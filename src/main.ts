@@ -7,7 +7,7 @@ import { GameAudio } from './audio/audio';
 import { FixedLoop, FpsMeter } from './core/loop';
 import { DynamicResolution, pickTier, probeGpu } from './core/quality';
 import { loadSettings, saveSettings, type Settings } from './core/settings';
-import { RATE_PRESETS } from './control/rates';
+import { RATE_PRESETS, axisRatesFrom } from './control/rates';
 import { LOFT_LEVEL } from './game/level-data';
 import { RaceController } from './game/race';
 import { InputManager } from './input/input-manager';
@@ -82,7 +82,7 @@ function boot(): void {
   function applySettings(s: Settings): void {
     settings = s;
     sim.fc.mode = s.flightMode;
-    sim.fc.rates = RATE_PRESETS[s.ratePreset];
+    sim.fc.rates = axisRatesFrom(RATE_PRESETS[s.ratePreset]);
     input.updateSettings(s);
     audio.setVolume(s.volume);
     const next = resolveTier(s);
