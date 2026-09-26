@@ -18,6 +18,7 @@ import type { ButtonEvents, CameraMode, ControlInput, DroneState, GameEvent, Qua
 
 const PHYSICS_DT = 1 / 1000;
 const CAMERA_CYCLE: CameraMode[] = ['fpv', 'chase', 'los'];
+const BUTTON_KEYS: readonly (keyof ButtonEvents)[] = ['arm', 'toggleMode', 'cycleCamera', 'reset', 'pause', 'confirm'];
 const FLYING = new Set(['countdown', 'racing', 'crashed', 'freefly']);
 
 function safeStorage(): Storage | null {
@@ -75,6 +76,8 @@ function boot(): void {
   let respawnPending = false;
   let override: ControlInput | null = null;
   const injected: Partial<ButtonEvents> = {};
+  let hasInjected = false;
+  let motorsMuted = false;
 
   function applySettings(s: Settings): void {
     settings = s;
@@ -96,7 +99,7 @@ function boot(): void {
   function placeDrone(position: Vector3, yaw: number): void {
     sim.world.reset(position, yaw);
     sim.fc.reset();
-    sim.fc.setArmed(false, zeroThrottle, sim.world.state);
+    sim.setArmed(false, zeroThrottle);
     loop.reset();
   }
 
@@ -148,13 +151,13 @@ function boot(): void {
         break;
       case 'crash':
         input.rumble(1, 1, 380);
-        sim.fc.setArmed(false, zeroThrottle, sim.world.state);
+        sim.setArmed(false, zeroThrottle);
         break;
       case 'respawn':
         respawnPending = true;
         break;
       case 'race-finish':
-        sim.fc.setArmed(false, zeroThrottle, sim.world.state);
+        sim.setArmed(false, zeroThrottle);
         hud.showScreen('finish', { time: e.time, best: race.snapshot().bestTime, newBest: e.best });
         break;
       default:
@@ -163,10 +166,9 @@ function boot(): void {
   }
 
   function handleFlightButtons(b: ButtonEvents, control: ControlInput): void {
-    const state = sim.world.state;
     if (b.arm) {
       const want = !sim.fc.armed;
-      const ok = sim.fc.setArmed(want, control, state);
+      const ok = sim.setArmed(want, control);
       if (want && !ok) hud.toast(control.throttle >= 0.05 ? 'Arming blocked: lower throttle to zero' : 'Arming blocked: level the drone');
       dispatch({ type: 'armed', armed: sim.fc.armed });
     }
@@ -215,9 +217,12 @@ function boot(): void {
 
     const inp = input.poll(frameSec);
     if (override) Object.assign(inp.control, override);
-    for (const k of Object.keys(injected) as (keyof ButtonEvents)[]) {
-      if (injected[k]) inp.buttons[k] = true;
-      delete injected[k];
+    if (hasInjected) {
+      for (const k of BUTTON_KEYS) {
+        if (injected[k]) inp.buttons[k] = true;
+        injected[k] = false;
+      }
+      hasInjected = false;
     }
     if (inp.buttons.confirm || inp.buttons.arm) void audio.resume();
 
@@ -237,12 +242,14 @@ function boot(): void {
         const contacts = sim.step(dt, control);
         const events = race.step(dt, prevPos, sim.world.state, contacts);
         for (let i = 0; i < events.length; i++) dispatch(events[i]);
-        if (respawnPending) {
-          respawnPending = false;
-          const p = race.respawnPoint();
-          placeDrone(p.position, p.yaw);
-        }
       });
+      // Teleport outside advance(): placeDrone resets the loop accumulator.
+      if (respawnPending) {
+        respawnPending = false;
+        const p = race.respawnPoint();
+        placeDrone(p.position, p.yaw);
+        alpha = 1;
+      }
       // After stepping: a race-start 'respawn' emitted this frame must not undo the pilot's arm press.
       handleFlightButtons(inp.buttons, inp.control);
     }
@@ -277,6 +284,11 @@ function boot(): void {
       tier,
       settings,
     });
+    const mute = snap.status === 'paused';
+    if (mute !== motorsMuted) {
+      motorsMuted = mute;
+      audio.setMotorsMuted(mute);
+    }
     audio.update(drone.motors, drone.armed, speed);
 
     requestAnimationFrame(frame);
@@ -309,6 +321,7 @@ function boot(): void {
     },
     press(name: keyof ButtonEvents) {
       injected[name] = true;
+      hasInjected = true;
     },
     action: onAction,
     teleport(x: number, y: number, z: number, yaw = 0) {

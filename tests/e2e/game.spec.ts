@@ -128,3 +128,26 @@ test('camera cycles FPV → chase → LOS', async ({ page }) => {
   }
   expect(seen).toEqual(['fpv', 'chase', 'los', 'fpv']);
 });
+
+test('disarm on quit-to-menu is reflected in drone state (HUD/LED stay in sync)', async ({ page }) => {
+  await boot(page);
+  await page.evaluate(() => window.__drone.action({ type: 'freefly' }));
+  await control(page, 0);
+  await page.evaluate(() => window.__drone.press('arm'));
+  await page.waitForFunction(() => window.__drone.armed && (window.__drone.state as unknown as { armed: boolean }).armed);
+  await page.evaluate(() => window.__drone.action({ type: 'menu' }));
+  await page.waitForTimeout(100);
+  const s = await page.evaluate(() => ({ fc: window.__drone.armed, state: (window.__drone.state as unknown as { armed: boolean }).armed }));
+  expect(s).toEqual({ fc: false, state: false });
+});
+
+test('manual reset respawns and simulation keeps running', async ({ page }) => {
+  await boot(page);
+  await page.evaluate(() => window.__drone.action({ type: 'freefly' }));
+  await page.evaluate(() => window.__drone.teleport(0, 3, 0, 0));
+  await page.evaluate(() => window.__drone.press('reset'));
+  await page.waitForTimeout(300);
+  const p = await page.evaluate(() => window.__drone.state.position);
+  expect(Math.hypot(p.x + 9, p.z - 5.8)).toBeLessThan(0.3);
+  expect(errors).toEqual([]);
+});
