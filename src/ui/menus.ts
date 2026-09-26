@@ -30,6 +30,8 @@ export type UiAction =
   | { type: 'request-quit' }
   /** leave the game (close tab when allowed) */
   | { type: 'exit' }
+  /** touch devices: toggle the Fullscreen API (needs the tap gesture) */
+  | { type: 'fullscreen' }
   | { type: 'settings'; settings: Settings };
 
 export interface FinishData {
@@ -223,9 +225,35 @@ const ROW_DEFS: Row[] = [
     },
   },
   rangeRow('deadzone', 'Stick deadzone', 'Radial deadzone for worn sticks', (v) => v.toFixed(2)),
+  {
+    id: 'touchThrottleCentre',
+    label: 'Touch throttle',
+    hint: 'Hold stays where released (like a radio) · Auto-centre = hover',
+    kind: 'bool',
+    on: 'Auto-centre',
+    off: 'Hold',
+    get: (s) => s.touchThrottleCentre,
+    set: (s, v) => {
+      s.touchThrottleCentre = v;
+    },
+  },
+  {
+    id: 'touchSticksFixed',
+    label: 'Touch sticks',
+    hint: 'Floating: stick appears under your thumb',
+    kind: 'bool',
+    on: 'Fixed',
+    off: 'Floating',
+    get: (s) => s.touchSticksFixed,
+    set: (s, v) => {
+      s.touchSticksFixed = v;
+    },
+  },
 ];
+/** Rows only shown on touch devices. */
+const TOUCH_ROWS: ReadonlySet<string> = new Set(['touchThrottleCentre', 'touchSticksFixed']);
 const ROWS = new Map(ROW_DEFS.map((r) => [r.id, r]));
-const SETTINGS_ROWS = ['stickMode', 'throttleSource', 'flightMode', 'ratePreset', 'cameraTiltDeg', 'fovDeg', 'quality', 'volume', 'showFps', 'deadzone'];
+const SETTINGS_ROWS = ['stickMode', 'touchThrottleCentre', 'touchSticksFixed', 'throttleSource', 'flightMode', 'ratePreset', 'cameraTiltDeg', 'fovDeg', 'quality', 'volume', 'showFps', 'deadzone'];
 const CONTROLLER_ROWS = ['stickMode', 'throttleSource', 'squareGate', 'invert.throttle', 'invert.yaw', 'invert.pitch', 'invert.roll'];
 const CHANNELS: readonly Channel[] = ['throttle', 'yaw', 'pitch', 'roll'];
 const SLOT_NAME: Record<StickSlot, string> = { lx: 'LX', ly: 'LY', rx: 'RX', ry: 'RY' };
@@ -322,6 +350,21 @@ export class Menus {
   setSettings(s: Settings): void {
     this.settings = cloneSettings(s);
     this.renderSettings();
+  }
+
+  /** Touch device: reveal touch-only rows/tips; `fullscreen` also shows the Full screen button. */
+  enableTouch(fullscreen: boolean): void {
+    for (const el of this.screens.values()) {
+      el.querySelectorAll<HTMLElement>('[data-touch-only]').forEach((x) => {
+        x.hidden = false;
+      });
+      if (fullscreen) {
+        el.querySelectorAll<HTMLElement>('[data-fs-only]').forEach((x) => {
+          x.hidden = false;
+        });
+      }
+    }
+    if (this.current !== 'none') this.items = this.collectItems(this.screens.get(this.current)!);
   }
 
   setMenuBest(best: number | null): void {
@@ -480,6 +523,7 @@ export class Menus {
   private collectItems(screen: HTMLElement): Item[] {
     const list: Item[] = [];
     screen.querySelectorAll<HTMLElement>('[data-nav]').forEach((el) => {
+      if (el.closest('[hidden]')) return;
       const item: Item = { el };
       const act = el.dataset.act;
       const key = el.dataset.key;
@@ -526,6 +570,9 @@ export class Menus {
         break;
       case 'reload':
         location.reload();
+        break;
+      case 'fullscreen':
+        this.onAction({ type: 'fullscreen' });
         break;
     }
   }
@@ -738,8 +785,8 @@ export class Menus {
     return el;
   }
 
-  private btn(act: string, label: string, primary = false, extra = ''): string {
-    return `<button type="button" class="ds-btn${primary ? ' ds-btn--primary' : ''}${extra}" data-nav data-act="${act}"><span>${label}</span></button>`;
+  private btn(act: string, label: string, primary = false, extra = '', attrs = ''): string {
+    return `<button type="button" class="ds-btn${primary ? ' ds-btn--primary' : ''}${extra}" data-nav data-act="${act}"${attrs}><span>${label}</span></button>`;
   }
 
   private rowsHtml(ids: string[]): string {
@@ -748,7 +795,7 @@ export class Menus {
         const r = ROWS.get(id)!;
         const track = r.kind === 'range' ? `<span class="ds-row__track" aria-hidden="true"><span class="ds-row__fill"></span></span>` : '';
         return `
-        <div class="ds-row" data-nav data-key="${r.id}" role="group" aria-label="${r.label}">
+        <div class="ds-row" data-nav data-key="${r.id}" role="group" aria-label="${r.label}"${TOUCH_ROWS.has(r.id) ? ' data-touch-only hidden' : ''}>
           <div class="ds-row__text"><span class="ds-row__label">${r.label}</span><span class="ds-row__hint">${r.hint}</span></div>
           <div class="ds-row__ctl">
             <button type="button" class="ds-arrow" data-dir="-1" aria-label="Previous ${r.label}" tabindex="-1">‹</button>
@@ -804,7 +851,7 @@ export class Menus {
       <div class="ds-panel ds-glass ds-dialog ds-dialog--wide">
         <h2 class="ds-dialog__title">Settings</h2>
         <div class="ds-rows">${this.rowsHtml(SETTINGS_ROWS)}</div>
-        <div class="ds-dialog__actions">${this.btn('rates', 'Rates &amp; sensitivity ›', false, ' ds-btn--ghost')}${this.btn('controller', 'Controller setup ›', false, ' ds-btn--ghost')}${this.btn('back', 'Back')}</div>
+        <div class="ds-dialog__actions">${this.btn('fullscreen', 'Full screen', false, ' ds-btn--ghost', ' data-fs-only hidden')}${this.btn('rates', 'Rates &amp; sensitivity ›', false, ' ds-btn--ghost')}${this.btn('controller', 'Controller setup ›', false, ' ds-btn--ghost')}${this.btn('back', 'Back')}</div>
         <p class="ds-foot ds-foot--inline"><span><kbd class="ds-kbd">←</kbd><kbd class="ds-kbd">→</kbd> Change</span><span><kbd class="ds-kbd ds-kbd--b">B</kbd> Back</span></p>
       </div>`,
     );
@@ -925,6 +972,7 @@ export class Menus {
       `
       <div class="ds-panel ds-glass ds-dialog ds-dialog--wide">
         <h2 class="ds-dialog__title">Controls <small data-f="modeTag">Mode 2</small></h2>
+        <p class="ds-tip" data-touch-only hidden>Touch: put a thumb anywhere on the left or right half — the stick appears under it. The throttle stick (magenta) holds where you let go, like a real radio. Pull it fully down, then tap ARM. Buttons: ARM, MODE (Angle/Acro), CAM, RESET, pause.</p>
         <div data-f="body"></div>
         <div class="ds-dialog__actions">${this.btn('controller', 'Controller setup ›', false, ' ds-btn--ghost')}${this.btn('back', 'Back', true)}</div>
       </div>`,
