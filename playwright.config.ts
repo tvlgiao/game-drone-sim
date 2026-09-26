@@ -3,6 +3,7 @@ import { defineConfig } from '@playwright/test';
 export default defineConfig({
   testDir: 'tests/e2e',
   timeout: 60_000,
+  workers: 1,
   use: {
     baseURL: 'http://localhost:4173',
     launchOptions: { args: ['--use-angle=metal', '--enable-gpu', '--ignore-gpu-blocklist'] },

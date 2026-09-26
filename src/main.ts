@@ -214,7 +214,7 @@ function boot(): void {
     fpsMeter.sample(frameSec);
 
     const inp = input.poll(frameSec);
-    if (override) inp.control = override;
+    if (override) Object.assign(inp.control, override);
     for (const k of Object.keys(injected) as (keyof ButtonEvents)[]) {
       if (injected[k]) inp.buttons[k] = true;
       delete injected[k];
@@ -227,8 +227,6 @@ function boot(): void {
     if (!flying) {
       hud.navigate(inp.nav, inp.buttons.confirm);
       if (status === 'paused' && inp.buttons.pause) onAction({ type: 'resume' });
-    } else {
-      handleFlightButtons(inp.buttons, inp.control);
     }
 
     let alpha = 1;
@@ -245,6 +243,8 @@ function boot(): void {
           placeDrone(p.position, p.yaw);
         }
       });
+      // After stepping: a race-start 'respawn' emitted this frame must not undo the pilot's arm press.
+      handleFlightButtons(inp.buttons, inp.control);
     }
 
     const drone = sim.world.interpolate(alpha, renderState);
