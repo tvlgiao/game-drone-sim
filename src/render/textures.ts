@@ -305,8 +305,12 @@ export function carbonMaps(size = 256): PbrMaps {
 }
 
 /** Night city skyline for window backdrops (emissive). */
-export function skylineTexture(w = 2048, h = 1024, seed = 42): THREE.CanvasTexture {
-  const [c, ctx] = canvas(w, h);
+export function skylineTexture(outW = 2048, outH = 1024, seed = 42): THREE.CanvasTexture {
+  const [c, ctx] = canvas(outW, outH);
+  // Drawn in a fixed 2048×1024 design space, scaled to the output size (mobile uses 1024×512).
+  const w = 2048;
+  const h = 1024;
+  ctx.scale(outW / w, outH / h);
   const rnd = mulberry32(seed);
   const sky = ctx.createLinearGradient(0, 0, 0, h);
   sky.addColorStop(0, '#060a1c');

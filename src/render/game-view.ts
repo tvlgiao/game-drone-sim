@@ -1,7 +1,8 @@
 /** The only render entry used by main.ts: owns renderer, scene, cameras, post FX and VFX. */
 import * as THREE from 'three';
 import { LosMarker } from './los-marker';
-import { QUALITY_PROFILES, type QualityProfile } from '../core/quality';
+import { MOBILE_MAX_TEXTURE, qualityProfile, type QualityProfile } from '../core/quality';
+import type { FormFactor } from '../core/device';
 import type { CameraMode, DroneState, GameEvent, LevelDef, QualityTier } from '../types';
 import { StaticBatcher } from './batcher';
 import { CameraRig } from './camera-rig';
@@ -74,9 +75,14 @@ export class GameView {
   private ringFlash = 0;
   private readonly ledColor = new THREE.Color();
 
-  constructor(canvas: HTMLCanvasElement, level: LevelDef, tier: QualityTier) {
+  private readonly form: FormFactor;
+
+  /** `form` = device class: phones/tablets get capped DPR, ≤ 1024 px textures and smaller particle pools. */
+  constructor(canvas: HTMLCanvasElement, level: LevelDef, tier: QualityTier, form: FormFactor = 'desktop') {
     this.level = level;
-    this.profile = QUALITY_PROFILES[tier];
+    this.form = form;
+    const mobile = form !== 'desktop';
+    this.profile = qualityProfile(tier, form);
     this.renderer = new THREE.WebGLRenderer({
       canvas,
       antialias: tier === 'low',
@@ -96,7 +102,7 @@ export class GameView {
     scene.background = new THREE.Color(0x04060b);
     scene.fog = new THREE.FogExp2(0x0b0f1a, 0.016);
 
-    this.mats = new Materials(r.capabilities.getMaxAnisotropy());
+    this.mats = new Materials(r.capabilities.getMaxAnisotropy(), mobile ? MOBILE_MAX_TEXTURE : 2048);
     const batch = new StaticBatcher();
     const windows = buildRoom(level.room, this.mats, batch);
     const world = new THREE.Group();
@@ -127,13 +133,13 @@ export class GameView {
     this.fill = new THREE.PointLight(0xcfe0ff, 0.5, 3.5, 2);
     scene.add(this.fill);
 
-    this.fx = new ParticlePool(4096, true);
-    this.soft = new ParticlePool(2048, false);
+    this.fx = new ParticlePool(mobile ? 2048 : 4096, true);
+    this.soft = new ParticlePool(mobile ? 1024 : 2048, false);
     this.waves = new Shockwaves(8);
     scene.add(this.fx.points, this.soft.points, this.waves.group);
 
     const warm = level.props.filter((p) => p.kind === 'bulb-hanging' || p.kind === 'lamp-floor').map((p) => new THREE.Vector3(p.position[0], p.position[1] + (p.kind === 'lamp-floor' ? p.size[1] - 0.2 : 0), p.position[2]));
-    this.atmos = new Atmosphere(windows, MOON_DIR, warm, QUALITY_PROFILES.ultra.particles);
+    this.atmos = new Atmosphere(windows, MOON_DIR, warm, qualityProfile('ultra', form).particles);
     scene.add(this.atmos.shafts, this.atmos.dust);
 
     this.contact = new ContactShadow(level, this.mats.radial);
@@ -392,7 +398,7 @@ export class GameView {
 
   setQuality(tier: QualityTier): void {
     if (tier === this.profile.tier) return;
-    this.profile = QUALITY_PROFILES[tier];
+    this.profile = qualityProfile(tier, this.form);
     this.applyQuality();
     this.resize(this.width, this.height);
   }
@@ -432,6 +438,15 @@ export class GameView {
     this.rig.camera.aspect = this.width / this.height;
     this.rig.camera.updateProjectionMatrix();
     this.post?.setSize(this.width, this.height);
+  }
+
+  /** Effective renderer pixel ratio (DPR cap × render scale). */
+  get pixelRatio(): number {
+    return this.renderer.getPixelRatio();
+  }
+
+  get scale(): number {
+    return this.renderScale;
   }
 
   stats(): { calls: number; triangles: number } {
