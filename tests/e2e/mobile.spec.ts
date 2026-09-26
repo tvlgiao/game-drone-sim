@@ -1,0 +1,293 @@
+/**
+ * Touch / mobile E2E. Runs on 'webkit-iphone' + 'webkit-ipad' (touch UI) and on desktop 'chromium'
+ * (where the touch UI must stay hidden). Stick drags are synthetic PointerEvents (pointerType 'touch')
+ * dispatched at real screen coordinates — WebKit has no CDP multi-touch — so they exercise the same
+ * listeners as a finger. Buttons are tapped with Playwright's real touchscreen tap.
+ */
+import { expect, test, type Page } from '@playwright/test';
+
+interface Track {
+  cx: number;
+  cy: number;
+  x: number;
+  y: number;
+  holdsThrottle: boolean;
+}
+interface Hook {
+  state: { position: { x: number; y: number; z: number }; velocity: { y: number } };
+  race: { status: string };
+  fps: number;
+  tier: string;
+  armed: boolean;
+  camera: string;
+  mode: string;
+  screen: string;
+  source: string;
+  touchVisible: boolean;
+  rotateOverlay: boolean;
+  gateOpen: boolean;
+  pixelRatio: number;
+  renderScale: number;
+  control: { throttle: number; pitch: number; roll: number; yaw: number } | null;
+  device: { touch: boolean; form: string; ios: boolean; fullscreen: boolean; standalone: boolean };
+  touch: { layer: HTMLElement | null; sticks: { opts: { radius: number }; l: Track; r: Track } };
+  action: (a: { type: string }) => void;
+  teleport: (x: number, y: number, z: number, yaw?: number) => void;
+}
+
+const errors: string[] = [];
+
+async function boot(page: Page, path = '/'): Promise<void> {
+  errors.length = 0;
+  page.on('console', (m) => {
+    if (m.type() === 'error') errors.push(m.text());
+  });
+  page.on('pageerror', (e) => errors.push(e.message));
+  await page.goto(path);
+  await page.waitForFunction(() => !!(window as unknown as { __drone?: Hook }).__drone, null, { timeout: 30_000 });
+}
+
+const hook = <T>(page: Page, fn: (d: Hook) => T): Promise<T> =>
+  page.evaluate(`(${fn.toString()})(window.__drone)`) as Promise<T>;
+
+/** Dismisses the "Tap to play" gate (and the Add-to-Home-Screen sheet if the fullscreen request was refused). */
+async function passGate(page: Page): Promise<void> {
+  const gate = page.locator('.ds-gate__btn');
+  await expect(gate).toBeVisible();
+  await gate.tap();
+  await expect(gate).toBeHidden();
+  const ok = page.locator('[data-sheet="ok"]');
+  await page.waitForTimeout(300);
+  if (await ok.isVisible()) await ok.tap();
+}
+
+/** Synthetic touch pointer event at viewport coordinates on whatever element is there. */
+async function touch(page: Page, type: 'pointerdown' | 'pointermove' | 'pointerup', id: number, x: number, y: number): Promise<void> {
+  await page.evaluate(
+    ([type, id, x, y]) => {
+      const target = document.elementFromPoint(x as number, y as number) ?? document.body;
+      target.dispatchEvent(
+        new PointerEvent(type as string, { pointerId: id as number, pointerType: 'touch', clientX: x as number, clientY: y as number, bubbles: true, cancelable: true, isPrimary: id === 1 }),
+      );
+    },
+    [type, id, x, y] as const,
+  );
+}
+
+/** Knob screen position of a stick (layer is full-viewport). */
+async function knob(page: Page, side: 'l' | 'r'): Promise<{ x: number; y: number; R: number }> {
+  return page.evaluate((side) => {
+    const d = (window as unknown as { __drone: Hook }).__drone;
+    const t = d.touch.sticks[side];
+    const R = d.touch.sticks.opts.radius;
+    return { x: t.cx + t.x * R, y: t.cy - t.y * R, R };
+  }, side);
+}
+
+async function startFreeFly(page: Page): Promise<void> {
+  await page.getByRole('button', { name: 'Free Fly' }).tap();
+  await page.waitForFunction(() => (window as unknown as { __drone: Hook }).__drone.touchVisible, null, { timeout: 5000 });
+}
+
+test.describe('desktop (no touch)', () => {
+  test.skip(({ isMobile }) => isMobile, 'desktop only');
+
+  test('touch UI, tap gate and rotate overlay never show on desktop', async ({ page }) => {
+    await boot(page);
+    expect(await hook(page, (d) => d.gateOpen)).toBe(false);
+    await page.evaluate(() => (window as unknown as { __drone: Hook }).__drone.action({ type: 'freefly' }));
+    await page.waitForTimeout(500);
+    const s = await hook(page, (d) => ({ touch: d.device.touch, visible: d.touchVisible, source: d.source, rotate: d.rotateOverlay }));
+    expect(s).toEqual({ touch: false, visible: false, source: 'none', rotate: false });
+    await expect(page.locator('.ds-touch')).toHaveCount(0);
+    await expect(page.locator('.ds-hud__br')).toBeVisible(); // stick visualiser stays on desktop
+    expect(errors).toEqual([]);
+  });
+});
+
+test.describe('touch devices', () => {
+  test.skip(({ isMobile }) => !isMobile, 'touch devices only');
+
+  test('device detection, tier and tap gate → main menu by tap, no console errors', async ({ page }, info) => {
+    await boot(page);
+    const d = await hook(page, (d) => ({ ...d.device, tier: d.tier, dpr: d.pixelRatio }));
+    const phone = info.project.name.includes('iphone');
+    expect(d.touch).toBe(true);
+    expect(d.ios).toBe(true);
+    expect(d.form).toBe(phone ? 'phone' : 'tablet');
+    expect(d.tier).toBe(phone ? 'medium' : 'high');
+    expect(d.dpr).toBeLessThanOrEqual(phone ? 1.5 : 1.75);
+    await passGate(page);
+    expect(await hook(page, (d) => d.screen)).toBe('main');
+    await expect(page.locator('.ds-foot').first()).toBeHidden(); // keyboard/gamepad hints hidden on touch
+    // Settings by tap: touch rows are there, stepper arrows ≥ 44 px and change the value.
+    await page.getByRole('button', { name: 'Settings' }).tap();
+    const row = page.locator('.ds-screen--settings [data-key="touchThrottleCentre"]');
+    await expect(row).toBeVisible();
+    await expect(row.locator('.ds-row__value')).toHaveText('Hold');
+    const arrow = row.locator('[data-dir="1"]');
+    await page.waitForTimeout(500); // dialog rise animation scales the panel
+    const box = (await arrow.boundingBox())!;
+    expect(box.width).toBeGreaterThanOrEqual(44);
+    expect(box.height).toBeGreaterThanOrEqual(44);
+    await arrow.tap();
+    await expect(row.locator('.ds-row__value')).toHaveText('Auto-centre');
+    await arrow.tap();
+    await expect(row.locator('.ds-row__value')).toHaveText('Hold');
+    await page.locator('.ds-screen--settings [data-act="back"]').tap();
+    expect(await hook(page, (d) => d.screen)).toBe('main');
+    expect(errors).toEqual([]);
+  });
+
+  test('touch sticks show in flight, HUD visualiser hidden, nothing overlaps the buttons', async ({ page }, info) => {
+    await boot(page);
+    await passGate(page);
+    await startFreeFly(page);
+    expect(await hook(page, (d) => d.source)).toBe('touch');
+    await expect(page.locator('.ds-touch')).toBeVisible();
+    await expect(page.locator('.ds-hud__br')).toBeHidden();
+    for (const name of ['arm', 'toggleMode', 'cycleCamera', 'reset', 'pause']) {
+      const b = (await page.locator(`[data-tbtn="${name}"]`).boundingBox())!;
+      expect(b.width, name).toBeGreaterThanOrEqual(44);
+      expect(b.height, name).toBeGreaterThanOrEqual(44);
+    }
+    // Buttons and visible HUD panels must not overlap each other.
+    const rects = await page.evaluate(() => {
+      const sel = ['[data-tbtn]', '.ds-hud__tl', '.ds-hud__tc .ds-gates', '.ds-hud__tr .ds-chip', '.ds-hud__bl'];
+      const out: { n: string; l: number; t: number; r: number; b: number }[] = [];
+      for (const s of sel) {
+        document.querySelectorAll<HTMLElement>(s).forEach((el) => {
+          const r = el.getBoundingClientRect();
+          if (r.width > 0 && r.height > 0 && getComputedStyle(el).visibility !== 'hidden') out.push({ n: el.dataset.tbtn ?? el.className, l: r.left, t: r.top, r: r.right, b: r.bottom });
+        });
+      }
+      return out;
+    });
+    const overlaps: string[] = [];
+    for (let i = 0; i < rects.length; i++)
+      for (let j = i + 1; j < rects.length; j++) {
+        const a = rects[i]!;
+        const b = rects[j]!;
+        if (a.n.includes('ds-chip') && b.n.includes('ds-chip')) continue;
+        if (a.l < b.r - 1 && b.l < a.r - 1 && a.t < b.b - 1 && b.t < a.b - 1) overlaps.push(`${a.n} × ${b.n}`);
+      }
+    expect(overlaps).toEqual([]);
+    await page.screenshot({ path: test.info().outputPath(`touch-hud-${info.project.name}.png`) });
+  });
+
+  test('two-thumb flight: throttle down + ARM tap arms, throttle up climbs, pitch stick moves forward', async ({ page }) => {
+    await boot(page);
+    await passGate(page);
+    await startFreeFly(page);
+    const thr = await knob(page, 'l'); // mode 2: throttle on the left
+    expect(await page.locator('.ds-tstick[data-side="l"]').getAttribute('class')).toContain('is-thr');
+    await touch(page, 'pointerdown', 1, thr.x, thr.y);
+    await touch(page, 'pointermove', 1, thr.x, thr.y + 10); // already at the bottom: stays 0
+    await page.locator('[data-tbtn="arm"]').tap();
+    await page.waitForFunction(() => (window as unknown as { __drone: Hook }).__drone.armed, null, { timeout: 2000 });
+    // Second finger on the right stick while the first holds throttle.
+    await touch(page, 'pointermove', 1, thr.x, thr.y - thr.R * 1.4); // throttle ≈ 0.7
+    await page.waitForTimeout(150);
+    expect(await hook(page, (d) => d.control!.throttle)).toBeGreaterThan(0.6);
+    await page.waitForFunction(() => (window as unknown as { __drone: Hook }).__drone.state.position.y > 0.8, null, { timeout: 3000 });
+    await touch(page, 'pointermove', 1, thr.x, thr.y - thr.R); // centre ≈ hover
+    await page.waitForTimeout(300);
+    expect(await hook(page, (d) => [d.race.status, d.armed])).toEqual(['freefly', true]);
+    const p0 = await hook(page, (d) => ({ x: d.state.position.x, z: d.state.position.z }));
+    const pit = await knob(page, 'r');
+    await touch(page, 'pointerdown', 2, pit.x, pit.y);
+    await touch(page, 'pointermove', 2, pit.x, pit.y - pit.R * 0.4);
+    await page.waitForTimeout(100);
+    const c = await hook(page, (d) => d.control!);
+    expect(c.pitch).toBeGreaterThan(0.3);
+    expect(c.throttle).toBeGreaterThan(0.4); // first finger still holds throttle
+    await page.waitForTimeout(1200);
+    await touch(page, 'pointerup', 2, pit.x, pit.y);
+    const p1 = await hook(page, (d) => ({ x: d.state.position.x, z: d.state.position.z }));
+    expect(Math.hypot(p1.x - p0.x, p1.z - p0.z)).toBeGreaterThan(0.3);
+    await touch(page, 'pointerup', 1, thr.x, thr.y);
+    await page.waitForTimeout(100); // next frame polls the release
+    expect(await hook(page, (d) => d.control!.pitch)).toBe(0);
+    expect(await hook(page, (d) => d.control!.throttle)).toBeGreaterThan(0.4); // non-centering: held
+    expect(errors).toEqual([]);
+  });
+
+  test('stick mode 1 puts the throttle on the right thumb', async ({ page }) => {
+    await page.addInitScript(() => localStorage.setItem('drone-sim.settings', JSON.stringify({ stickMode: 1 })));
+    await boot(page);
+    await passGate(page);
+    await startFreeFly(page);
+    expect(await page.locator('.ds-tstick[data-side="r"]').getAttribute('class')).toContain('is-thr');
+    const r = await knob(page, 'r');
+    await touch(page, 'pointerdown', 5, r.x, r.y);
+    await touch(page, 'pointermove', 5, r.x, r.y - r.R * 2);
+    await page.waitForTimeout(80);
+    expect(await hook(page, (d) => d.control!.throttle)).toBe(1);
+    const l = await knob(page, 'l');
+    await touch(page, 'pointerdown', 6, l.x, l.y);
+    await touch(page, 'pointermove', 6, l.x, l.y - l.R);
+    await page.waitForTimeout(80);
+    expect(await hook(page, (d) => d.control!.pitch)).toBe(1);
+    await touch(page, 'pointerup', 5, 0, 0);
+    await touch(page, 'pointerup', 6, 0, 0);
+  });
+
+  test('MODE, CAM, RESET and PAUSE buttons work by tap', async ({ page }) => {
+    await boot(page);
+    await passGate(page);
+    await startFreeFly(page);
+    const mode0 = await hook(page, (d) => d.mode);
+    await page.locator('[data-tbtn="toggleMode"]').tap();
+    await expect.poll(() => hook(page, (d) => d.mode)).not.toBe(mode0);
+    await page.locator('[data-tbtn="toggleMode"]').tap();
+    await expect.poll(() => hook(page, (d) => d.mode)).toBe(mode0);
+    await page.locator('[data-tbtn="cycleCamera"]').tap();
+    await expect.poll(() => hook(page, (d) => d.camera)).toBe('fpv');
+    await page.evaluate(() => (window as unknown as { __drone: Hook }).__drone.teleport(0, 3, 0, 0));
+    await page.locator('[data-tbtn="reset"]').tap();
+    await expect.poll(() => hook(page, (d) => Math.hypot(d.state.position.x + 9, d.state.position.z - 5.8))).toBeLessThan(0.3);
+    await page.locator('[data-tbtn="pause"]').tap();
+    await expect.poll(() => hook(page, (d) => d.screen)).toBe('pause');
+    expect(await hook(page, (d) => d.touchVisible)).toBe(false);
+    await page.locator('.ds-screen--pause [data-act="resume"]').tap();
+    await expect.poll(() => hook(page, (d) => [d.screen, d.touchVisible])).toEqual(['none', true]);
+    expect(errors).toEqual([]);
+  });
+
+  test('portrait on a phone shows the rotate overlay and pauses; landscape returns to the pause menu', async ({ page }, info) => {
+    test.skip(!info.project.name.includes('iphone'), 'phones only');
+    await boot(page);
+    await passGate(page);
+    await startFreeFly(page);
+    const land = page.viewportSize()!;
+    await page.setViewportSize({ width: land.height, height: land.width });
+    await expect(page.locator('.ds-rotate')).toBeVisible();
+    await expect.poll(() => hook(page, (d) => [d.rotateOverlay, d.race.status])).toEqual([true, 'paused']);
+    await page.screenshot({ path: test.info().outputPath('rotate-overlay.png') });
+    await page.setViewportSize(land);
+    await expect(page.locator('.ds-rotate')).toBeHidden();
+    expect(await hook(page, (d) => d.screen)).toBe('pause');
+    expect(errors).toEqual([]);
+  });
+
+  test('frame rate sample', async ({ page }, info) => {
+    await boot(page);
+    await passGate(page);
+    await startFreeFly(page);
+    await page.waitForTimeout(3000);
+    const r = await hook(page, (d) => ({ fps: d.fps, tier: d.tier, dpr: d.pixelRatio, scale: d.renderScale }));
+    info.annotations.push({ type: 'fps', description: `${r.fps.toFixed(1)} fps · ${r.tier} · dpr ${r.dpr} · scale ${r.scale}` });
+    console.log(`[${info.project.name}] fps ${r.fps.toFixed(1)} tier ${r.tier} dpr ${r.dpr} scale ${r.scale}`);
+    expect(r.fps).toBeGreaterThan(10);
+  });
+
+  test('?selftest=1 flies the scripted touch flight and reports PASS', async ({ page }, info) => {
+    await boot(page, '/?selftest=1');
+    await page.waitForFunction(() => (window as unknown as { __selftest?: { done: boolean } }).__selftest?.done, null, { timeout: 30_000 });
+    const r = await page.evaluate(() => (window as unknown as { __selftest: { pass: boolean; fps: number; checks: { name: string; ok: boolean; detail: string; soft?: boolean }[] } }).__selftest);
+    console.log(`[${info.project.name}] selftest ${r.pass ? 'PASS' : 'FAIL'} fps ${r.fps.toFixed(1)}: ${r.checks.map((c) => `${c.name}=${c.detail}`).join('; ')}`);
+    await page.screenshot({ path: test.info().outputPath('selftest.png') });
+    expect(r.checks.filter((c) => !c.ok && !c.soft)).toEqual([]);
+    expect(r.pass).toBe(true);
+  });
+});
