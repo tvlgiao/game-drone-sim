@@ -5,6 +5,7 @@ import type { CameraMode, DroneState, FlightMode, GameEvent, InputFrame, InputSo
 import { formatDelta, formatTime } from './format';
 import { ICON_GAMEPAD, ICON_KEYBOARD, ICON_NONE } from './icons';
 import { Menus, type FinishData, type ScreenName, type UiAction } from './menus';
+import { stickShort, throttleControl, throttleDownHint } from './mode-labels';
 
 export type { UiAction, ScreenName, FinishData } from './menus';
 
@@ -55,6 +56,10 @@ type Ref =
   | 'srcName'
   | 'stickL'
   | 'stickR'
+  | 'wellL'
+  | 'wellR'
+  | 'lblL'
+  | 'lblR'
   | 'flash'
   | 'toasts';
 
@@ -100,8 +105,8 @@ const HUD_HTML = `
   <div class="ds-hud__br ds-panel">
     <div class="ds-src"><span class="ds-src__icon" data-r="srcIcon"></span><span class="ds-src__name" data-r="srcName">No input</span></div>
     <div class="ds-sticks">
-      <div class="ds-well"><i class="ds-well__cross"></i><i class="ds-well__dot" data-r="stickL"></i></div>
-      <div class="ds-well"><i class="ds-well__cross"></i><i class="ds-well__dot" data-r="stickR"></i></div>
+      <div class="ds-stick"><div class="ds-well" data-r="wellL"><i class="ds-well__cross"></i><i class="ds-well__rail"></i><i class="ds-well__dot" data-r="stickL"></i></div><span class="ds-stick__lbl" data-r="lblL">THR·YAW</span></div>
+      <div class="ds-stick"><div class="ds-well" data-r="wellR"><i class="ds-well__cross"></i><i class="ds-well__rail"></i><i class="ds-well__dot" data-r="stickR"></i></div><span class="ds-stick__lbl" data-r="lblR">PIT·ROL</span></div>
     </div>
   </div>
   <div class="ds-toasts" data-r="toasts" role="status" aria-live="polite"></div>
@@ -125,6 +130,7 @@ export class Hud {
   private stickL = [9, 9];
   private stickR = [9, 9];
   private throttle = 9;
+  private lastUpdate = -Infinity;
   private goTimer: ReturnType<typeof setTimeout> | null = null;
 
   constructor(root: HTMLElement, onAction: (a: UiAction) => void) {
@@ -150,11 +156,19 @@ export class Hud {
     const race = f.race;
     const now = performance.now();
 
+    const dt = Number.isFinite(this.lastUpdate) ? Math.min(0.1, (now - this.lastUpdate) / 1000) : 0;
+    this.lastUpdate = now;
     if (f.settings !== this.settingsRef) {
       this.settingsRef = f.settings;
-      if (this.menus.current !== 'settings') this.menus.setSettings(f.settings);
+      this.menus.setSettings(f.settings);
       this.root.classList.toggle('ds-hide-fps', !f.settings.showFps);
+      this.text(r.lblL, stickShort(f.settings, 'l'));
+      this.text(r.lblR, stickShort(f.settings, 'r'));
+      const thr = throttleControl(f.settings);
+      r.wellL.classList.toggle('is-thr', thr === 'left');
+      r.wellR.classList.toggle('is-thr', thr === 'right');
     }
+    this.menus.updateLive(f.input, dt, now);
     if (race.status !== this.status) this.setStatus(race.status);
     if (race.status === 'menu') this.menus.setMenuBest(race.bestTime);
     this.updateRings(race, now);
@@ -189,7 +203,7 @@ export class Hud {
     this.updateSticks(f.input);
   }
 
-  showScreen(s: 'main' | 'pause' | 'finish' | 'none' | 'settings' | 'controls', data?: FinishData & { best?: number | null }): void {
+  showScreen(s: 'main' | 'pause' | 'finish' | 'none' | 'settings' | 'controls' | 'controller', data?: FinishData & { best?: number | null }): void {
     if (s === 'main' && data && 'best' in data) this.menus.setMenuBest(data.best ?? null);
     this.menus.show(s as ScreenName, data);
   }
@@ -315,7 +329,7 @@ export class Hud {
       const pad = f.input.source === 'gamepad';
       const arm = pad ? 'A' : 'Space';
       if (f.input.control.throttle > 0.05) {
-        const low = pad ? (f.settings.throttleSource === 'right-trigger' ? 'Release RT' : 'Left stick fully down') : 'Hold S';
+        const low = throttleDownHint(f.settings, !pad);
         msg = `Throttle to zero — ${low}, then press ${arm} to arm`;
       } else {
         msg = `DISARMED — press ${arm} to arm`;
@@ -327,10 +341,11 @@ export class Hud {
 
   private updateSticks(input: InputFrame): void {
     const c = input.control;
-    const lx = c.yaw;
-    const ly = -(c.throttle * 2 - 1);
-    const rx = c.roll;
-    const ry = -c.pitch;
+    const st = input.sticks;
+    const lx = st.lx;
+    const ly = -st.ly;
+    const rx = st.rx;
+    const ry = -st.ry;
     const eps = 0.004;
     if (Math.abs(lx - this.stickL[0]!) > eps || Math.abs(ly - this.stickL[1]!) > eps) {
       this.stickL[0] = lx;

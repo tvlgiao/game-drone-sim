@@ -1,20 +1,11 @@
 /** Merges gamepad + keyboard into one normalised InputFrame per render frame. */
 import type { Settings } from '../core/settings';
-import type { InputFrame, InputSource } from '../types';
+import type { InputFrame, InputSource, StickPositions } from '../types';
 import { GP, GamepadInput, prettyPadName } from './gamepad';
 import { KeyboardInput } from './keyboard';
-import {
-  EdgeDetector,
-  KeyboardAxes,
-  RepeatTrigger,
-  applyAxialDeadzone,
-  applyRadialDeadzone,
-  stickToThrottle,
-  triggerToThrottle,
-  type Vec2,
-} from './stick';
+import { EdgeDetector, RepeatTrigger, VirtualSticks, mapSticks, throttleSlot, type StickMapOptions, type StickSlot } from './stick';
 
-export { applyRadialDeadzone, applyAxialDeadzone, stickToThrottle, triggerToThrottle, KeyboardAxes, EdgeDetector } from './stick';
+export { applyRadialDeadzone, applyAxialDeadzone, stickToThrottle, triggerToThrottle, mapSticks, squareGate, VirtualSticks, EdgeDetector } from './stick';
 
 /** Fired on gamepad connect/disconnect so the HUD can toast it. */
 export interface GamepadConnectionEvent {
@@ -58,10 +49,13 @@ export class InputManager {
   private readonly win: Window | null;
   private readonly pad: GamepadInput;
   private readonly kb: KeyboardInput;
-  private readonly kbAxes = new KeyboardAxes();
+  private readonly vsticks = new VirtualSticks();
   private readonly padEdges = new Map<ButtonName, EdgeDetector>(BUTTON_NAMES.map((n) => [n, new EdgeDetector()]));
   private readonly navRepeat = new Map<NavDir, RepeatTrigger>(NAV_DIRS.map((d) => [d, new RepeatTrigger()]));
-  private readonly stick: Vec2 = { x: 0, y: 0 };
+  private readonly raw: Record<StickSlot, number> = { lx: 0, ly: 0, rx: 0, ry: 0 };
+  private readonly padAxes: number[] = [];
+  private readonly padButtons: number[] = [];
+  private readonly padRaw = { id: '', mapping: '', axes: this.padAxes as readonly number[], buttons: this.padButtons as readonly number[] };
   private source: InputSource = 'none';
   private readonly frame: InputFrame = {
     control: { throttle: 0, yaw: 0, pitch: 0, roll: 0 },
@@ -69,6 +63,8 @@ export class InputManager {
     nav: { up: false, down: false, left: false, right: false, back: false },
     source: 'none',
     gamepadId: null,
+    sticks: { lx: 0, ly: -1, rx: 0, ry: 0 },
+    pad: null,
   };
 
   private readonly onConnected = (e: Event): void => this.emitConnection(e, true);
@@ -93,7 +89,7 @@ export class InputManager {
 
   /** Current keyboard throttle (0..1); lets the game zero it on respawn/disarm. */
   setKeyboardThrottle(v: number): void {
-    this.kbAxes.throttle = Math.min(1, Math.max(0, v));
+    this.vsticks.setThrottle(v);
   }
 
   /**
@@ -106,35 +102,57 @@ export class InputManager {
     const snap = this.pad.poll(now);
     const kb = this.kb;
 
-    this.kbAxes.update(dt, {
-      throttleUp: kb.isDown('KeyW'),
-      throttleDown: kb.isDown('KeyS'),
-      yawLeft: kb.isDown('KeyA'),
-      yawRight: kb.isDown('KeyD'),
-      pitchForward: kb.isDown('ArrowUp'),
-      pitchBack: kb.isDown('ArrowDown'),
-      rollLeft: kb.isDown('ArrowLeft'),
-      rollRight: kb.isDown('ArrowRight'),
-    });
+    const st = this.settings;
+    const hold = throttleSlot(st.stickMode);
+    this.vsticks.update(
+      dt,
+      {
+        lUp: kb.isDown('KeyW'),
+        lDown: kb.isDown('KeyS'),
+        lLeft: kb.isDown('KeyA'),
+        lRight: kb.isDown('KeyD'),
+        rUp: kb.isDown('ArrowUp'),
+        rDown: kb.isDown('ArrowDown'),
+        rLeft: kb.isDown('ArrowLeft'),
+        rRight: kb.isDown('ArrowRight'),
+      },
+      hold,
+    );
 
     if (kb.lastActivity > -Infinity && kb.lastActivity >= this.pad.lastActivity) this.source = 'keyboard';
     else if (snap && (this.pad.lastActivity > kb.lastActivity || this.source === 'none')) this.source = 'gamepad';
     if (!snap && this.source === 'gamepad') this.source = kb.lastActivity > -Infinity ? 'keyboard' : 'none';
 
-    const c = f.control;
+    const opts: StickMapOptions = st;
+    const sticks: StickPositions = f.sticks;
     if (this.source === 'gamepad' && snap) {
-      const dz = this.settings.deadzone;
-      c.throttle =
-        this.settings.throttleSource === 'right-trigger' ? triggerToThrottle(snap.values[GP.RT]!) : stickToThrottle(snap.axes[1]!);
-      c.yaw = applyAxialDeadzone(snap.axes[0]!, dz);
-      applyRadialDeadzone(snap.axes[2]!, snap.axes[3]!, dz, this.stick);
-      c.roll = this.stick.x;
-      c.pitch = -this.stick.y;
+      const am = st.axisMap;
+      const ax = snap.axes;
+      const n = snap.axisCount;
+      const read = (i: number): number => (i < n ? ax[i]! : 0);
+      // Gamepad Y is +down; sticks are +up.
+      this.raw.lx = read(am.lx);
+      this.raw.ly = -read(am.ly);
+      this.raw.rx = read(am.rx);
+      this.raw.ry = -read(am.ry);
+      mapSticks(this.raw, snap.values[GP.RT]!, opts, sticks, f.control, true);
     } else {
-      c.throttle = this.kbAxes.throttle;
-      c.yaw = this.kbAxes.yaw;
-      c.pitch = this.kbAxes.pitch;
-      c.roll = this.kbAxes.roll;
+      // Keyboard has no trigger: its throttle is always the mode's throttle stick.
+      const kbOpts: StickMapOptions = st.throttleSource === 'stick' ? opts : { ...opts, throttleSource: 'stick' };
+      mapSticks(this.vsticks.pos, 0, kbOpts, sticks, f.control, false);
+    }
+
+    if (snap) {
+      const pr = this.padRaw;
+      pr.id = snap.id;
+      pr.mapping = snap.mapping;
+      this.padAxes.length = snap.axisCount;
+      for (let i = 0; i < snap.axisCount; i++) this.padAxes[i] = snap.axes[i]!;
+      this.padButtons.length = snap.values.length;
+      for (let i = 0; i < snap.values.length; i++) this.padButtons[i] = snap.values[i]!;
+      f.pad = pr;
+    } else {
+      f.pad = null;
     }
 
     const b = f.buttons;
@@ -152,8 +170,9 @@ export class InputManager {
       let held = kb.isDown(NAV_KEYS[d]) || kb.wasPressed(NAV_KEYS[d]);
       if (snap) {
         held ||= snap.pressed[NAV_PAD[d]]!;
-        const lx = snap.axes[0]!;
-        const ly = snap.axes[1]!;
+        const am = this.settings.axisMap;
+        const lx = am.lx < snap.axisCount ? snap.axes[am.lx]! : 0;
+        const ly = am.ly < snap.axisCount ? snap.axes[am.ly]! : 0;
         if (d === 'up') held ||= ly < -FLICK;
         else if (d === 'down') held ||= ly > FLICK;
         else if (d === 'left') held ||= lx < -FLICK;

@@ -1,27 +1,14 @@
 import { describe, expect, it } from 'vitest';
 import {
   EdgeDetector,
-  KeyboardAxes,
   RepeatTrigger,
   applyAxialDeadzone,
   applyRadialDeadzone,
   stickToThrottle,
   triggerToThrottle,
-  type KeyAxisState,
 } from '../../src/input/stick';
 import { InputManager } from '../../src/input/input-manager';
 import { DEFAULT_SETTINGS } from '../../src/core/settings';
-
-const NO_KEYS: KeyAxisState = {
-  throttleUp: false,
-  throttleDown: false,
-  yawLeft: false,
-  yawRight: false,
-  pitchForward: false,
-  pitchBack: false,
-  rollLeft: false,
-  rollRight: false,
-};
 
 describe('applyRadialDeadzone', () => {
   it('zeroes inside the deadzone', () => {
@@ -78,37 +65,6 @@ describe('throttle mapping', () => {
   });
 });
 
-describe('KeyboardAxes', () => {
-  it('throttle ramps at 0.6/s and stays where released', () => {
-    const k = new KeyboardAxes();
-    for (let i = 0; i < 50; i++) k.update(0.01, { ...NO_KEYS, throttleUp: true });
-    expect(k.throttle).toBeCloseTo(0.3, 5);
-    for (let i = 0; i < 100; i++) k.update(0.01, NO_KEYS);
-    expect(k.throttle).toBeCloseTo(0.3, 5);
-    for (let i = 0; i < 100; i++) k.update(0.01, { ...NO_KEYS, throttleDown: true });
-    expect(k.throttle).toBe(0);
-    for (let i = 0; i < 300; i++) k.update(0.01, { ...NO_KEYS, throttleUp: true });
-    expect(k.throttle).toBe(1);
-  });
-  it('axes rise over ~0.12 s instead of jumping, and fall back to 0', () => {
-    const k = new KeyboardAxes();
-    k.update(0.06, { ...NO_KEYS, pitchForward: true, rollLeft: true, yawRight: true });
-    expect(k.pitch).toBeCloseTo(0.5);
-    expect(k.roll).toBeCloseTo(-0.5);
-    expect(k.yaw).toBeCloseTo(0.5);
-    k.update(0.06, { ...NO_KEYS, pitchForward: true, rollLeft: true, yawRight: true });
-    expect(k.pitch).toBeCloseTo(1);
-    k.update(0.2, NO_KEYS);
-    expect(k.pitch).toBe(0);
-    expect(k.roll).toBe(0);
-  });
-  it('opposite keys cancel', () => {
-    const k = new KeyboardAxes();
-    k.update(1, { ...NO_KEYS, pitchForward: true, pitchBack: true });
-    expect(k.pitch).toBe(0);
-  });
-});
-
 describe('EdgeDetector', () => {
   it('fires only on the rising edge', () => {
     const e = new EdgeDetector();
@@ -158,9 +114,9 @@ describe('InputManager (gamepad, Mode 2)', () => {
     im.dispose();
   });
 
-  it('right-trigger throttle source', () => {
+  it('trigger throttle source', () => {
     const pad = fakePad([0, 0, 0, 0], [], 0.75);
-    const im = new InputManager(fakeWindow([pad]), { ...DEFAULT_SETTINGS, throttleSource: 'right-trigger' });
+    const im = new InputManager(fakeWindow([pad]), { ...DEFAULT_SETTINGS, throttleSource: 'trigger' });
     expect(im.poll(1 / 60).control.throttle).toBeCloseTo(0.75, 1);
   });
 

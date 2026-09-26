@@ -1,13 +1,14 @@
 /**
  * Standalone UI preview (ui-preview.html): mounts the Hud over a fake scene, drives it with a real
  * RaceController following a scripted path through the loft rings, real InputManager + GameAudio.
- * Query: ?screen=main|settings|controls|pause|finish|hud|freefly|disarmed|error
+ * Query: ?screen=main|settings|controller|controls|pause|finish|hud|freefly|disarmed|error (&nonstd=1: fake non-standard pad)
  */
 import { Quaternion, Vector3 } from 'three';
 import { loadSettings, saveSettings, type Settings } from '../core/settings';
 import { LOFT_LEVEL } from '../game/level-data';
 import { RaceController } from '../game/race';
 import { InputManager } from '../input/input-manager';
+import { mapSticks } from '../input/stick';
 import { GameAudio } from '../audio/audio';
 import type { CameraMode, DroneState, FlightMode, GameEvent, InputFrame } from '../types';
 import { Hud, type UiAction } from './hud';
@@ -123,14 +124,43 @@ function flyScript(dt: number): void {
   drone.position.lerpVectors(a, b, Math.min(1, segT));
 }
 
-// Fake stick motion when no real input device is in use, so the visualiser can be seen.
+// Fake gamepad when no real input device is in use, so the visualiser / controller setup can be seen.
+const params = new URLSearchParams(location.search);
+const fakeAxes = [0, 0, 0, 0, -1, -1];
+const fakeButtons = new Array<number>(17).fill(0);
 const fakeInput: InputFrame = {
   control: { throttle: 0, yaw: 0, pitch: 0, roll: 0 },
   buttons: { arm: false, toggleMode: false, cycleCamera: false, reset: false, pause: false, confirm: false },
   nav: { up: false, down: false, left: false, right: false, back: false },
-  source: 'none',
-  gamepadId: null,
+  source: 'gamepad',
+  gamepadId: 'Xbox Wireless Controller (STANDARD GAMEPAD Vendor: 045e Product: 0b13)',
+  sticks: { lx: 0, ly: 0, rx: 0, ry: 0 },
+  pad: {
+    id: 'Xbox Wireless Controller (STANDARD GAMEPAD Vendor: 045e Product: 0b13)',
+    mapping: params.has('nonstd') ? '' : 'standard',
+    axes: fakeAxes,
+    buttons: fakeButtons,
+  },
 };
+const fakeRaw = { lx: 0, ly: 0, rx: 0, ry: 0 };
+
+function fakePad(time: number): void {
+  // Circular sweeps that hit the round gate edge, plus a throttle stick sweeping full range.
+  const a = time * 1.1;
+  fakeAxes[0] = 0.95 * Math.cos(a);
+  fakeAxes[1] = 0.95 * Math.sin(a);
+  fakeAxes[2] = 0.7071 * Math.sign(Math.sin(time * 0.6)) || 0.7071;
+  fakeAxes[3] = -0.7071;
+  fakeAxes[4] = -1 + 0.3 * (1 + Math.sin(time * 2));
+  fakeButtons[0] = Math.sin(time * 3) > 0.7 ? 1 : 0;
+  fakeButtons[7] = 0.5 + 0.5 * Math.sin(time * 0.8);
+  const am = settings.axisMap;
+  fakeRaw.lx = fakeAxes[am.lx] ?? 0;
+  fakeRaw.ly = -(fakeAxes[am.ly] ?? 0);
+  fakeRaw.rx = fakeAxes[am.rx] ?? 0;
+  fakeRaw.ry = -(fakeAxes[am.ry] ?? 0);
+  mapSticks(fakeRaw, fakeButtons[7]!, settings, fakeInput.sticks, fakeInput.control, true);
+}
 
 let fps = 120;
 let last = performance.now();
@@ -173,13 +203,7 @@ function frame(now: number): void {
   const speed = dt > 0 ? drone.position.distanceTo(lastPos) / dt : 0;
   lastPos.copy(drone.position);
   const shown = inp.source === 'none' ? fakeInput : inp;
-  if (inp.source === 'none') {
-    const c = fakeInput.control;
-    c.throttle = 0.5 + 0.35 * Math.sin(t * 0.9);
-    c.yaw = 0.6 * Math.sin(t * 1.3);
-    c.pitch = 0.7 * Math.sin(t * 0.7 + 1);
-    c.roll = 0.7 * Math.cos(t * 1.1);
-  }
+  if (inp.source === 'none') fakePad(t);
   const thr = drone.armed ? 0.35 + 0.25 * Math.abs(Math.sin(t * 2)) : 0;
   for (let i = 0; i < 4; i++) drone.motors[i] = drone.armed ? thr + 0.04 * Math.sin(t * 7 + i) : Math.max(0, drone.motors[i]! - dt * 2);
   drone.batteryVoltage = Math.max(14, 16.8 - t * 0.01 - thr * 0.4);
@@ -218,6 +242,7 @@ switch (q) {
       if (race.snapshot().status === 'racing' && drone.armed) flyScript(1 / 120);
       for (const e of race.step(1 / 120, prevPos, drone, [])) handle(e);
     }
+    lastPos.copy(drone.position);
     if (q === 'disarmed') {
       drone.armed = false;
       resetPath();
@@ -233,6 +258,11 @@ switch (q) {
   case 'controls':
     hud.showScreen('main', { best: race.snapshot().bestTime });
     hud.showScreen(q);
+    break;
+  case 'controller':
+    hud.showScreen('main', { best: race.snapshot().bestTime });
+    hud.showScreen('settings');
+    hud.showScreen('controller');
     break;
   case 'pause':
     race.startRace();

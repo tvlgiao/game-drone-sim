@@ -28,6 +28,9 @@ gamepads after an input. Chrome/Edge recommended (rumble supported there).
 4. Fly through the rings in order (cyan = next, magenta = the one after). Impact > 5 m/s = crash
    → respawn after the last ring (clock keeps running, like a real race).
 
+Stick mode 1–4, square gate, per-channel reverse, axis remap and a live channel monitor are in
+Settings → **Controller setup** (check it first with a new controller).
+
 Tip: an Xbox left stick springs back to centre (≈ 50 % throttle). Settings → Throttle source →
 **Right trigger** gives a throttle that rests at zero.
 
