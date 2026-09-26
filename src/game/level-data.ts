@@ -125,7 +125,7 @@ export const LOFT_LEVEL: LevelDef = {
   props,
   rings,
   spawn: { position: [-9, 0.06, 5.8], yaw: 0 },
-  pilot: [-9.5, 1.7, 6.6],
+  pilot: [-11.3, 1.7, 6.5],
 };
 
 /** Ring colliders (rims) so the frame of a gate is solid, like a real race gate. */

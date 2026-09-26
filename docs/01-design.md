@@ -121,7 +121,8 @@ Drone model: procedural (no external assets): carbon-fibre frame (procedural wea
 texture), 4 motors with bells & copper windings hint, tri-blade props (+ blur disc),
 TPU ducts (cinewhoop), battery with strap, FPV camera cage + lens, antennas, RGB LEDs.
 
-Cameras: FPV (camera tilt 25° up, FOV 110° horizontal-ish ⇒ vertical 80°),
+Cameras: **LOS (default)** — standing pilot at the SW corner beside the take-off pad (eye 1.7 m, vertical FOV 62°), resting gaze on the whole room, head turns only when the drone nears the frame edge (dead-zone + critically damped spring), screen-constant locator brackets around a distant drone;
+FPV (camera tilt 25° up, FOV 110° horizontal-ish ⇒ vertical 80°),
 Chase (critically-damped spring), LOS (fixed tripod at pilot position, tracks drone).
 
 Audio: WebAudio synthesised motor whine per motor (freq ∝ rpm), prop noise, ring chime,

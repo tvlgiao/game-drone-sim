@@ -1,5 +1,6 @@
 /** The only render entry used by main.ts: owns renderer, scene, cameras, post FX and VFX. */
 import * as THREE from 'three';
+import { LosMarker } from './los-marker';
 import { QUALITY_PROFILES, type QualityProfile } from '../core/quality';
 import type { CameraMode, DroneState, GameEvent, LevelDef, QualityTier } from '../types';
 import { StaticBatcher } from './batcher';
@@ -61,6 +62,7 @@ export class GameView {
   private readonly staticMeshes: THREE.Mesh[];
   private readonly envTexture: THREE.Texture;
   private readonly fill: THREE.PointLight;
+  private readonly losMarker: LosMarker;
   private post: PostFX | null = null;
   private profile: QualityProfile;
   private renderScale = 1;
@@ -120,6 +122,8 @@ export class GameView {
     scene.add(this.drone.root);
 
     this.rig = new CameraRig(level.pilot, level.room.size);
+    this.losMarker = new LosMarker();
+    scene.add(this.losMarker.sprite);
     this.fill = new THREE.PointLight(0xcfe0ff, 0.5, 3.5, 2);
     scene.add(this.fill);
 
@@ -167,6 +171,7 @@ export class GameView {
     const cam = this.rig.camera;
     this.drone.camera.visible = this.rig.fpvWeight < 0.5;
     this.drone.update(f.drone, dt, t, f.cameraTiltDeg, cam.position);
+    this.losMarker.update(f.drone.position, cam.position, this.rig.losWeight, t);
 
     this.rings.update(t, dt, f.nextRing);
     this.updateRingLight(t, dt, f.nextRing);
@@ -437,6 +442,7 @@ export class GameView {
   dispose(): void {
     this.post?.dispose();
     this.post = null;
+    this.losMarker.dispose();
     for (const m of this.staticMeshes) m.geometry.dispose();
     for (const d of this.live.disposables) d.dispose();
     this.rings.dispose();

@@ -7,6 +7,14 @@ const CHASE_BACK = 1.0;
 const CHASE_UP = 0.35;
 const CHASE_OMEGA = 9;
 const BLEND_TIME = 0.45;
+/** LOS: standing pilot's eye. Vertical FOV wide enough to take in the whole loft from the corner. */
+const LOS_FOV_V = 62;
+/** fraction of the half-FOV the drone may drift before the pilot turns their head */
+const LOS_MARGIN_YAW = 0.62;
+const LOS_MARGIN_PITCH = 0.55;
+/** head turn spring (rad/s natural frequency) and relax-back-to-overview rate */
+const LOS_HEAD_OMEGA = 4.5;
+const LOS_RELAX = 0.35;
 
 const _pos = new THREE.Vector3();
 const _q = new THREE.Quaternion();
@@ -40,6 +48,16 @@ export class CameraRig {
   private readonly chaseVel = new THREE.Vector3();
   private readonly chaseLook = new THREE.Vector3();
   private readonly losLook = new THREE.Vector3();
+  private readonly overview: THREE.Vector3;
+  private headYaw = 0;
+  private headPitch = 0;
+  private headYawV = 0;
+  private headPitchV = 0;
+  private headTargetYaw = 0;
+  private headTargetPitch = 0;
+  private headInit = false;
+  /** exposed for FX: LOS-ness 0..1 */
+  losWeight = 0;
   private chaseInit = false;
   private trauma = 0;
   private fovV = 70;
@@ -57,6 +75,8 @@ export class CameraRig {
       new THREE.Vector3(roomSize[0] / 2 - m, roomSize[1] - m, roomSize[2] / 2 - m),
     );
     this.camera.position.copy(this.pilot);
+    // Resting gaze: centre of the room at chest height, so the whole course is in view.
+    this.overview = new THREE.Vector3(0, roomSize[1] * 0.28, -roomSize[2] * 0.08);
   }
 
   get currentMode(): CameraMode {
@@ -83,7 +103,7 @@ export class CameraRig {
       this.blend = 0;
     }
     this.updateChase(f, dt);
-    this.losLook.lerp(f.drone.position, 1 - Math.exp(-dt * 10));
+    this.updateHead(f, dt);
 
     this.pose(f.mode, f, _pos, _q);
     const targetFov = this.fovV;
@@ -102,6 +122,7 @@ export class CameraRig {
     }
     const fpvTarget = f.mode === 'fpv' ? 1 : 0;
     this.fpvWeight += (fpvTarget - this.fpvWeight) * Math.min(1, dt * 8);
+    this.losWeight += ((f.mode === 'los' ? 1 : 0) - this.losWeight) * Math.min(1, dt * 8);
 
     // Shake: high-frequency vibration in FPV (motor driven) + trauma from impacts.
     let motors = 0;
@@ -148,11 +169,51 @@ export class CameraRig {
       this.fovV = 68 + Math.min(14, f.speed * 0.9);
     } else {
       outPos.copy(this.pilot);
+      dirFromAngles(this.headYaw, this.headPitch, _v);
+      this.losLook.copy(this.pilot).add(_v);
       lookQuat(outPos, this.losLook, outQuat);
-      const dist = this.pilot.distanceTo(f.drone.position);
-      // Fixed tripod at 55°, with a gentle zoom when the quad is far so it stays readable.
-      this.fovV = dist > 7 ? Math.max(32, (55 * 7) / dist) : 55;
+      this.fovV = LOS_FOV_V;
     }
+  }
+
+  /**
+   * Standing pilot's head: rests on the room overview and only turns when the drone nears the
+   * edge of the frame (dead-zone), with a critically damped spring like a human head.
+   */
+  private updateHead(f: RigInput, dt: number): void {
+    const halfV = THREE.MathUtils.degToRad(LOS_FOV_V / 2);
+    const halfH = Math.atan(Math.tan(halfV) * this.camera.aspect);
+    _v.copy(this.overview).sub(this.pilot);
+    const baseYaw = yawOf(_v);
+    const basePitch = pitchOf(_v);
+    _v.copy(f.drone.position).sub(this.pilot);
+    const droneYaw = yawOf(_v);
+    const dronePitch = pitchOf(_v);
+    if (!this.headInit) {
+      this.headYaw = this.headTargetYaw = baseYaw;
+      this.headPitch = this.headTargetPitch = basePitch;
+      this.headInit = true;
+    }
+    // drift back towards the overview, then keep the drone inside the dead-zone
+    this.headTargetYaw += wrapAngle(baseYaw - this.headTargetYaw) * Math.min(1, dt * LOS_RELAX);
+    this.headTargetPitch += (basePitch - this.headTargetPitch) * Math.min(1, dt * LOS_RELAX);
+    const my = halfH * LOS_MARGIN_YAW;
+    const mp = halfV * LOS_MARGIN_PITCH;
+    const dy = wrapAngle(droneYaw - this.headTargetYaw);
+    if (dy > my) this.headTargetYaw += dy - my;
+    else if (dy < -my) this.headTargetYaw += dy + my;
+    const dp = dronePitch - this.headTargetPitch;
+    if (dp > mp) this.headTargetPitch += dp - mp;
+    else if (dp < -mp) this.headTargetPitch += dp + mp;
+    this.headTargetPitch = THREE.MathUtils.clamp(this.headTargetPitch, -1.2, 1.2);
+
+    const w = LOS_HEAD_OMEGA;
+    const ey = wrapAngle(this.headTargetYaw - this.headYaw);
+    this.headYawV += (ey * w * w - 2 * w * this.headYawV) * dt;
+    this.headYaw = wrapAngle(this.headYaw + this.headYawV * dt);
+    const ep = this.headTargetPitch - this.headPitch;
+    this.headPitchV += (ep * w * w - 2 * w * this.headPitchV) * dt;
+    this.headPitch += this.headPitchV * dt;
   }
 
   private pullInside(from: THREE.Vector3, cam: THREE.Vector3): void {
@@ -176,7 +237,6 @@ export class CameraRig {
       this.chasePos.copy(_v);
       this.chaseVel.set(0, 0, 0);
       this.chaseLook.copy(_v2);
-      this.losLook.copy(d.position);
       this.chaseInit = true;
       return;
     }
@@ -215,4 +275,22 @@ function lookQuat(eye: THREE.Vector3, target: THREE.Vector3, out: THREE.Quaterni
   if (eye.distanceToSquared(target) < 1e-8) return;
   _m.lookAt(eye, target, _up);
   out.setFromRotationMatrix(_m);
+}
+
+/** yaw 0 looks down -Z, positive turns left (rotation about +Y) */
+function yawOf(v: THREE.Vector3): number {
+  return Math.atan2(-v.x, -v.z);
+}
+
+function pitchOf(v: THREE.Vector3): number {
+  return Math.atan2(v.y, Math.hypot(v.x, v.z));
+}
+
+function dirFromAngles(yaw: number, pitch: number, out: THREE.Vector3): THREE.Vector3 {
+  const c = Math.cos(pitch);
+  return out.set(-Math.sin(yaw) * c, Math.sin(pitch), -Math.cos(yaw) * c);
+}
+
+function wrapAngle(a: number): number {
+  return Math.atan2(Math.sin(a), Math.cos(a));
 }

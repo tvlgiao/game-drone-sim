@@ -117,7 +117,7 @@ test('race: countdown, pass ring 0, crash + respawn', async ({ page }) => {
   expect(errors).toEqual([]);
 });
 
-test('camera cycles FPV → chase → LOS', async ({ page }) => {
+test('camera starts in LOS (standing pilot) and cycles LOS → FPV → chase', async ({ page }) => {
   await boot(page);
   await page.evaluate(() => window.__drone.action({ type: 'freefly' }));
   const seen: string[] = [await page.evaluate(() => window.__drone.camera)];
@@ -126,7 +126,7 @@ test('camera cycles FPV → chase → LOS', async ({ page }) => {
     await page.waitForTimeout(80);
     seen.push(await page.evaluate(() => window.__drone.camera));
   }
-  expect(seen).toEqual(['fpv', 'chase', 'los', 'fpv']);
+  expect(seen).toEqual(['los', 'fpv', 'chase', 'los']);
 });
 
 test('disarm on quit-to-menu is reflected in drone state (HUD/LED stay in sync)', async ({ page }) => {
