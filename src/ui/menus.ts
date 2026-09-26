@@ -18,7 +18,7 @@ import { controllerDiagram } from './icons';
 import { HOVER, RateCharts } from './rate-charts';
 import { CH_NAME, CH_SHORT, keyboardKeys, padControls, stickLong, stickShort, throttleControl } from './mode-labels';
 
-export type ScreenName = 'main' | 'settings' | 'controller' | 'rates' | 'controls' | 'pause' | 'finish' | 'error' | 'none';
+export type ScreenName = 'main' | 'settings' | 'controller' | 'rates' | 'controls' | 'pause' | 'finish' | 'error' | 'confirm-quit' | 'bye' | 'none';
 
 export type UiAction =
   | { type: 'race' }
@@ -26,6 +26,10 @@ export type UiAction =
   | { type: 'resume' }
   | { type: 'menu' }
   | { type: 'retry' }
+  /** HUD quit button: pause and ask for confirmation */
+  | { type: 'request-quit' }
+  /** leave the game (close tab when allowed) */
+  | { type: 'exit' }
   | { type: 'settings'; settings: Settings };
 
 export interface FinishData {
@@ -281,6 +285,8 @@ export class Menus {
     const controls = this.buildControls();
     this.screens.set('controls', controls);
     this.screens.set('pause', this.buildPause());
+    this.screens.set('confirm-quit', this.buildConfirmQuit());
+    this.screens.set('bye', this.buildBye());
     const fin = this.buildFinish();
     this.screens.set('finish', fin);
     const err = this.buildError();
@@ -388,7 +394,11 @@ export class Menus {
         this.show(this.returnTo);
         break;
       case 'pause':
+      case 'confirm-quit':
         this.onAction({ type: 'resume' });
+        break;
+      case 'bye':
+        this.onAction({ type: 'menu' });
         break;
       default:
         break;
@@ -491,6 +501,7 @@ export class Menus {
       case 'resume':
       case 'menu':
       case 'retry':
+      case 'exit':
         this.onAction({ type: act });
         break;
       case 'settings':
@@ -774,6 +785,7 @@ export class Menus {
           ${this.btn('freefly', 'Free Fly')}
           ${this.btn('settings', 'Settings')}
           ${this.btn('controls', 'Controls')}
+          ${this.btn('exit', 'Quit', false, ' ds-btn--quit')}
         </nav>
         <p class="ds-main__best" data-f="best"></p>
         <footer class="ds-foot">
@@ -930,7 +942,36 @@ export class Menus {
           ${this.btn('retry', 'Restart')}
           ${this.btn('settings', 'Settings')}
           ${this.btn('controls', 'Controls')}
-          ${this.btn('menu', 'Main menu')}
+          ${this.btn('menu', 'Quit to menu', false, ' ds-btn--quit')}
+        </nav>
+      </div>`,
+    );
+  }
+
+  private buildConfirmQuit(): HTMLElement {
+    return this.screen(
+      'confirm-quit',
+      `
+      <div class="ds-panel ds-glass ds-dialog">
+        <h2 class="ds-dialog__title">Quit?</h2>
+        <p class="ds-dialog__text">Leave this flight and return to the main menu. The current run is not saved.</p>
+        <nav class="ds-menu">
+          ${this.btn('menu', 'Quit to menu', true, ' ds-btn--quit')}
+          ${this.btn('resume', 'Cancel')}
+        </nav>
+      </div>`,
+    );
+  }
+
+  private buildBye(): HTMLElement {
+    return this.screen(
+      'bye',
+      `
+      <div class="ds-panel ds-glass ds-dialog">
+        <h2 class="ds-dialog__title">Drone Sim closed</h2>
+        <p class="ds-dialog__text">Sound is off. You can close this browser tab now.</p>
+        <nav class="ds-menu">
+          ${this.btn('menu', 'Back to game', true)}
         </nav>
       </div>`,
     );
