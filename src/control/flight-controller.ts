@@ -8,13 +8,13 @@
  *   yaw   + (clockwise from top) = −ω_y
  */
 import { Euler, Quaternion, Vector3 } from 'three';
-import type { ControlInput, DroneState, FlightMode, RateProfile } from '../types';
+import type { ControlInput, DroneState, FlightMode, AxisRates } from '../types';
 import { type DroneParams, hoverThrottle } from '../physics/drone-params';
 import { Rng } from '../physics/rng';
 import { LowPass1 } from './filters';
 import { Mixer } from './mixer';
 import { Pid, type PidGains } from './pid';
-import { RATE_PRESETS, actualRate, throttleCurve } from './rates';
+import { RATE_PRESETS, actualRate, axisRatesFrom, throttleCurve } from './rates';
 
 const DEG = Math.PI / 180;
 
@@ -43,7 +43,14 @@ const THROTTLE_EXPO = 0.3;
 
 export class FlightController {
   mode: FlightMode = 'angle';
-  rates: RateProfile = { ...RATE_PRESETS.freestyle };
+  /** per-axis Betaflight Actual rates */
+  rates: AxisRates = axisRatesFrom(RATE_PRESETS.freestyle);
+  /** Angle mode tilt limit (deg), Betaflight angle_limit */
+  angleMaxTiltDeg = ANGLE_MAX_TILT_DEG;
+  /** throttle curve expo around the mid point (Betaflight thr_expo) */
+  throttleExpo = THROTTLE_EXPO;
+  /** throttle output scale 0.25..1 (Betaflight throttle_limit "scale") */
+  throttleLimit = 1;
   readonly params: DroneParams;
   readonly pidRoll: Pid;
   readonly pidPitch: Pid;
@@ -140,10 +147,10 @@ export class FlightController {
     }
 
     const sp = this.setpoint;
-    sp.z = actualRate(input.yaw, this.rates) * DEG;
+    sp.z = actualRate(input.yaw, this.rates.yaw) * DEG;
     if (this.mode === 'acro') {
-      sp.x = actualRate(input.roll, this.rates) * DEG;
-      sp.y = actualRate(input.pitch, this.rates) * DEG;
+      sp.x = actualRate(input.roll, this.rates.roll) * DEG;
+      sp.y = actualRate(input.pitch, this.rates.pitch) * DEG;
     } else {
       this.angleSetpoints(input, state);
     }
@@ -159,7 +166,7 @@ export class FlightController {
       this.pidYaw.relax(dt, I_RELAX_TAU);
     }
 
-    const u = throttleCurve(input.throttle, this.throttleMid, THROTTLE_EXPO);
+    const u = throttleCurve(input.throttle, this.throttleMid, this.throttleExpo) * this.throttleLimit;
     const idle = this.params.idle;
     const thrust = this.mixer.mix(u * u, r, p, y, idle * idle);
     // thrust fraction → normalised rpm command (T ∝ u²): linear torque authority at any throttle
@@ -170,7 +177,7 @@ export class FlightController {
   /** Angle mode: tilt error between current and stick-commanded body-up vectors → roll/pitch rates. */
   private angleSetpoints(input: ControlInput, state: DroneState): void {
     const q = state.orientation;
-    const maxTilt = ANGLE_MAX_TILT_DEG * DEG;
+    const maxTilt = this.angleMaxTiltDeg * DEG;
     this.euler.setFromQuaternion(q, 'YXZ');
     const qd = this.qd.setFromAxisAngle(FlightController.Y, this.euler.y);
     qd.multiply(this.qTmp.setFromAxisAngle(FlightController.X, -clampS(input.pitch) * maxTilt));

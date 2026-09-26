@@ -69,6 +69,13 @@ export interface InputFrame {
 
 export type FlightMode = 'acro' | 'angle';
 
+/** Per-axis rate profiles (Betaflight rateprofile). */
+export interface AxisRates {
+  roll: RateProfile;
+  pitch: RateProfile;
+  yaw: RateProfile;
+}
+
 export interface RateProfile {
   /** deg/s at stick centre (Betaflight Actual "center sensitivity") */
   center: number;

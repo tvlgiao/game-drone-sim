@@ -42,7 +42,7 @@ describe('acro rate loop', () => {
     for (const stick of [1, 0.3, -0.6]) {
       it(`${name} step to ${stick} stick settles < 80 ms (±5 %), overshoot < 15 %, no oscillation`, () => {
         const sim = airborne('acro');
-        const target = actualRate(stick, sim.fc.rates);
+        const target = actualRate(stick, idx === 0 ? sim.fc.rates.roll : sim.fc.rates.pitch);
         const inp = idx === 0 ? input(0.5, stick, 0, 0) : input(0.5, 0, stick, 0);
         let peak = 0;
         let settled = -1;
@@ -248,5 +248,44 @@ describe('whole simulation', () => {
     expect(vTop).toBeLessThan(20);
     expect(Math.abs(s.position.y - alt0)).toBeLessThan(0.5);
     expect(tiltDeg(s)).toBeCloseTo(ANGLE_MAX_TILT_DEG, 0);
+  });
+});
+
+describe('pilot-tunable FC parameters (Rates & Sensitivity)', () => {
+  it('custom angle limit: full stick holds 30° when angleMaxTiltDeg = 30', () => {
+    const sim = airborne('angle');
+    sim.fc.angleMaxTiltDeg = 30;
+    run(sim, 0.8, input(0.55, 0, 1, 0));
+    expect(tiltDeg(sim.world.state)).toBeGreaterThan(28);
+    expect(tiltDeg(sim.world.state)).toBeLessThan(32);
+  });
+
+  it('per-axis rates: yaw uses its own profile, roll/pitch unaffected', () => {
+    const sim = airborne('acro');
+    sim.fc.rates.yaw = { center: 100, max: 300, expo: 0 };
+    run(sim, 0.3, input(0.5, 0, 0, 1));
+    expect(pilotRates(sim)[2]).toBeCloseTo(300, -1);
+    expect(actualRate(1, sim.fc.rates.roll)).toBeCloseTo(670, 5);
+  });
+
+  it('throttle limit scales full-throttle motor output', () => {
+    const full = airborne('angle');
+    const limited = airborne('angle');
+    limited.fc.throttleLimit = 0.6;
+    run(full, 0.3, input(1));
+    run(limited, 0.3, input(1));
+    const avg = (s: Simulation) => s.world.state.motors.reduce((a, b) => a + b, 0) / 4;
+    expect(avg(limited)).toBeLessThan(avg(full) * 0.7);
+    expect(avg(limited)).toBeGreaterThan(avg(full) * 0.5);
+  });
+
+  it('throttle expo 0.3 vs 0.8: higher expo = finer control near mid, same end points', () => {
+    const a = airborne('angle');
+    const b = airborne('angle');
+    b.fc.throttleExpo = 0.8;
+    run(a, 0.3, input(0.6));
+    run(b, 0.3, input(0.6));
+    const vy = (s: Simulation) => s.world.state.velocity.y;
+    expect(vy(b)).toBeLessThan(vy(a));
   });
 });

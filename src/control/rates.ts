@@ -1,5 +1,5 @@
 /** Stick shaping: Betaflight "Actual" rates and the throttle mid/expo curve. */
-import type { RateProfile } from '../types';
+import type { AxisRates, RateProfile } from '../types';
 
 /** Betaflight Actual rates: centre sensitivity, max rate and expo; returns deg/s (sign follows stick). */
 export function actualRate(stick: number, r: RateProfile): number {
@@ -16,6 +16,11 @@ export const RATE_PRESETS: Record<'beginner' | 'freestyle' | 'race', RateProfile
   freestyle: { center: 200, max: 670, expo: 0.54 },
   race: { center: 240, max: 800, expo: 0.45 },
 };
+
+/** Same profile on all three axes (deep copy, safe to mutate). */
+export function axisRatesFrom(r: RateProfile): AxisRates {
+  return { roll: { ...r }, pitch: { ...r }, yaw: { ...r } };
+}
 
 /**
  * Throttle stick 0..1 → normalised motor command 0..1. Stick centre maps to `mid` (hover command)
