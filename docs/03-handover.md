@@ -31,6 +31,9 @@ gamepads after an input. Chrome/Edge recommended (rumble supported there).
 Stick mode 1–4, square gate, per-channel reverse, axis remap and a live channel monitor are in
 Settings → **Controller setup** (check it first with a new controller).
 
+Sensitivity: Settings → **Rates & sensitivity** — preset or custom Betaflight Actual rates per axis
+(center °/s, max °/s, expo) with live curve, throttle mid/expo/limit, Angle-mode max tilt, deadzone.
+
 Tip: an Xbox left stick springs back to centre (≈ 50 % throttle). Settings → Throttle source →
 **Right trigger** gives a throttle that rests at zero.
 

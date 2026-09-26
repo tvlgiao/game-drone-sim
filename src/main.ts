@@ -7,7 +7,7 @@ import { GameAudio } from './audio/audio';
 import { FixedLoop, FpsMeter } from './core/loop';
 import { DynamicResolution, pickTier, probeGpu } from './core/quality';
 import { loadSettings, saveSettings, type Settings } from './core/settings';
-import { RATE_PRESETS, axisRatesFrom } from './control/rates';
+import { hoverThrottle } from './physics/drone-params';
 import { LOFT_LEVEL } from './game/level-data';
 import { RaceController } from './game/race';
 import { InputManager } from './input/input-manager';
@@ -82,7 +82,12 @@ function boot(): void {
   function applySettings(s: Settings): void {
     settings = s;
     sim.fc.mode = s.flightMode;
-    sim.fc.rates = axisRatesFrom(RATE_PRESETS[s.ratePreset]);
+    const r = s.rates;
+    sim.fc.rates = { roll: { ...r.roll }, pitch: { ...r.pitch }, yaw: { ...r.yaw } };
+    sim.fc.angleMaxTiltDeg = s.angleMaxTiltDeg;
+    sim.fc.throttleExpo = s.throttleExpo;
+    sim.fc.throttleLimit = s.throttleLimit;
+    sim.fc.throttleMid = s.throttleMid ?? hoverThrottle(sim.world.params);
     input.updateSettings(s);
     audio.setVolume(s.volume);
     const next = resolveTier(s);

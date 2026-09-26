@@ -1,12 +1,24 @@
-/** Menu screens (main, settings, controller setup, controls, pause, finish, error) with mouse / keyboard / gamepad focus. */
-import { DEFAULT_AXIS_MAP, SETTINGS_OPTIONS, cloneSettings, type Settings } from '../core/settings';
+/** Menu screens (main, settings, controller setup, rates, controls, pause, finish, error) with mouse / keyboard / gamepad focus. */
+import {
+  DEFAULT_AXIS_MAP,
+  RATE_AXES,
+  SETTINGS_OPTIONS,
+  applyRatePreset,
+  cloneSettings,
+  rateRange,
+  setRateValue,
+  type RateAxis,
+  type RateField,
+  type Settings,
+} from '../core/settings';
 import { AxisCapture, MODE_TABLE, STICK_SLOTS, type Channel, type StickSlot } from '../input/stick';
 import type { InputFrame, NavEvents } from '../types';
 import { formatTime } from './format';
 import { controllerDiagram } from './icons';
+import { HOVER, RateCharts } from './rate-charts';
 import { CH_NAME, CH_SHORT, keyboardKeys, padControls, stickLong, stickShort, throttleControl } from './mode-labels';
 
-export type ScreenName = 'main' | 'settings' | 'controller' | 'controls' | 'pause' | 'finish' | 'error' | 'none';
+export type ScreenName = 'main' | 'settings' | 'controller' | 'rates' | 'controls' | 'pause' | 'finish' | 'error' | 'none';
 
 export type UiAction =
   | { type: 'race' }
@@ -39,7 +51,7 @@ type Row =
   | (RowBase & { kind: 'range'; range: { min: number; max: number; step: number }; fmt: (v: number) => string; get: (s: Settings) => number; set: (s: Settings, v: number) => void })
   | (RowBase & { kind: 'bool'; on?: string; off?: string; get: (s: Settings) => boolean; set: (s: Settings, v: boolean) => void });
 
-type NumKey = 'cameraTiltDeg' | 'fovDeg' | 'volume' | 'deadzone';
+type NumKey = 'cameraTiltDeg' | 'fovDeg' | 'volume' | 'deadzone' | 'throttleExpo' | 'throttleLimit' | 'angleMaxTiltDeg';
 const rangeRow = (id: NumKey, label: string, hint: string, fmt: (v: number) => string): Row => ({
   id,
   label,
@@ -52,6 +64,21 @@ const rangeRow = (id: NumKey, label: string, hint: string, fmt: (v: number) => s
     s[id] = v;
   },
 });
+
+const FIELD_NAME: Record<RateField, string> = { center: 'Center sensitivity', max: 'Max rate', expo: 'Expo' };
+const rateCell = (axis: RateAxis, field: RateField): Row => ({
+  id: `rate.${axis}.${field}`,
+  label: `${axis[0]!.toUpperCase()}${axis.slice(1)} ${FIELD_NAME[field].toLowerCase()}`,
+  hint: '',
+  kind: 'range',
+  range: rateRange(field),
+  fmt: (v) => (field === 'expo' ? v.toFixed(2) : String(Math.round(v))),
+  get: (s) => s.rates[axis][field],
+  set: (s, v) => setRateValue(s, axis, field, v),
+});
+const RATE_FIELDS: readonly RateField[] = ['center', 'max', 'expo'];
+/** Throttle MID below the range = Auto (hover). */
+const MID_AUTO = SETTINGS_OPTIONS.throttleMid.min - SETTINGS_OPTIONS.throttleMid.step;
 
 const invertRow = (ch: Channel): Row => ({
   id: `invert.${ch}`,
@@ -136,12 +163,37 @@ const ROW_DEFS: Row[] = [
       { value: 'beginner', label: 'Beginner' },
       { value: 'freestyle', label: 'Freestyle' },
       { value: 'race', label: 'Race' },
+      { value: 'custom', label: 'Custom' },
     ],
     get: (s) => s.ratePreset,
+    set: (s, v) => applyRatePreset(s, v as Settings['ratePreset']),
+  },
+  {
+    id: 'linkRollPitch',
+    label: 'Link roll & pitch',
+    hint: 'Editing roll also sets pitch (and vice versa)',
+    kind: 'bool',
+    get: (s) => s.linkRollPitch,
     set: (s, v) => {
-      s.ratePreset = v as Settings['ratePreset'];
+      s.linkRollPitch = v;
     },
   },
+  ...RATE_AXES.flatMap((a) => RATE_FIELDS.map((f) => rateCell(a, f))),
+  {
+    id: 'throttleMid',
+    label: 'Throttle mid',
+    hint: 'Motor output at stick centre',
+    kind: 'range',
+    range: { ...SETTINGS_OPTIONS.throttleMid, min: MID_AUTO },
+    fmt: (v) => (v < SETTINGS_OPTIONS.throttleMid.min ? `Auto (${Math.round(HOVER * 100)}%)` : `${Math.round(v * 100)}%`),
+    get: (s) => s.throttleMid ?? MID_AUTO,
+    set: (s, v) => {
+      s.throttleMid = v < SETTINGS_OPTIONS.throttleMid.min - 1e-6 ? null : v;
+    },
+  },
+  rangeRow('throttleExpo', 'Throttle expo', 'Flattens the curve around mid', (v) => v.toFixed(2)),
+  rangeRow('throttleLimit', 'Throttle limit', 'Scales maximum motor output', (v) => `${Math.round(v * 100)}%`),
+  rangeRow('angleMaxTiltDeg', 'Max tilt angle', 'Angle mode: tilt at full stick', (v) => `${Math.round(v)}°`),
   rangeRow('cameraTiltDeg', 'Camera tilt', 'FPV camera uptilt', (v) => `${Math.round(v)}°`),
   rangeRow('fovDeg', 'Field of view', 'FPV lens width', (v) => `${Math.round(v)}°`),
   {
@@ -196,6 +248,10 @@ export class Menus {
   private focus = 0;
   private returnTo: 'main' | 'pause' = 'main';
   private controllerReturn: ScreenName = 'settings';
+  private ratesReturn: ScreenName = 'settings';
+  private fine = false;
+  private charts!: RateCharts;
+  private ratesEls!: { preset: HTMLElement; fine: HTMLElement; box: HTMLElement };
   private settings: Settings;
   private readonly rowEls = new Map<string, { value: HTMLElement; fill: HTMLElement | null }[]>();
   private readonly finishEls: { time: HTMLElement; best: HTMLElement; badge: HTMLElement };
@@ -221,6 +277,7 @@ export class Menus {
     this.screens.set('settings', this.buildSettings());
     const ctl = this.buildController();
     this.screens.set('controller', ctl);
+    this.screens.set('rates', this.buildRates());
     const controls = this.buildControls();
     this.screens.set('controls', controls);
     this.screens.set('pause', this.buildPause());
@@ -274,7 +331,9 @@ export class Menus {
   show(name: ScreenName, data?: FinishData): void {
     if (this.current === 'error' && name !== 'error') return;
     if ((name === 'settings' || name === 'controls') && (this.current === 'main' || this.current === 'pause')) this.returnTo = this.current;
-    if (name === 'controller' && this.current !== 'controller') this.controllerReturn = this.current === 'controls' ? 'controls' : 'settings';
+    if (name === 'controller' && (this.current === 'settings' || this.current === 'controls')) this.controllerReturn = this.current;
+    if (name === 'rates' && (this.current === 'settings' || this.current === 'controller')) this.ratesReturn = this.current;
+    if (name !== 'rates') this.setFine(false);
     if (name !== 'controller') this.stopCapture('');
     if (name === 'finish' && data) {
       this.finishEls.time.textContent = formatTime(data.time ?? null);
@@ -321,6 +380,9 @@ export class Menus {
         if (this.capture.active) this.stopCapture('Remap cancelled');
         else this.show(this.controllerReturn);
         break;
+      case 'rates':
+        this.show(this.ratesReturn);
+        break;
       case 'settings':
       case 'controls':
         this.show(this.returnTo);
@@ -336,6 +398,7 @@ export class Menus {
   /** Live data for the controller setup screen; call every frame while it is open. */
   updateLive(input: InputFrame, dt: number, now: number): void {
     this.lastInput = input;
+    if (this.current === 'rates') this.charts.updateLive(input.control, now);
     if (this.current !== 'controller') return;
     const L = this.live;
     const st = input.sticks;
@@ -412,7 +475,7 @@ export class Menus {
       const key = el.dataset.key;
       if (key) {
         item.adjust = (dir) => this.adjust(key, dir);
-        item.activate = () => this.adjust(key, 1);
+        item.activate = screen === this.screens.get('rates') && ROWS.get(key)?.kind === 'range' ? () => this.setFine(!this.fine) : () => this.adjust(key, 1);
       } else if (act) {
         item.activate = () => this.act(act);
       }
@@ -433,6 +496,7 @@ export class Menus {
       case 'settings':
       case 'controls':
       case 'controller':
+      case 'rates':
         this.show(act);
         break;
       case 'back':
@@ -485,7 +549,8 @@ export class Menus {
       const n = row.options.length;
       row.set(s, row.options[(Math.max(0, idx) + dir + n) % n]!.value);
     } else if (row.kind === 'range') {
-      const { min, max, step } = row.range;
+      const { min, max } = row.range;
+      const step = this.fine && this.current === 'rates' ? row.range.step / 5 : row.range.step;
       const v = Math.round((row.get(s) + dir * step) / step) * step;
       row.set(s, Math.min(max, Math.max(min, Number(v.toFixed(4)))));
     } else {
@@ -526,6 +591,10 @@ export class Menus {
           if (h) h.textContent = MODE_HINT[s.stickMode]!;
         }
       }
+    }
+    if (this.charts) {
+      this.charts.redraw(s);
+      this.ratesEls.preset.textContent = s.ratePreset === 'custom' ? 'Custom' : s.ratePreset[0]!.toUpperCase() + s.ratePreset.slice(1);
     }
     if (!this.live) return;
     // Controller screen: mode-dependent labels.
@@ -617,16 +686,37 @@ export class Menus {
     el.inert = true;
     el.innerHTML = inner;
     el.addEventListener('click', (e) => {
-      const target = (e.target as HTMLElement).closest<HTMLElement>('[data-nav], [data-dir]');
-      if (!target) return;
-      const dirBtn = (e.target as HTMLElement).closest<HTMLElement>('[data-dir]');
-      const navEl = target.closest<HTMLElement>('[data-nav]') ?? target;
+      if ((e.target as HTMLElement).closest('[data-dir]')) return; // handled on pointerdown (hold to repeat)
+      const navEl = (e.target as HTMLElement).closest<HTMLElement>('[data-nav]');
+      if (!navEl) return;
       const idx = this.items.findIndex((i) => i.el === navEl);
       if (idx >= 0) this.setFocus(idx);
+      this.items[idx]?.activate?.();
+    });
+    el.addEventListener('pointerdown', (e) => {
+      const dirBtn = (e.target as HTMLElement).closest<HTMLElement>('[data-dir]');
+      const navEl = dirBtn?.closest<HTMLElement>('[data-nav]');
+      if (!dirBtn || !navEl) return;
+      e.preventDefault();
+      const idx = this.items.findIndex((i) => i.el === navEl);
       const item = this.items[idx];
-      if (!item) return;
-      if (dirBtn && item.adjust) item.adjust(dirBtn.dataset.dir === '-1' ? -1 : 1);
-      else item.activate?.();
+      if (!item?.adjust) return;
+      this.setFocus(idx);
+      const dir = dirBtn.dataset.dir === '-1' ? -1 : 1;
+      item.adjust(dir);
+      let timer = window.setTimeout(function repeat() {
+        item.adjust!(dir);
+        timer = window.setTimeout(repeat, 70);
+      }, 400);
+      const stop = (): void => {
+        clearTimeout(timer);
+        window.removeEventListener('pointerup', stop);
+        window.removeEventListener('pointercancel', stop);
+        dirBtn.removeEventListener('pointerleave', stop);
+      };
+      window.addEventListener('pointerup', stop);
+      window.addEventListener('pointercancel', stop);
+      dirBtn.addEventListener('pointerleave', stop);
     });
     el.addEventListener('pointermove', (e) => {
       const navEl = (e.target as HTMLElement).closest<HTMLElement>('[data-nav]');
@@ -661,7 +751,7 @@ export class Menus {
   }
 
   private registerRows(el: HTMLElement): void {
-    el.querySelectorAll<HTMLElement>('.ds-row[data-key]').forEach((rowEl) => {
+    el.querySelectorAll<HTMLElement>('[data-key]').forEach((rowEl) => {
       const id = rowEl.dataset.key!;
       const list = this.rowEls.get(id) ?? [];
       list.push({ value: rowEl.querySelector<HTMLElement>('.ds-row__value')!, fill: rowEl.querySelector<HTMLElement>('.ds-row__fill') });
@@ -702,7 +792,7 @@ export class Menus {
       <div class="ds-panel ds-glass ds-dialog ds-dialog--wide">
         <h2 class="ds-dialog__title">Settings</h2>
         <div class="ds-rows">${this.rowsHtml(SETTINGS_ROWS)}</div>
-        <div class="ds-dialog__actions">${this.btn('controller', 'Controller setup ›', false, ' ds-btn--ghost')}${this.btn('back', 'Back')}</div>
+        <div class="ds-dialog__actions">${this.btn('rates', 'Rates &amp; sensitivity ›', false, ' ds-btn--ghost')}${this.btn('controller', 'Controller setup ›', false, ' ds-btn--ghost')}${this.btn('back', 'Back')}</div>
         <p class="ds-foot ds-foot--inline"><span><kbd class="ds-kbd">←</kbd><kbd class="ds-kbd">→</kbd> Change</span><span><kbd class="ds-kbd ds-kbd--b">B</kbd> Back</span></p>
       </div>`,
     );
@@ -754,10 +844,66 @@ export class Menus {
             <p class="ds-remap__status" data-f="remapStatus">Select a stick axis, then move that stick.</p>
           </section>
         </div>
+        <div class="ds-dialog__actions">${this.btn('rates', 'Rates &amp; sensitivity ›', false, ' ds-btn--ghost')}${this.btn('back', 'Back', true)}</div>
+      </div>`,
+    );
+    this.registerRows(el);
+    return el;
+  }
+
+  private setFine(on: boolean): void {
+    this.fine = on;
+    if (!this.ratesEls) return;
+    this.ratesEls.box.classList.toggle('is-fine', on);
+    this.ratesEls.fine.textContent = on ? 'Fine step ON · A to toggle' : 'A / Enter on a value: fine step';
+  }
+
+  private buildRates(): HTMLElement {
+    const cell = (a: RateAxis, f: RateField) => `
+      <td><div class="ds-cell" data-nav data-key="rate.${a}.${f}" role="group" aria-label="${a} ${FIELD_NAME[f]}">
+        <button type="button" class="ds-arrow" data-dir="-1" aria-label="Decrease" tabindex="-1">‹</button>
+        <span class="ds-row__value ds-num"></span>
+        <button type="button" class="ds-arrow" data-dir="1" aria-label="Increase" tabindex="-1">›</button>
+      </div></td>`;
+    const body = RATE_AXES.map((a) => `<tr><th scope="row" class="is-${a}">${a.toUpperCase()}</th>${RATE_FIELDS.map((f) => cell(a, f)).join('')}</tr>`).join('');
+    const el = this.screen(
+      'rates',
+      `
+      <div class="ds-panel ds-glass ds-dialog ds-dialog--xwide ds-rates">
+        <h2 class="ds-dialog__title">Rates &amp; sensitivity <small data-f="preset">Freestyle</small></h2>
+        <div class="ds-ctl__grid">
+          <section class="ds-ctl__col">
+            <div class="ds-rows">${this.rowsHtml(['ratePreset', 'linkRollPitch'])}</div>
+            <table class="ds-rtable">
+              <thead><tr><th></th><th>Center <small>°/s</small></th><th>Max rate <small>°/s</small></th><th>Expo</th></tr></thead>
+              <tbody>${body}</tbody>
+            </table>
+            <p class="ds-help">Center sensitivity: rotation rate around stick centre. Max rate: rate at full stick. Expo: softens the centre.</p>
+            <p class="ds-help ds-help--fine" data-f="fine">A / Enter on a value: fine step</p>
+            <h3 class="ds-h3">Throttle</h3>
+            <div class="ds-rows">${this.rowsHtml(['throttleMid', 'throttleExpo', 'throttleLimit'])}</div>
+            <p class="ds-help">Mid: output at stick centre (Auto = hover). Expo: finer control around mid. Limit: caps full throttle.</p>
+            <h3 class="ds-h3">Angle mode &amp; sticks</h3>
+            <div class="ds-rows">${this.rowsHtml(['angleMaxTiltDeg', 'deadzone'])}</div>
+            <p class="ds-help">Max tilt: how far Angle mode leans at full stick. Deadzone: ignored stick travel at centre.</p>
+          </section>
+          <section class="ds-ctl__col">
+            <h3 class="ds-h3">Rate preview <small>deg/s vs stick</small></h3>
+            <div class="ds-chart" data-f="rateChart"></div>
+            <h3 class="ds-h3">Throttle curve <small>output vs stick</small></h3>
+            <div class="ds-chart" data-f="thrChart"></div>
+          </section>
+        </div>
         <div class="ds-dialog__actions">${this.btn('back', 'Back', true)}</div>
       </div>`,
     );
     this.registerRows(el);
+    this.charts = new RateCharts(el.querySelector<HTMLElement>('[data-f="rateChart"]')!, el.querySelector<HTMLElement>('[data-f="thrChart"]')!);
+    this.ratesEls = {
+      preset: el.querySelector<HTMLElement>('[data-f="preset"]')!,
+      fine: el.querySelector<HTMLElement>('[data-f="fine"]')!,
+      box: el.querySelector<HTMLElement>('.ds-rates')!,
+    };
     return el;
   }
 

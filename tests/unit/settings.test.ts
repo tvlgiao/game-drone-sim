@@ -1,5 +1,15 @@
 import { describe, expect, it } from 'vitest';
-import { DEFAULT_SETTINGS, SETTINGS_KEY, loadSettings, saveSettings, validateSettings } from '../../src/core/settings';
+import {
+  DEFAULT_SETTINGS,
+  SETTINGS_KEY,
+  applyRatePreset,
+  cloneSettings,
+  loadSettings,
+  saveSettings,
+  setRateValue,
+  validateSettings,
+} from '../../src/core/settings';
+import { RATE_PRESETS } from '../../src/control/rates';
 
 function mem(initial: Record<string, string> = {}): Storage {
   const m = new Map(Object.entries(initial));
@@ -25,6 +35,12 @@ describe('settings', () => {
       axisMap: { lx: 0, ly: 1, rx: 2, ry: 3 },
       flightMode: 'angle',
       ratePreset: 'freestyle',
+      rates: { roll: { center: 200, max: 670, expo: 0.54 }, pitch: { center: 200, max: 670, expo: 0.54 }, yaw: { center: 200, max: 670, expo: 0.54 } },
+      linkRollPitch: true,
+      throttleMid: null,
+      throttleExpo: 0.3,
+      throttleLimit: 1,
+      angleMaxTiltDeg: 55,
       cameraTiltDeg: 25,
       fovDeg: 110,
       quality: 'auto',
@@ -83,6 +99,12 @@ describe('settings', () => {
       axisMap: { lx: 0, ly: 1, rx: 2, ry: 3 },
       flightMode: 'acro',
       ratePreset: 'freestyle',
+      rates: { roll: { center: 200, max: 670, expo: 0.54 }, pitch: { center: 200, max: 670, expo: 0.54 }, yaw: { center: 200, max: 670, expo: 0.54 } },
+      linkRollPitch: true,
+      throttleMid: null,
+      throttleExpo: 0.3,
+      throttleLimit: 1,
+      angleMaxTiltDeg: 55,
       cameraTiltDeg: 45,
       fovDeg: 80,
       quality: 'low',
@@ -128,5 +150,74 @@ describe('settings', () => {
     for (const m of [1, 3, 4] as const) expect(validateSettings({ stickMode: m }).stickMode).toBe(m);
     expect(validateSettings({ stickMode: '1' }).stickMode).toBe(2);
     expect(validateSettings({ invert: [true], axisMap: 'x' }).invert.throttle).toBe(false);
+  });
+
+  it('migrates old saves: rates come from the stored preset', () => {
+    const s = loadSettings(mem({ [SETTINGS_KEY]: JSON.stringify({ ratePreset: 'race' }) }));
+    expect(s.ratePreset).toBe('race');
+    for (const a of ['roll', 'pitch', 'yaw'] as const) expect(s.rates[a]).toEqual(RATE_PRESETS.race);
+    expect(s).toMatchObject({ throttleMid: null, throttleExpo: 0.3, throttleLimit: 1, angleMaxTiltDeg: 55 });
+  });
+
+  it('clamps rates and enforces max ≥ center; clamps throttle / angle fields', () => {
+    const s = validateSettings({
+      ratePreset: 'custom',
+      rates: { roll: { center: 5, max: 5000, expo: 2 }, pitch: { center: 500, max: 200, expo: -1 }, yaw: 'bad' },
+      throttleMid: 0.9,
+      throttleExpo: 7,
+      throttleLimit: 0.1,
+      angleMaxTiltDeg: 100,
+    });
+    expect(s.rates.roll).toEqual({ center: 20, max: 1800, expo: 1 });
+    expect(s.rates.pitch).toEqual({ center: 500, max: 500, expo: 0 });
+    expect(s.rates.yaw).toEqual(RATE_PRESETS.freestyle);
+    expect(s).toMatchObject({ throttleMid: 0.75, throttleExpo: 1, throttleLimit: 0.25, angleMaxTiltDeg: 80 });
+    expect(validateSettings({ throttleMid: 0.1 }).throttleMid).toBe(0.25);
+    expect(validateSettings({ throttleMid: 'auto' }).throttleMid).toBeNull();
+    expect(validateSettings({ throttleMid: null }).throttleMid).toBeNull();
+  });
+
+  it('choosing a preset copies it to all axes; editing a value switches to custom', () => {
+    const s = cloneSettings(DEFAULT_SETTINGS);
+    applyRatePreset(s, 'beginner');
+    expect(s.ratePreset).toBe('beginner');
+    for (const a of ['roll', 'pitch', 'yaw'] as const) expect(s.rates[a]).toEqual(RATE_PRESETS.beginner);
+    s.rates.roll.center = 111; // presets are copies
+    expect(RATE_PRESETS.beginner.center).toBe(150);
+    setRateValue(s, 'yaw', 'max', 500);
+    expect(s.ratePreset).toBe('custom');
+    expect(s.rates.yaw.max).toBe(500);
+    applyRatePreset(s, 'custom');
+    expect(s.rates.yaw.max).toBe(500); // custom keeps values
+    expect(DEFAULT_SETTINGS.rates.roll).toEqual(RATE_PRESETS.freestyle);
+  });
+
+  it('link roll & pitch mirrors edits; yaw is never linked', () => {
+    const s = cloneSettings(DEFAULT_SETTINGS);
+    setRateValue(s, 'roll', 'center', 300);
+    expect(s.rates.pitch.center).toBe(300);
+    setRateValue(s, 'pitch', 'expo', 0.2);
+    expect(s.rates.roll.expo).toBe(0.2);
+    expect(s.rates.yaw).toEqual(RATE_PRESETS.freestyle);
+    s.linkRollPitch = false;
+    setRateValue(s, 'roll', 'max', 900);
+    expect(s.rates.roll.max).toBe(900);
+    expect(s.rates.pitch.max).toBe(670);
+  });
+
+  it('setRateValue clamps and keeps max ≥ center', () => {
+    const s = cloneSettings(DEFAULT_SETTINGS);
+    s.linkRollPitch = false;
+    setRateValue(s, 'roll', 'center', 800); // above max: max follows
+    expect(s.rates.roll).toMatchObject({ center: 600, max: 670 });
+    setRateValue(s, 'roll', 'center', 590);
+    setRateValue(s, 'roll', 'max', 300); // below center: held at center
+    expect(s.rates.roll.max).toBe(590);
+    setRateValue(s, 'roll', 'expo', 3);
+    expect(s.rates.roll.expo).toBe(1);
+    setRateValue(s, 'yaw', 'center', 700);
+    expect(s.rates.yaw).toMatchObject({ center: 600, max: 670 });
+    setRateValue(s, 'yaw', 'center', 5);
+    expect(s.rates.yaw.center).toBe(20);
   });
 });

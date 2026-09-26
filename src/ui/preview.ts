@@ -1,7 +1,7 @@
 /**
  * Standalone UI preview (ui-preview.html): mounts the Hud over a fake scene, drives it with a real
  * RaceController following a scripted path through the loft rings, real InputManager + GameAudio.
- * Query: ?screen=main|settings|controller|controls|pause|finish|hud|freefly|disarmed|error (&nonstd=1: fake non-standard pad)
+ * Query: ?screen=main|settings|controller|rates|controls|pause|finish|hud|freefly|disarmed|error (&nonstd=1: fake non-standard pad)
  */
 import { Quaternion, Vector3 } from 'three';
 import { loadSettings, saveSettings, type Settings } from '../core/settings';
@@ -258,6 +258,11 @@ switch (q) {
   case 'controls':
     hud.showScreen('main', { best: race.snapshot().bestTime });
     hud.showScreen(q);
+    break;
+  case 'rates':
+    hud.showScreen('main', { best: race.snapshot().bestTime });
+    hud.showScreen('settings');
+    hud.showScreen('rates');
     break;
   case 'controller':
     hud.showScreen('main', { best: race.snapshot().bestTime });
