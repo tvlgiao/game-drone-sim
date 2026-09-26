@@ -6,8 +6,16 @@ export const ICON_KEYBOARD = `<svg viewBox="0 0 24 24" aria-hidden="true"><path 
 
 export const ICON_NONE = `<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="8" fill="none" stroke="currentColor" stroke-width="1.8" stroke-dasharray="3 3"/></svg>`;
 
-/** Xbox-style controller with leader-line labels for the Mode 2 mapping. */
-export const CONTROLLER_DIAGRAM = `
+export interface DiagramLabels {
+  left: string;
+  right: string;
+  rt: string;
+  /** stick holding throttle, highlighted magenta ('rt' when the trigger is the throttle) */
+  thr: 'left' | 'right' | 'rt';
+}
+
+/** Xbox-style controller with leader-line labels for the selected stick mode. Labels are static app strings. */
+export const controllerDiagram = (l: DiagramLabels): string => `
 <svg class="ds-pad" viewBox="0 0 760 370" role="img" aria-label="Xbox controller mapping diagram">
   <defs>
     <linearGradient id="dsPadBody" x1="0" y1="0" x2="0" y2="1">
@@ -19,13 +27,13 @@ export const CONTROLLER_DIAGRAM = `
   </defs>
   <g class="ds-pad__body">
     <rect x="245" y="64" width="54" height="26" rx="10" class="ds-pad__trig"/>
-    <rect x="461" y="64" width="54" height="26" rx="10" class="ds-pad__trig is-hot-m"/>
+    <rect x="461" y="64" width="54" height="26" rx="10" class="ds-pad__trig${l.thr === 'rt' ? ' is-hot-m' : ''}"/>
     <path d="M232 104c14-12 52-16 82-10l-4 12c-28-4-58 0-74 8Z" class="ds-pad__bump"/>
     <path d="M528 104c-14-12-52-16-82-10l4 12c28-4 58 0 74 8Z" class="ds-pad__bump is-hot"/>
     <path d="M260 110C300 95 460 95 500 110C560 120 600 150 620 230C635 290 620 330 585 330C550 330 530 300 510 270C490 245 270 245 250 270C230 300 210 330 175 330C140 330 125 290 140 230C160 150 200 120 260 110Z" fill="url(#dsPadBody)" class="ds-pad__shell"/>
     <circle cx="380" cy="128" r="13" class="ds-pad__logo"/>
-    <circle cx="295" cy="160" r="25" fill="url(#dsStick)" class="ds-pad__stick is-hot"/>
-    <circle cx="435" cy="218" r="25" fill="url(#dsStick)" class="ds-pad__stick is-hot-m"/>
+    <circle cx="295" cy="160" r="25" fill="url(#dsStick)" class="ds-pad__stick ${l.thr === 'left' ? 'is-hot-m' : 'is-hot'}"/>
+    <circle cx="435" cy="218" r="25" fill="url(#dsStick)" class="ds-pad__stick ${l.thr === 'right' ? 'is-hot-m' : 'is-hot'}"/>
     <path d="M329 199h12v-12h10v12h12v10h-12v12h-10v-12h-12Z" class="ds-pad__dpad"/>
     <rect x="345" y="146" width="16" height="10" rx="5" class="ds-pad__small"/>
     <rect x="399" y="146" width="16" height="10" rx="5" class="ds-pad__small is-hot"/>
@@ -51,16 +59,16 @@ export const CONTROLLER_DIAGRAM = `
   </g>
   <g class="ds-pad__labels">
     <text x="20" y="128"><tspan class="k">LEFT STICK</tspan></text>
-    <text x="20" y="148">↕ Throttle · ↔ Yaw</text>
+    <text x="20" y="148">${l.left}</text>
     <text x="20" y="246"><tspan class="k">D-PAD</tspan></text>
     <text x="20" y="266">Menu navigation</text>
     <text x="407" y="32" text-anchor="middle"><tspan class="k">MENU</tspan> Pause</text>
-    <text x="606" y="55"><tspan class="k">RT</tspan> Throttle (opt.)</text>
+    <text x="606" y="55"><tspan class="k">RT</tspan> ${l.rt}</text>
     <text x="606" y="99"><tspan class="k">RB</tspan> Camera</text>
     <text x="606" y="133"><tspan class="k">Y</tspan> Flight mode</text>
     <text x="606" y="169"><tspan class="k">B</tspan> Reset · Back</text>
     <text x="606" y="205"><tspan class="k">A</tspan> Arm · Select</text>
     <text x="606" y="256"><tspan class="k">RIGHT STICK</tspan></text>
-    <text x="606" y="276">↕ Pitch · ↔ Roll</text>
+    <text x="606" y="276">${l.right}</text>
   </g>
 </svg>`;

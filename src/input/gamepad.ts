@@ -21,6 +21,8 @@ export const GP = {
 } as const;
 
 const BUTTON_COUNT = 17;
+/** Axes copied / watched per pad (covers non-standard pads that put sticks on axes 4+). */
+export const MAX_AXES = 16;
 const ACTIVITY_AXIS = 0.3;
 const ACTIVITY_DELTA = 0.15;
 
@@ -28,8 +30,10 @@ const ACTIVITY_DELTA = 0.15;
 export interface PadSnapshot {
   id: string;
   index: number;
-  /** LX, LY, RX, RY (Standard: −1 = left / up) */
-  axes: Float32Array;
+  mapping: string;
+  /** raw axes (Standard: 0..3 = LX, LY, RX, RY; −1 = left / up); valid up to axisCount */
+  axes: Float64Array;
+  axisCount: number;
   /** analog value 0..1 per button */
   values: Float32Array;
   pressed: boolean[];
@@ -46,7 +50,9 @@ export class GamepadInput {
   readonly snap: PadSnapshot = {
     id: '',
     index: -1,
-    axes: new Float32Array(4),
+    mapping: '',
+    axes: new Float64Array(MAX_AXES),
+    axisCount: 0,
     values: new Float32Array(BUTTON_COUNT),
     pressed: new Array<boolean>(BUTTON_COUNT).fill(false),
   };
@@ -77,7 +83,7 @@ export class GamepadInput {
       fallback ??= gp;
       let tr = this.tracks.get(gp.index);
       if (!tr) {
-        tr = { lastAxes: new Float32Array(4), lastActive: -Infinity };
+        tr = { lastAxes: new Float32Array(MAX_AXES), lastActive: -Infinity };
         this.tracks.set(gp.index, tr);
       }
       if (this.isActive(gp, tr)) tr.lastActive = now;
@@ -114,10 +120,12 @@ export class GamepadInput {
 
   private isActive(gp: Gamepad, tr: PadTrack): boolean {
     let active = false;
-    const n = Math.min(4, gp.axes.length);
+    const n = Math.min(MAX_AXES, gp.axes.length);
     for (let i = 0; i < n; i++) {
       const v = gp.axes[i] ?? 0;
-      if (Math.abs(v) > ACTIVITY_AXIS || Math.abs(v - tr.lastAxes[i]!) > ACTIVITY_DELTA) {
+      // Sticks of a standard pad rest at 0; other axes (triggers on non-standard pads) may rest at ±1.
+      const deflected = i < 4 && gp.mapping === 'standard' && Math.abs(v) > ACTIVITY_AXIS;
+      if (deflected || Math.abs(v - tr.lastAxes[i]!) > ACTIVITY_DELTA) {
         active = true;
         tr.lastAxes[i] = v;
       }
@@ -134,7 +142,9 @@ export class GamepadInput {
     const s = this.snap;
     s.id = gp.id;
     s.index = gp.index;
-    for (let i = 0; i < 4; i++) {
+    s.mapping = gp.mapping ?? '';
+    s.axisCount = Math.min(MAX_AXES, gp.axes.length);
+    for (let i = 0; i < MAX_AXES; i++) {
       const v = gp.axes[i];
       s.axes[i] = typeof v === 'number' && Number.isFinite(v) ? v : 0;
     }

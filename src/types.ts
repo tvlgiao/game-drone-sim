@@ -38,12 +38,33 @@ export interface NavEvents {
   back: boolean;
 }
 
+/** Physical stick positions −1..1 (X +right, Y +up). */
+export interface StickPositions {
+  lx: number;
+  ly: number;
+  rx: number;
+  ry: number;
+}
+
+/** Raw live values of the active gamepad (arrays are reused between frames). */
+export interface RawPad {
+  id: string;
+  /** 'standard' or '' (non-standard layout) */
+  mapping: string;
+  axes: readonly number[];
+  /** analog value 0..1 per button */
+  buttons: readonly number[];
+}
+
 export interface InputFrame {
   control: ControlInput;
   buttons: ButtonEvents;
   nav: NavEvents;
   source: InputSource;
   gamepadId: string | null;
+  /** processed stick positions (after deadzone / square gate) for the visualiser; keyboard = virtual sticks */
+  sticks: StickPositions;
+  pad: RawPad | null;
 }
 
 export type FlightMode = 'acro' | 'angle';

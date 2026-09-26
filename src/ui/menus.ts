@@ -1,10 +1,12 @@
-/** Menu screens (main, settings, controls, pause, finish, error) with mouse / keyboard / gamepad focus navigation. */
-import { SETTINGS_OPTIONS, type Settings } from '../core/settings';
-import type { NavEvents } from '../types';
+/** Menu screens (main, settings, controller setup, controls, pause, finish, error) with mouse / keyboard / gamepad focus. */
+import { DEFAULT_AXIS_MAP, SETTINGS_OPTIONS, cloneSettings, type Settings } from '../core/settings';
+import { AxisCapture, MODE_TABLE, STICK_SLOTS, type Channel, type StickSlot } from '../input/stick';
+import type { InputFrame, NavEvents } from '../types';
 import { formatTime } from './format';
-import { CONTROLLER_DIAGRAM } from './icons';
+import { controllerDiagram } from './icons';
+import { CH_NAME, CH_SHORT, keyboardKeys, padControls, stickLong, stickShort, throttleControl } from './mode-labels';
 
-export type ScreenName = 'main' | 'settings' | 'controls' | 'pause' | 'finish' | 'error' | 'none';
+export type ScreenName = 'main' | 'settings' | 'controller' | 'controls' | 'pause' | 'finish' | 'error' | 'none';
 
 export type UiAction =
   | { type: 'race' }
@@ -26,55 +28,166 @@ interface Item {
   adjust?: (dir: -1 | 1) => void;
 }
 
-type Option<T> = { value: T; label: string };
+type Val = string | number;
+interface RowBase {
+  id: string;
+  label: string;
+  hint: string;
+}
 type Row =
-  | { key: 'throttleSource' | 'flightMode' | 'ratePreset' | 'quality'; label: string; hint: string; options: Option<string>[] }
-  | { key: 'cameraTiltDeg' | 'fovDeg' | 'volume' | 'deadzone'; label: string; hint: string; range: { min: number; max: number; step: number }; fmt: (v: number) => string }
-  | { key: 'showFps'; label: string; hint: string; bool: true };
+  | (RowBase & { kind: 'enum'; options: { value: Val; label: string }[]; get: (s: Settings) => Val; set: (s: Settings, v: Val) => void })
+  | (RowBase & { kind: 'range'; range: { min: number; max: number; step: number }; fmt: (v: number) => string; get: (s: Settings) => number; set: (s: Settings, v: number) => void })
+  | (RowBase & { kind: 'bool'; on?: string; off?: string; get: (s: Settings) => boolean; set: (s: Settings, v: boolean) => void });
 
-const ROWS: Row[] = [
+type NumKey = 'cameraTiltDeg' | 'fovDeg' | 'volume' | 'deadzone';
+const rangeRow = (id: NumKey, label: string, hint: string, fmt: (v: number) => string): Row => ({
+  id,
+  label,
+  hint,
+  kind: 'range',
+  range: SETTINGS_OPTIONS[id],
+  fmt,
+  get: (s) => s[id],
+  set: (s, v) => {
+    s[id] = v;
+  },
+});
+
+const invertRow = (ch: Channel): Row => ({
+  id: `invert.${ch}`,
+  label: `Reverse ${CH_NAME[ch].toLowerCase()}`,
+  hint: `Flip the ${CH_SHORT[ch]} channel direction`,
+  kind: 'bool',
+  on: 'Reversed',
+  off: 'Normal',
+  get: (s) => s.invert[ch],
+  set: (s, v) => {
+    s.invert[ch] = v;
+  },
+});
+
+const MODE_HINT: Record<number, string> = {
+  1: 'Left: pitch·yaw · Right: throttle·roll',
+  2: 'Left: throttle·yaw · Right: pitch·roll',
+  3: 'Left: pitch·roll · Right: throttle·yaw',
+  4: 'Left: throttle·roll · Right: pitch·yaw',
+};
+
+const ROW_DEFS: Row[] = [
   {
-    key: 'throttleSource',
-    label: 'Throttle',
-    hint: 'Left stick = full-range Mode 2 gimbal · RT = trigger',
-    options: [
-      { value: 'left-stick', label: 'Left stick' },
-      { value: 'right-trigger', label: 'Right trigger' },
-    ],
+    id: 'stickMode',
+    label: 'Stick mode',
+    hint: 'RC transmitter layout (Mode 2 is most common)',
+    kind: 'enum',
+    options: SETTINGS_OPTIONS.stickMode.map((m) => ({ value: m, label: `Mode ${m}` })),
+    get: (s) => s.stickMode,
+    set: (s, v) => {
+      s.stickMode = v as Settings['stickMode'];
+    },
   },
   {
-    key: 'flightMode',
+    id: 'throttleSource',
+    label: 'Throttle source',
+    hint: 'Throttle stick of the mode, or right trigger',
+    kind: 'enum',
+    options: [
+      { value: 'stick', label: 'Stick' },
+      { value: 'trigger', label: 'Right trigger' },
+    ],
+    get: (s) => s.throttleSource,
+    set: (s, v) => {
+      s.throttleSource = v as Settings['throttleSource'];
+    },
+  },
+  {
+    id: 'squareGate',
+    label: 'Square gate',
+    hint: 'Diagonals reach full deflection like an RC gimbal',
+    kind: 'bool',
+    get: (s) => s.squareGate,
+    set: (s, v) => {
+      s.squareGate = v;
+    },
+  },
+  invertRow('throttle'),
+  invertRow('yaw'),
+  invertRow('pitch'),
+  invertRow('roll'),
+  {
+    id: 'flightMode',
     label: 'Flight mode',
-    hint: 'Angle self-levels · Acro is full manual',
+    hint: 'Angle levels itself (DJI "A"/Atti) · Acro holds attitude',
+    kind: 'enum',
     options: [
-      { value: 'angle', label: 'Angle' },
-      { value: 'acro', label: 'Acro' },
+      { value: 'angle', label: "Angle (self-level · 'A/Atti')" },
+      { value: 'acro', label: 'Acro (rate)' },
     ],
+    get: (s) => s.flightMode,
+    set: (s, v) => {
+      s.flightMode = v as Settings['flightMode'];
+    },
   },
   {
-    key: 'ratePreset',
+    id: 'ratePreset',
     label: 'Rates',
     hint: 'Stick sensitivity (Betaflight Actual)',
+    kind: 'enum',
     options: [
       { value: 'beginner', label: 'Beginner' },
       { value: 'freestyle', label: 'Freestyle' },
       { value: 'race', label: 'Race' },
     ],
+    get: (s) => s.ratePreset,
+    set: (s, v) => {
+      s.ratePreset = v as Settings['ratePreset'];
+    },
   },
-  { key: 'cameraTiltDeg', label: 'Camera tilt', hint: 'FPV camera uptilt', range: SETTINGS_OPTIONS.cameraTiltDeg, fmt: (v) => `${Math.round(v)}°` },
-  { key: 'fovDeg', label: 'Field of view', hint: 'FPV lens width', range: SETTINGS_OPTIONS.fovDeg, fmt: (v) => `${Math.round(v)}°` },
+  rangeRow('cameraTiltDeg', 'Camera tilt', 'FPV camera uptilt', (v) => `${Math.round(v)}°`),
+  rangeRow('fovDeg', 'Field of view', 'FPV lens width', (v) => `${Math.round(v)}°`),
   {
-    key: 'quality',
+    id: 'quality',
     label: 'Graphics',
     hint: 'Auto picks a tier from your GPU',
+    kind: 'enum',
     options: SETTINGS_OPTIONS.quality.map((q) => ({ value: q, label: q[0]!.toUpperCase() + q.slice(1) })),
+    get: (s) => s.quality,
+    set: (s, v) => {
+      s.quality = v as Settings['quality'];
+    },
   },
-  { key: 'volume', label: 'Volume', hint: 'Master volume', range: SETTINGS_OPTIONS.volume, fmt: (v) => `${Math.round(v * 100)}%` },
-  { key: 'showFps', label: 'Show FPS', hint: 'Frame-rate counter in the HUD', bool: true },
-  { key: 'deadzone', label: 'Stick deadzone', hint: 'Radial deadzone for worn sticks', range: SETTINGS_OPTIONS.deadzone, fmt: (v) => v.toFixed(2) },
+  rangeRow('volume', 'Volume', 'Master volume', (v) => `${Math.round(v * 100)}%`),
+  {
+    id: 'showFps',
+    label: 'Show FPS',
+    hint: 'Frame-rate counter in the HUD',
+    kind: 'bool',
+    get: (s) => s.showFps,
+    set: (s, v) => {
+      s.showFps = v;
+    },
+  },
+  rangeRow('deadzone', 'Stick deadzone', 'Radial deadzone for worn sticks', (v) => v.toFixed(2)),
 ];
+const ROWS = new Map(ROW_DEFS.map((r) => [r.id, r]));
+const SETTINGS_ROWS = ['stickMode', 'throttleSource', 'flightMode', 'ratePreset', 'cameraTiltDeg', 'fovDeg', 'quality', 'volume', 'showFps', 'deadzone'];
+const CONTROLLER_ROWS = ['stickMode', 'throttleSource', 'squareGate', 'invert.throttle', 'invert.yaw', 'invert.pitch', 'invert.roll'];
+const CHANNELS: readonly Channel[] = ['throttle', 'yaw', 'pitch', 'roll'];
+const SLOT_NAME: Record<StickSlot, string> = { lx: 'LX', ly: 'LY', rx: 'RX', ry: 'RY' };
+const LIVE_TEXT_MS = 50;
+const MAX_AXIS_ROWS = 12;
 
-const html = (s: string): string => s;
+interface LiveEls {
+  wells: Record<'l' | 'r', { dot: HTMLElement; well: HTMLElement; v: HTMLElement; h: HTMLElement }>;
+  chans: Record<Channel, { fill: HTMLElement; us: HTMLElement; pct: HTMLElement }>;
+  devName: HTMLElement;
+  devMap: HTMLElement;
+  devWarn: HTMLElement;
+  axes: HTMLElement;
+  buttons: HTMLElement;
+  remapStatus: HTMLElement;
+  remapBtns: Record<StickSlot, HTMLElement>;
+  title: HTMLElement;
+}
 
 export class Menus {
   current: ScreenName = 'none';
@@ -82,38 +195,69 @@ export class Menus {
   private items: Item[] = [];
   private focus = 0;
   private returnTo: 'main' | 'pause' = 'main';
+  private controllerReturn: ScreenName = 'settings';
   private settings: Settings;
-  private readonly rowEls = new Map<Row['key'], { value: HTMLElement; fill: HTMLElement | null }>();
+  private readonly rowEls = new Map<string, { value: HTMLElement; fill: HTMLElement | null }[]>();
   private readonly finishEls: { time: HTMLElement; best: HTMLElement; badge: HTMLElement };
   private readonly errorMsg: HTMLElement;
   private readonly menuBest: HTMLElement;
+  private readonly controlsBody: HTMLElement;
+  private readonly live: LiveEls;
+  private readonly liveCache = new Map<HTMLElement, string>();
+  private liveTextAt = -Infinity;
+  private axisRows: { fill: HTMLElement; val: HTMLElement }[] = [];
+  private lastInput: InputFrame | null = null;
+  private readonly capture = new AxisCapture();
+  private captureSlot: StickSlot | null = null;
+  private controlsKey = '';
 
   constructor(
     private readonly root: HTMLElement,
     private readonly onAction: (a: UiAction) => void,
     settings: Settings,
   ) {
-    this.settings = { ...settings };
+    this.settings = cloneSettings(settings);
     this.screens.set('main', this.buildMain());
     this.screens.set('settings', this.buildSettings());
-    this.screens.set('controls', this.buildControls());
+    const ctl = this.buildController();
+    this.screens.set('controller', ctl);
+    const controls = this.buildControls();
+    this.screens.set('controls', controls);
     this.screens.set('pause', this.buildPause());
     const fin = this.buildFinish();
     this.screens.set('finish', fin);
     const err = this.buildError();
     this.screens.set('error', err);
-    this.finishEls = {
-      time: fin.querySelector<HTMLElement>('[data-f="time"]')!,
-      best: fin.querySelector<HTMLElement>('[data-f="best"]')!,
-      badge: fin.querySelector<HTMLElement>('[data-f="badge"]')!,
+    const q = <T extends HTMLElement = HTMLElement>(el: HTMLElement, sel: string): T => el.querySelector<T>(sel)!;
+    this.finishEls = { time: q(fin, '[data-f="time"]'), best: q(fin, '[data-f="best"]'), badge: q(fin, '[data-f="badge"]') };
+    this.errorMsg = q(err, '[data-f="msg"]');
+    this.menuBest = q(this.screens.get('main')!, '[data-f="best"]');
+    this.controlsBody = q(controls, '[data-f="body"]');
+    const well = (side: 'l' | 'r') => ({
+      well: q(ctl, `[data-w="${side}"]`),
+      dot: q(ctl, `[data-w="${side}"] .ds-well__dot`),
+      v: q(ctl, `[data-w="${side}v"]`),
+      h: q(ctl, `[data-w="${side}h"]`),
+    });
+    const chan = (c: Channel) => ({ fill: q(ctl, `[data-ch="${c}"] .ds-chan__fill`), us: q(ctl, `[data-ch="${c}"] [data-f="us"]`), pct: q(ctl, `[data-ch="${c}"] [data-f="pct"]`) });
+    this.live = {
+      wells: { l: well('l'), r: well('r') },
+      chans: { throttle: chan('throttle'), yaw: chan('yaw'), pitch: chan('pitch'), roll: chan('roll') },
+      devName: q(ctl, '[data-f="devName"]'),
+      devMap: q(ctl, '[data-f="devMap"]'),
+      devWarn: q(ctl, '[data-f="devWarn"]'),
+      axes: q(ctl, '[data-f="axes"]'),
+      buttons: q(ctl, '[data-f="buttons"]'),
+      remapStatus: q(ctl, '[data-f="remapStatus"]'),
+      remapBtns: { lx: q(ctl, '[data-act="remap-lx"] span'), ly: q(ctl, '[data-act="remap-ly"] span'), rx: q(ctl, '[data-act="remap-rx"] span'), ry: q(ctl, '[data-act="remap-ry"] span') },
+      title: q(ctl, '[data-f="modeTitle"]'),
     };
-    this.errorMsg = err.querySelector<HTMLElement>('[data-f="msg"]')!;
-    this.menuBest = this.screens.get('main')!.querySelector<HTMLElement>('[data-f="best"]')!;
     for (const el of this.screens.values()) root.appendChild(el);
+    this.renderSettings();
   }
 
   setSettings(s: Settings): void {
-    this.settings = { ...s };
+    this.settings = cloneSettings(s);
     this.renderSettings();
   }
 
@@ -129,9 +273,9 @@ export class Menus {
 
   show(name: ScreenName, data?: FinishData): void {
     if (this.current === 'error' && name !== 'error') return;
-    if (name === 'settings' || name === 'controls') {
-      if (this.current === 'main' || this.current === 'pause') this.returnTo = this.current;
-    }
+    if ((name === 'settings' || name === 'controls') && (this.current === 'main' || this.current === 'pause')) this.returnTo = this.current;
+    if (name === 'controller' && this.current !== 'controller') this.controllerReturn = this.current === 'controls' ? 'controls' : 'settings';
+    if (name !== 'controller') this.stopCapture('');
     if (name === 'finish' && data) {
       this.finishEls.time.textContent = formatTime(data.time ?? null);
       this.finishEls.best.textContent = formatTime(data.best ?? null);
@@ -160,17 +304,23 @@ export class Menus {
     }
     const n = this.items.length;
     if (n === 0) return;
-    if (nav.up) this.setFocus((this.focus - 1 + n) % n);
-    if (nav.down) this.setFocus((this.focus + 1) % n);
+    // On the controller screen the sticks are being tested: only d-pad / keys move the focus.
+    const dirOk = this.current !== 'controller' || !this.stickDriven();
+    if (dirOk && nav.up) this.setFocus((this.focus - 1 + n) % n);
+    if (dirOk && nav.down) this.setFocus((this.focus + 1) % n);
     const item = this.items[this.focus];
     if (!item) return;
-    if (nav.left) item.adjust?.(-1);
-    if (nav.right) item.adjust?.(1);
+    if (dirOk && nav.left) item.adjust?.(-1);
+    if (dirOk && nav.right) item.adjust?.(1);
     if (confirm) item.activate?.();
   }
 
   back(): void {
     switch (this.current) {
+      case 'controller':
+        if (this.capture.active) this.stopCapture('Remap cancelled');
+        else this.show(this.controllerReturn);
+        break;
       case 'settings':
       case 'controls':
         this.show(this.returnTo);
@@ -181,6 +331,68 @@ export class Menus {
       default:
         break;
     }
+  }
+
+  /** Live data for the controller setup screen; call every frame while it is open. */
+  updateLive(input: InputFrame, dt: number, now: number): void {
+    this.lastInput = input;
+    if (this.current !== 'controller') return;
+    const L = this.live;
+    const st = input.sticks;
+    this.dot(L.wells.l.dot, st.lx, st.ly);
+    this.dot(L.wells.r.dot, st.rx, st.ry);
+    const c = input.control;
+    for (const ch of CHANNELS) {
+      const v = ch === 'throttle' ? c.throttle : c[ch];
+      this.liveStyle(L.chans[ch].fill, ch === 'throttle' ? `scaleX(${v.toFixed(3)})` : `scaleX(${(v / 2).toFixed(3)})`);
+    }
+    const pad = input.pad;
+    if (pad) {
+      if (pad.axes.length !== this.axisRows.length) this.buildAxisRows(Math.min(pad.axes.length, MAX_AXIS_ROWS));
+      for (let i = 0; i < this.axisRows.length; i++) this.liveStyle(this.axisRows[i]!.fill, `scaleX(${((pad.axes[i] ?? 0) / 2).toFixed(3)})`);
+    } else if (this.axisRows.length) {
+      this.buildAxisRows(0);
+    }
+    if (this.capture.active && pad) {
+      const idx = this.capture.sample(pad.axes, dt);
+      if (idx !== null && this.captureSlot) {
+        if (idx < 0) this.stopCapture('No movement detected — try again');
+        else {
+          const slot = this.captureSlot;
+          this.settings.axisMap[slot] = idx;
+          this.emitSettings();
+          this.stopCapture(`${SLOT_NAME[slot]} → axis ${idx} saved`);
+        }
+      }
+    }
+    if (now - this.liveTextAt < LIVE_TEXT_MS) return;
+    this.liveTextAt = now;
+    for (const ch of CHANNELS) {
+      const v = ch === 'throttle' ? c.throttle : c[ch];
+      const us = ch === 'throttle' ? 1000 + 1000 * v : 1500 + 500 * v;
+      this.liveText(L.chans[ch].us, String(Math.round(us)));
+      this.liveText(L.chans[ch].pct, `${Math.round(v * 100)}%`);
+    }
+    this.liveText(L.devName, pad ? pad.id : input.source === 'keyboard' ? 'Keyboard (virtual sticks: WASD + arrows)' : 'No gamepad — press any button on it');
+    const std = pad ? pad.mapping === 'standard' : true;
+    this.liveText(L.devMap, pad ? (std ? 'standard' : pad.mapping || '(none)') : '—');
+    L.devMap.classList.toggle('is-bad', !std);
+    L.devWarn.hidden = std;
+    if (pad) {
+      for (let i = 0; i < this.axisRows.length; i++) this.liveText(this.axisRows[i]!.val, (pad.axes[i] ?? 0).toFixed(2));
+      let pressed = '';
+      for (let i = 0; i < pad.buttons.length; i++) if ((pad.buttons[i] ?? 0) > 0.5) pressed += `${pressed ? ' ' : ''}B${i}`;
+      this.liveText(L.buttons, pressed || '—');
+    } else {
+      this.liveText(L.buttons, '—');
+    }
+  }
+
+  private stickDriven(): boolean {
+    const inp = this.lastInput;
+    if (!inp || inp.source !== 'gamepad' || !inp.pad) return false;
+    const b = inp.pad.buttons;
+    return !((b[12] ?? 0) > 0.5 || (b[13] ?? 0) > 0.5 || (b[14] ?? 0) > 0.5 || (b[15] ?? 0) > 0.5);
   }
 
   private setFocus(i: number, scroll = true): void {
@@ -197,7 +409,7 @@ export class Menus {
     screen.querySelectorAll<HTMLElement>('[data-nav]').forEach((el) => {
       const item: Item = { el };
       const act = el.dataset.act;
-      const key = el.dataset.key as Row['key'] | undefined;
+      const key = el.dataset.key;
       if (key) {
         item.adjust = (dir) => this.adjust(key, dir);
         item.activate = () => this.adjust(key, 1);
@@ -220,10 +432,22 @@ export class Menus {
         break;
       case 'settings':
       case 'controls':
+      case 'controller':
         this.show(act);
         break;
       case 'back':
         this.back();
+        break;
+      case 'remap-lx':
+      case 'remap-ly':
+      case 'remap-rx':
+      case 'remap-ry':
+        this.startCapture(act.slice(6) as StickSlot);
+        break;
+      case 'remap-reset':
+        this.settings.axisMap = { ...DEFAULT_AXIS_MAP };
+        this.emitSettings();
+        this.stopCapture('Mapping reset to standard (0, 1, 2, 3)');
         break;
       case 'reload':
         location.reload();
@@ -231,41 +455,159 @@ export class Menus {
     }
   }
 
-  private adjust(key: Row['key'], dir: -1 | 1): void {
-    const row = ROWS.find((r) => r.key === key);
-    if (!row) return;
-    const s = this.settings as unknown as Record<string, unknown>;
-    if ('options' in row) {
-      const idx = row.options.findIndex((o) => o.value === s[key]);
-      const n = row.options.length;
-      s[key] = row.options[(Math.max(0, idx) + dir + n) % n]!.value;
-    } else if ('range' in row) {
-      const { min, max, step } = row.range;
-      const v = Math.round((((s[key] as number) + dir * step) / step)) * step;
-      s[key] = Math.min(max, Math.max(min, Number(v.toFixed(4))));
-    } else {
-      s[key] = !s[key];
+  private startCapture(slot: StickSlot): void {
+    const pad = this.lastInput?.pad;
+    if (!pad) {
+      this.stopCapture('Connect a gamepad and press a button on it first');
+      return;
     }
+    this.capture.start(pad.axes);
+    this.captureSlot = slot;
+    const ch = MODE_TABLE[this.settings.stickMode][slot];
+    this.live.remapStatus.textContent = `Move ${SLOT_NAME[slot]} (${CH_NAME[ch]}) fully back and forth now…  B = cancel`;
+    this.live.remapStatus.className = 'ds-remap__status is-live';
+  }
+
+  private stopCapture(msg: string): void {
+    this.capture.cancel();
+    this.captureSlot = null;
+    if (!this.live) return;
+    this.live.remapStatus.textContent = msg;
+    this.live.remapStatus.className = 'ds-remap__status';
+  }
+
+  private adjust(id: string, dir: -1 | 1): void {
+    const row = ROWS.get(id);
+    if (!row) return;
+    const s = this.settings;
+    if (row.kind === 'enum') {
+      const idx = row.options.findIndex((o) => o.value === row.get(s));
+      const n = row.options.length;
+      row.set(s, row.options[(Math.max(0, idx) + dir + n) % n]!.value);
+    } else if (row.kind === 'range') {
+      const { min, max, step } = row.range;
+      const v = Math.round((row.get(s) + dir * step) / step) * step;
+      row.set(s, Math.min(max, Math.max(min, Number(v.toFixed(4)))));
+    } else {
+      row.set(s, !row.get(s));
+    }
+    this.emitSettings();
+  }
+
+  private emitSettings(): void {
     this.renderSettings();
-    this.onAction({ type: 'settings', settings: { ...this.settings } });
+    this.onAction({ type: 'settings', settings: cloneSettings(this.settings) });
   }
 
   private renderSettings(): void {
-    const s = this.settings as unknown as Record<string, unknown>;
-    for (const row of ROWS) {
-      const els = this.rowEls.get(row.key);
-      if (!els) continue;
-      const v = s[row.key];
+    const s = this.settings;
+    for (const [id, list] of this.rowEls) {
+      const row = ROWS.get(id)!;
       let text: string;
       let frac: number | null = null;
-      if ('options' in row) text = row.options.find((o) => o.value === v)?.label ?? String(v);
-      else if ('range' in row) {
-        text = row.fmt(v as number);
-        frac = ((v as number) - row.range.min) / (row.range.max - row.range.min);
-      } else text = v ? 'On' : 'Off';
-      if (els.value.textContent !== text) els.value.textContent = text;
-      if (els.fill && frac !== null) els.fill.style.transform = `scaleX(${frac.toFixed(3)})`;
+      if (row.kind === 'enum') {
+        const v = row.get(s);
+        text = row.options.find((o) => o.value === v)?.label ?? String(v);
+      } else if (row.kind === 'range') {
+        const v = row.get(s);
+        text = row.fmt(v);
+        frac = (v - row.range.min) / (row.range.max - row.range.min);
+      } else {
+        text = row.get(s) ? (row.on ?? 'On') : (row.off ?? 'Off');
+      }
+      for (const els of list) {
+        if (els.value.textContent !== text) els.value.textContent = text;
+        if (els.fill && frac !== null) els.fill.style.transform = `scaleX(${frac.toFixed(3)})`;
+        els.value.classList.toggle('is-alert', row.kind === 'bool' && id.startsWith('invert.') && row.get(s));
+      }
+      if (id === 'stickMode') {
+        for (const els of list) {
+          const h = els.value.closest('.ds-row')?.querySelector<HTMLElement>('.ds-row__hint');
+          if (h) h.textContent = MODE_HINT[s.stickMode]!;
+        }
+      }
     }
+    if (!this.live) return;
+    // Controller screen: mode-dependent labels.
+    const L = this.live;
+    L.title.textContent = `Mode ${s.stickMode}`;
+    const thr = throttleControl(s);
+    for (const side of ['l', 'r'] as const) {
+      const w = L.wells[side];
+      const [v, h] = stickShort(s, side).split('·');
+      w.v.textContent = v!;
+      w.h.textContent = h!;
+      w.well.classList.toggle('is-thr', (side === 'l' && thr === 'left') || (side === 'r' && thr === 'right'));
+    }
+    for (const slot of STICK_SLOTS) L.remapBtns[slot].textContent = `${SLOT_NAME[slot]} · ${CH_SHORT[MODE_TABLE[s.stickMode][slot]]} → axis ${s.axisMap[slot]}`;
+    this.renderControls();
+  }
+
+  private renderControls(): void {
+    const s = this.settings;
+    const key = `${s.stickMode}|${s.throttleSource}`;
+    if (key === this.controlsKey || !this.controlsBody) return;
+    this.controlsKey = key;
+    const pad = padControls(s);
+    const kb = keyboardKeys(s);
+    const thr = throttleControl(s);
+    const map: [string, string, string][] = [
+      ['Throttle', pad.throttle, kb.throttle],
+      ['Yaw', pad.yaw, kb.yaw],
+      ['Pitch', pad.pitch, kb.pitch],
+      ['Roll', pad.roll, kb.roll],
+      ['Arm / disarm', 'A', 'Space'],
+      ['Flight mode', 'Y', 'M'],
+      ['Camera', 'RB', 'C'],
+      ['Reset to checkpoint', 'B', 'R'],
+      ['Pause', 'Menu (☰)', 'Esc'],
+    ];
+    const rows = map.map(([a, x, k]) => `<tr><th scope="row">${a}</th><td>${x}</td><td><kbd class="ds-kbd">${k}</kbd></td></tr>`).join('');
+    const tip =
+      thr === 'rt'
+        ? 'Arming needs throttle at zero: release RT, then press A.'
+        : `Arming needs throttle at zero: hold the ${thr} stick fully down, then press A. The throttle axis does not re-centre in the sim — like a real radio.`;
+    this.controlsBody.innerHTML = `
+      <div class="ds-pad-wrap">${controllerDiagram({ left: stickLong(s, 'l'), right: stickLong(s, 'r'), rt: thr === 'rt' ? 'Throttle' : '—', thr })}</div>
+      <table class="ds-table">
+        <thead><tr><th>Action</th><th>Xbox controller</th><th>Keyboard</th></tr></thead>
+        <tbody>${rows}</tbody>
+      </table>
+      <p class="ds-tip">${tip}</p>`;
+    const t = this.screens.get('controls')?.querySelector('[data-f="modeTag"]');
+    if (t) t.textContent = `Mode ${s.stickMode}`;
+  }
+
+  private buildAxisRows(n: number): void {
+    const box = this.live.axes;
+    box.textContent = '';
+    this.axisRows = [];
+    for (let i = 0; i < n; i++) {
+      const row = document.createElement('div');
+      row.className = 'ds-axis';
+      row.innerHTML = `<span class="ds-axis__i">A${i}</span><span class="ds-axis__bar"><span class="ds-axis__fill"></span></span><span class="ds-axis__v ds-num">0.00</span>`;
+      box.appendChild(row);
+      this.axisRows.push({ fill: row.querySelector<HTMLElement>('.ds-axis__fill')!, val: row.querySelector<HTMLElement>('.ds-axis__v')! });
+    }
+    if (n === 0) box.textContent = '—';
+  }
+
+  private dot(el: HTMLElement, x: number, y: number): void {
+    // Dot is 1/8 of the well; travel ±0.42 well → ±336 % of the dot.
+    this.liveStyle(el, `translate(-50%, -50%) translate(${(x * 336).toFixed(1)}%, ${(-y * 336).toFixed(1)}%)`);
+  }
+
+  private liveStyle(el: HTMLElement, t: string): void {
+    const k = `s:${t}`;
+    if (this.liveCache.get(el) === k) return;
+    this.liveCache.set(el, k);
+    el.style.transform = t;
+  }
+
+  private liveText(el: HTMLElement, t: string): void {
+    if (this.liveCache.get(el) === t) return;
+    this.liveCache.set(el, t);
+    el.textContent = t;
   }
 
   private screen(name: string, inner: string): HTMLElement {
@@ -295,14 +637,42 @@ export class Menus {
     return el;
   }
 
-  private btn(act: string, label: string, primary = false): string {
-    return `<button type="button" class="ds-btn${primary ? ' ds-btn--primary' : ''}" data-nav data-act="${act}"><span>${label}</span></button>`;
+  private btn(act: string, label: string, primary = false, extra = ''): string {
+    return `<button type="button" class="ds-btn${primary ? ' ds-btn--primary' : ''}${extra}" data-nav data-act="${act}"><span>${label}</span></button>`;
+  }
+
+  private rowsHtml(ids: string[]): string {
+    return ids
+      .map((id) => {
+        const r = ROWS.get(id)!;
+        const track = r.kind === 'range' ? `<span class="ds-row__track" aria-hidden="true"><span class="ds-row__fill"></span></span>` : '';
+        return `
+        <div class="ds-row" data-nav data-key="${r.id}" role="group" aria-label="${r.label}">
+          <div class="ds-row__text"><span class="ds-row__label">${r.label}</span><span class="ds-row__hint">${r.hint}</span></div>
+          <div class="ds-row__ctl">
+            <button type="button" class="ds-arrow" data-dir="-1" aria-label="Previous ${r.label}" tabindex="-1">‹</button>
+            <span class="ds-row__value" aria-live="polite"></span>
+            <button type="button" class="ds-arrow" data-dir="1" aria-label="Next ${r.label}" tabindex="-1">›</button>
+            ${track}
+          </div>
+        </div>`;
+      })
+      .join('');
+  }
+
+  private registerRows(el: HTMLElement): void {
+    el.querySelectorAll<HTMLElement>('.ds-row[data-key]').forEach((rowEl) => {
+      const id = rowEl.dataset.key!;
+      const list = this.rowEls.get(id) ?? [];
+      list.push({ value: rowEl.querySelector<HTMLElement>('.ds-row__value')!, fill: rowEl.querySelector<HTMLElement>('.ds-row__fill') });
+      this.rowEls.set(id, list);
+    });
   }
 
   private buildMain(): HTMLElement {
     return this.screen(
       'main',
-      html(`
+      `
       <div class="ds-main">
         <header class="ds-logo">
           <div class="ds-logo__ring" aria-hidden="true"><i></i><i></i></div>
@@ -321,77 +691,92 @@ export class Menus {
           <span><kbd class="ds-kbd ds-kbd--b">B</kbd><kbd class="ds-kbd">Esc</kbd> Back</span>
           <span><kbd class="ds-kbd">D-pad</kbd><kbd class="ds-kbd">↑↓</kbd> Move</span>
         </footer>
-      </div>`),
+      </div>`,
     );
   }
 
   private buildSettings(): HTMLElement {
-    const rows = ROWS.map((r) => {
-      const track = 'range' in r ? `<span class="ds-row__track" aria-hidden="true"><span class="ds-row__fill"></span></span>` : '';
-      return `
-        <div class="ds-row" data-nav data-key="${r.key}" role="group" aria-label="${r.label}">
-          <div class="ds-row__text"><span class="ds-row__label">${r.label}</span><span class="ds-row__hint">${r.hint}</span></div>
-          <div class="ds-row__ctl">
-            <button type="button" class="ds-arrow" data-dir="-1" aria-label="Previous ${r.label}" tabindex="-1">‹</button>
-            <span class="ds-row__value" aria-live="polite"></span>
-            <button type="button" class="ds-arrow" data-dir="1" aria-label="Next ${r.label}" tabindex="-1">›</button>
-            ${track}
-          </div>
-        </div>`;
-    }).join('');
     const el = this.screen(
       'settings',
-      html(`
+      `
       <div class="ds-panel ds-glass ds-dialog ds-dialog--wide">
         <h2 class="ds-dialog__title">Settings</h2>
-        <div class="ds-rows">${rows}</div>
-        <div class="ds-dialog__actions">${this.btn('back', 'Back')}</div>
+        <div class="ds-rows">${this.rowsHtml(SETTINGS_ROWS)}</div>
+        <div class="ds-dialog__actions">${this.btn('controller', 'Controller setup ›', false, ' ds-btn--ghost')}${this.btn('back', 'Back')}</div>
         <p class="ds-foot ds-foot--inline"><span><kbd class="ds-kbd">←</kbd><kbd class="ds-kbd">→</kbd> Change</span><span><kbd class="ds-kbd ds-kbd--b">B</kbd> Back</span></p>
-      </div>`),
+      </div>`,
     );
-    el.querySelectorAll<HTMLElement>('.ds-row').forEach((rowEl) => {
-      const key = rowEl.dataset.key as Row['key'];
-      this.rowEls.set(key, { value: rowEl.querySelector<HTMLElement>('.ds-row__value')!, fill: rowEl.querySelector<HTMLElement>('.ds-row__fill') });
-    });
-    this.renderSettings();
+    this.registerRows(el);
+    return el;
+  }
+
+  private buildController(): HTMLElement {
+    const well = (side: 'l' | 'r', name: string) => `
+      <figure class="ds-cwell-box">
+        <span class="ds-cwell__v" data-w="${side}v">THR</span>
+        <div class="ds-well ds-well--big" data-w="${side}"><i class="ds-well__cross"></i><i class="ds-well__rail"></i><i class="ds-well__dot"></i></div>
+        <span class="ds-cwell__h" data-w="${side}h">YAW</span>
+        <figcaption>${name}</figcaption>
+      </figure>`;
+    const chans = CHANNELS.map(
+      (c) => `
+        <div class="ds-chan${c === 'throttle' ? ' ds-chan--thr' : ''}" data-ch="${c}">
+          <span class="ds-chan__name">${CH_SHORT[c]}</span>
+          <span class="ds-chan__bar"><span class="ds-chan__mid"></span><span class="ds-chan__fill"></span></span>
+          <span class="ds-num ds-chan__us"><b data-f="us">1500</b> µs</span>
+          <span class="ds-num ds-chan__pct" data-f="pct">0%</span>
+        </div>`,
+    ).join('');
+    const remap = STICK_SLOTS.map((s) => this.btn(`remap-${s}`, SLOT_NAME[s], false, ' ds-btn--sm')).join('');
+    const el = this.screen(
+      'controller',
+      `
+      <div class="ds-panel ds-glass ds-dialog ds-dialog--xwide ds-ctl">
+        <h2 class="ds-dialog__title">Controller setup <small data-f="modeTitle">Mode 2</small></h2>
+        <div class="ds-ctl__grid">
+          <section class="ds-ctl__col">
+            <div class="ds-ctl__sticks">${well('l', 'Left stick')}${well('r', 'Right stick')}</div>
+            <div class="ds-rows">${this.rowsHtml(CONTROLLER_ROWS)}</div>
+          </section>
+          <section class="ds-ctl__col">
+            <h3 class="ds-h3">Channels</h3>
+            <div class="ds-chans">${chans}</div>
+            <h3 class="ds-h3">Device</h3>
+            <div class="ds-dev">
+              <p class="ds-dev__name" data-f="devName">—</p>
+              <p class="ds-dev__meta"><span class="ds-label">Mapping</span> <span class="ds-dev__map" data-f="devMap">—</span>
+                <span class="ds-label">Buttons</span> <span class="ds-num" data-f="buttons">—</span></p>
+              <p class="ds-dev__warn" data-f="devWarn" hidden>Non-standard mapping — sticks may be on other axes. Use Remap below.</p>
+              <div class="ds-axes" data-f="axes">—</div>
+            </div>
+            <h3 class="ds-h3">Axis mapping</h3>
+            <div class="ds-remap">${remap}${this.btn('remap-reset', 'Reset mapping', false, ' ds-btn--sm')}</div>
+            <p class="ds-remap__status" data-f="remapStatus">Select a stick axis, then move that stick.</p>
+          </section>
+        </div>
+        <div class="ds-dialog__actions">${this.btn('back', 'Back', true)}</div>
+      </div>`,
+    );
+    this.registerRows(el);
     return el;
   }
 
   private buildControls(): HTMLElement {
-    const map: [string, string, string][] = [
-      ['Throttle', 'Left stick ↕ (full range) · or RT', 'W / S (ramped)'],
-      ['Yaw', 'Left stick ↔', 'A / D'],
-      ['Pitch', 'Right stick ↕', '↑ / ↓'],
-      ['Roll', 'Right stick ↔', '← / →'],
-      ['Arm / disarm', 'A', 'Space'],
-      ['Flight mode', 'Y', 'M'],
-      ['Camera', 'RB', 'C'],
-      ['Reset to checkpoint', 'B', 'R'],
-      ['Pause', 'Menu (☰)', 'Esc'],
-    ];
-    const rows = map
-      .map(([a, x, k]) => `<tr><th scope="row">${a}</th><td>${x}</td><td><kbd class="ds-kbd">${k}</kbd></td></tr>`)
-      .join('');
     return this.screen(
       'controls',
-      html(`
+      `
       <div class="ds-panel ds-glass ds-dialog ds-dialog--wide">
-        <h2 class="ds-dialog__title">Controls <small>Mode 2</small></h2>
-        <div class="ds-pad-wrap">${CONTROLLER_DIAGRAM}</div>
-        <table class="ds-table">
-          <thead><tr><th>Action</th><th>Xbox controller</th><th>Keyboard</th></tr></thead>
-          <tbody>${rows}</tbody>
-        </table>
-        <p class="ds-tip">Arming needs throttle at zero. Hold the left stick fully down (or release RT) and press A.</p>
-        <div class="ds-dialog__actions">${this.btn('back', 'Back', true)}</div>
-      </div>`),
+        <h2 class="ds-dialog__title">Controls <small data-f="modeTag">Mode 2</small></h2>
+        <div data-f="body"></div>
+        <div class="ds-dialog__actions">${this.btn('controller', 'Controller setup ›', false, ' ds-btn--ghost')}${this.btn('back', 'Back', true)}</div>
+      </div>`,
     );
   }
 
   private buildPause(): HTMLElement {
     return this.screen(
       'pause',
-      html(`
+      `
       <div class="ds-panel ds-glass ds-dialog">
         <h2 class="ds-dialog__title">Paused</h2>
         <nav class="ds-menu">
@@ -401,14 +786,14 @@ export class Menus {
           ${this.btn('controls', 'Controls')}
           ${this.btn('menu', 'Main menu')}
         </nav>
-      </div>`),
+      </div>`,
     );
   }
 
   private buildFinish(): HTMLElement {
     return this.screen(
       'finish',
-      html(`
+      `
       <div class="ds-panel ds-glass ds-dialog ds-finish">
         <p class="ds-finish__kicker">Finish</p>
         <span class="ds-badge-new" data-f="badge" hidden>New best</span>
@@ -418,19 +803,19 @@ export class Menus {
           ${this.btn('retry', 'Retry', true)}
           ${this.btn('menu', 'Menu')}
         </nav>
-      </div>`),
+      </div>`,
     );
   }
 
   private buildError(): HTMLElement {
     return this.screen(
       'error',
-      html(`
+      `
       <div class="ds-panel ds-glass ds-dialog ds-error">
         <h2 class="ds-dialog__title">Can't start the simulator</h2>
         <p class="ds-error__msg" data-f="msg"></p>
         <div class="ds-dialog__actions">${this.btn('reload', 'Reload', true)}</div>
-      </div>`),
+      </div>`,
     );
   }
 }

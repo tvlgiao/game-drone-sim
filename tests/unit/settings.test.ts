@@ -18,7 +18,11 @@ function mem(initial: Record<string, string> = {}): Storage {
 describe('settings', () => {
   it('defaults match the spec', () => {
     expect(DEFAULT_SETTINGS).toEqual({
-      throttleSource: 'left-stick',
+      stickMode: 2,
+      throttleSource: 'stick',
+      squareGate: true,
+      invert: { throttle: false, yaw: false, pitch: false, roll: false },
+      axisMap: { lx: 0, ly: 1, rx: 2, ry: 3 },
       flightMode: 'angle',
       ratePreset: 'freestyle',
       cameraTiltDeg: 25,
@@ -34,7 +38,11 @@ describe('settings', () => {
     const a = loadSettings(null);
     expect(a).toEqual(DEFAULT_SETTINGS);
     a.volume = 0;
+    a.invert.pitch = true;
+    a.axisMap.ly = 5;
     expect(DEFAULT_SETTINGS.volume).toBe(0.7);
+    expect(DEFAULT_SETTINGS.invert.pitch).toBe(false);
+    expect(DEFAULT_SETTINGS.axisMap.ly).toBe(1);
     expect(loadSettings(mem())).toEqual(DEFAULT_SETTINGS);
   });
 
@@ -68,7 +76,11 @@ describe('settings', () => {
       deadzone: Number.NaN,
     });
     expect(s).toEqual({
-      throttleSource: 'left-stick',
+      stickMode: 2,
+      throttleSource: 'stick',
+      squareGate: true,
+      invert: { throttle: false, yaw: false, pitch: false, roll: false },
+      axisMap: { lx: 0, ly: 1, rx: 2, ry: 3 },
       flightMode: 'acro',
       ratePreset: 'freestyle',
       cameraTiltDeg: 45,
@@ -82,8 +94,39 @@ describe('settings', () => {
 
   it('round-trips through storage', () => {
     const st = mem();
-    const custom = { ...DEFAULT_SETTINGS, throttleSource: 'right-trigger' as const, fovDeg: 120, showFps: false };
+    const custom = {
+      ...DEFAULT_SETTINGS,
+      stickMode: 1 as const,
+      throttleSource: 'trigger' as const,
+      squareGate: false,
+      invert: { throttle: false, yaw: true, pitch: false, roll: true },
+      axisMap: { lx: 0, ly: 1, rx: 3, ry: 4 },
+      fovDeg: 120,
+      showFps: false,
+    };
     saveSettings(custom, st);
     expect(loadSettings(st)).toEqual(custom);
+  });
+
+  it('migrates old throttleSource values and keeps other old fields', () => {
+    const old = (ts: string) => loadSettings(mem({ [SETTINGS_KEY]: JSON.stringify({ throttleSource: ts, fovDeg: 120, flightMode: 'acro' }) }));
+    expect(old('left-stick')).toMatchObject({ throttleSource: 'stick', stickMode: 2, squareGate: true, fovDeg: 120, flightMode: 'acro' });
+    expect(old('right-trigger').throttleSource).toBe('trigger');
+  });
+
+  it('validates stick mode, square gate, invert flags and axis map', () => {
+    const s = validateSettings({
+      stickMode: 5,
+      squareGate: 'yes',
+      invert: { throttle: true, yaw: 1, pitch: null },
+      axisMap: { lx: 7, ly: -1, rx: 2.5, ry: 99 },
+    });
+    expect(s.stickMode).toBe(2);
+    expect(s.squareGate).toBe(true);
+    expect(s.invert).toEqual({ throttle: true, yaw: false, pitch: false, roll: false });
+    expect(s.axisMap).toEqual({ lx: 7, ly: 1, rx: 2, ry: 3 });
+    for (const m of [1, 3, 4] as const) expect(validateSettings({ stickMode: m }).stickMode).toBe(m);
+    expect(validateSettings({ stickMode: '1' }).stickMode).toBe(2);
+    expect(validateSettings({ invert: [true], axisMap: 'x' }).invert.throttle).toBe(false);
   });
 });

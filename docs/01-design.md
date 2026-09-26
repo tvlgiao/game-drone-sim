@@ -31,7 +31,25 @@ Menu ──► Countdown (3-2-1) ──► Racing ──► Finished (time, best
 - Free-fly mode: no timer, rings optional.
 - Best time persisted in `localStorage` (try/catch).
 
-## 3. Controls (Mode 2, like a real radio)
+## 3. Controls (real RC stick modes)
+
+Stick mode selectable like a real transmitter (Settings → Controller setup), default Mode 2:
+
+| Mode | Left stick X / Y | Right stick X / Y |
+|---|---|---|
+| 1 | Yaw / Pitch | Roll / **Throttle** |
+| 2 (default) | Yaw / **Throttle** | Roll / Pitch |
+| 3 | Roll / Pitch | Yaw / **Throttle** |
+| 4 | Roll / **Throttle** | Yaw / Pitch |
+
+Gamepad → RC gimbal fidelity: throttle axis full range (down 0 %, up 100 %), optional RT throttle;
+circle→square gate mapping (elliptical-grid inverse) so each axis reaches ±1 on diagonals like a
+square-gate gimbal; per-channel reverse; axis remap for non-standard pads; live channel monitor in
+µs (1000–2000) like Betaflight's Receiver tab. Keyboard = virtual sticks (WASD left, arrows right),
+the throttle axis holds its position, the others self-centre. "Mode A" on DJI radios is the
+Attitude *flight* mode = our Angle mode.
+
+Default Mode 2 mapping:
 
 | Action | Xbox | Keyboard |
 |---|---|---|
