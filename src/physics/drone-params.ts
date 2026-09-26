@@ -24,6 +24,10 @@ export interface DroneParams {
   propRadius: number;
   colliderRadius: number;
   propColliderRadius: number;
+  /**
+   * full/empty resting volts; sagPerThrust = volts lost per unit of summed normalised thrust (0..4);
+   * capacityS = summed-normalised-thrust·seconds until empty (hover ≈ 0.88/s ⇒ ~5.5 min)
+   */
   battery: { full: number; empty: number; sagPerThrust: number; capacityS: number };
   /** motor idle fraction when armed */
   idle: number;
@@ -40,12 +44,12 @@ export const DEFAULT_DRONE: DroneParams = {
   tauUp: 0.025,
   tauDown: 0.04,
   yawTorqueCoef: 0.012,
-  dragCdA: [0.0035, 0.006, 0.0035],
+  dragCdA: [0.012, 0.018, 0.012],
   rotorDrag: 0.08,
   propRadius: 0.038,
   colliderRadius: 0.075,
   propColliderRadius: 0.04,
-  battery: { full: 16.8, empty: 14.0, sagPerThrust: 0.12, capacityS: 300 },
+  battery: { full: 16.8, empty: 14.0, sagPerThrust: 0.08, capacityS: 300 },
   idle: 0.055,
 };
 
@@ -56,6 +60,9 @@ export const MOTOR_LAYOUT: readonly MotorSpec[] = [
   { position: [-D, 0.02, -D], spin: -1 },
   { position: [D, 0.02, D], spin: -1 },
 ];
+
+/** Body-frame offset of the centre collider sphere: above the COM so a landed quad rocks back level. */
+export const CENTER_COLLIDER_OFFSET: [number, number, number] = [0, 0.03, 0];
 
 export const GRAVITY = 9.81;
 export const AIR_DENSITY = 1.225;

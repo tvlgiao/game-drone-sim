@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#05070d" />
+    <title>Drone Sim — UI preview</title>
+    <link rel="icon" href="data:," />
+    <style>
+      html, body { margin: 0; height: 100%; background: #05070d; overflow: hidden; }
+      #app { position: fixed; inset: 0; }
+      /* Fake dark loft scene so HUD contrast can be judged without WebGL. */
+      #scene {
+        position: absolute; inset: 0;
+        background:
+          radial-gradient(ellipse 30% 22% at 62% 46%, transparent 62%, rgba(40, 231, 255, 0.9) 64%, rgba(40, 231, 255, 0.25) 70%, transparent 74%),
+          radial-gradient(ellipse 12% 9% at 30% 44%, transparent 60%, rgba(255, 61, 232, 0.8) 63%, rgba(255, 61, 232, 0.2) 70%, transparent 74%),
+          radial-gradient(ellipse 60% 35% at 50% 100%, rgba(120, 90, 60, 0.35), transparent 70%),
+          radial-gradient(circle at 80% 18%, rgba(255, 190, 120, 0.55), transparent 7%),
+          radial-gradient(circle at 18% 22%, rgba(255, 190, 120, 0.4), transparent 5%),
+          linear-gradient(180deg, #0b1220 0%, #121a26 55%, #1d1a18 56%, #0c0b0a 100%);
+      }
+      #ui { position: absolute; inset: 0; pointer-events: none; }
+    </style>
+  </head>
+  <body>
+    <div id="app">
+      <div id="scene" aria-hidden="true"></div>
+      <div id="ui"></div>
+    </div>
+    <script type="module" src="/src/ui/preview.ts"></script>
+  </body>
+</html>

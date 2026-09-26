@@ -1,0 +1,22 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#05070d" />
+    <title>Drone Sim — FPV Loft</title>
+    <style>
+      html, body { margin: 0; height: 100%; background: #05070d; overflow: hidden; }
+      #app { position: fixed; inset: 0; }
+      #game { display: block; width: 100%; height: 100%; outline: none; touch-action: none; }
+      #ui { position: absolute; inset: 0; pointer-events: none; }
+    </style>
+  </head>
+  <body>
+    <div id="app">
+      <canvas id="game" tabindex="0" aria-label="Drone simulator 3D view"></canvas>
+      <div id="ui"></div>
+    </div>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>
