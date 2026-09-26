@@ -44,8 +44,9 @@ void main() {
   vColor = aColor;
   vKind = kind;
   vec4 mvPosition = modelViewMatrix * vec4(p, 1.0);
+  vAlpha *= smoothstep(0.12, 0.6, -mvPosition.z);
   gl_Position = projectionMatrix * mvPosition;
-  gl_PointSize = clamp(size * uPx / max(0.05, -mvPosition.z), 0.0, kind > 0.5 && kind < 1.5 ? 18.0 : (kind > 1.5 ? 72.0 : 48.0));
+  gl_PointSize = clamp(size * uPx / max(0.05, -mvPosition.z), 0.0, kind > 0.5 && kind < 1.5 ? 18.0 : (kind > 1.5 ? 64.0 : 32.0));
   #include <fog_vertex>
 }`;
 
