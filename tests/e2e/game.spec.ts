@@ -7,6 +7,8 @@ interface DroneHook {
   tier: string;
   armed: boolean;
   camera: string;
+  audio: string;
+  screen: string;
   stats: () => { calls: number; triangles: number };
   setControl: (c: { throttle: number; yaw: number; pitch: number; roll: number } | null) => void;
   press: (name: string) => void;
@@ -149,5 +151,42 @@ test('manual reset respawns and simulation keeps running', async ({ page }) => {
   await page.waitForTimeout(300);
   const p = await page.evaluate(() => window.__drone.state.position);
   expect(Math.hypot(p.x + 9, p.z - 5.8)).toBeLessThan(0.3);
+  expect(errors).toEqual([]);
+});
+
+test('HUD quit button asks for confirmation; cancel resumes, confirm returns to menu', async ({ page }) => {
+  await boot(page);
+  await page.evaluate(() => window.__drone.action({ type: 'freefly' }));
+  await page.getByRole('button', { name: 'Quit flight' }).click();
+  expect(await page.evaluate(() => [window.__drone.screen, window.__drone.race.status])).toEqual(['confirm-quit', 'paused']);
+  await page.getByRole('button', { name: 'Cancel' }).click();
+  expect(await page.evaluate(() => [window.__drone.screen, window.__drone.race.status])).toEqual(['none', 'freefly']);
+  await page.getByRole('button', { name: 'Quit flight' }).click();
+  await page.locator('[data-act="menu"]:visible').first().click();
+  expect(await page.evaluate(() => [window.__drone.screen, window.__drone.race.status])).toEqual(['main', 'menu']);
+});
+
+test('sound stops when the window is hidden and when quitting the game', async ({ page }) => {
+  await boot(page);
+  await page.getByRole('button', { name: 'Free Fly' }).click(); // real gesture → audio starts
+  await page.waitForFunction(() => window.__drone.audio === 'running');
+  await page.evaluate(() => {
+    Object.defineProperty(document, 'hidden', { configurable: true, get: () => true });
+    document.dispatchEvent(new Event('visibilitychange'));
+  });
+  await page.waitForFunction(() => window.__drone.audio === 'suspended');
+  expect(await page.evaluate(() => window.__drone.race.status)).toBe('paused');
+  await page.evaluate(() => {
+    Object.defineProperty(document, 'hidden', { configurable: true, get: () => false });
+    document.dispatchEvent(new Event('visibilitychange'));
+  });
+  await page.waitForFunction(() => window.__drone.audio === 'running');
+
+  await page.evaluate(() => window.__drone.action({ type: 'menu' }));
+  await page.getByRole('button', { name: 'Quit', exact: true }).click();
+  await page.waitForFunction(() => window.__drone.audio === 'suspended');
+  expect(await page.evaluate(() => window.__drone.screen)).toBe('bye');
+  await page.waitForTimeout(300); // a late resume() must not bring the sound back
+  expect(await page.evaluate(() => window.__drone.audio)).toBe('suspended');
   expect(errors).toEqual([]);
 });

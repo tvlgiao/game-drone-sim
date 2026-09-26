@@ -117,7 +117,7 @@ function boot(): void {
   }
 
   function onAction(a: UiAction): void {
-    void audio.resume();
+    if (a.type !== 'exit') void audio.resume();
     switch (a.type) {
       case 'race':
       case 'retry':
@@ -131,7 +131,15 @@ function boot(): void {
         hud.showScreen('none');
         loop.reset();
         break;
+      case 'request-quit':
+        if (FLYING.has(race.snapshot().status)) race.pause();
+        hud.showScreen('confirm-quit');
+        break;
+      case 'exit':
+        exitGame();
+        break;
       case 'menu':
+        exited = false;
         race.toMenu();
         placeDrone(spawnPos, LOFT_LEVEL.spawn.yaw);
         hud.showScreen('main');
@@ -193,16 +201,38 @@ function boot(): void {
   }
 
   // Autoplay policy: audio starts on the first real user gesture.
-  const unlock = (): void => void audio.resume();
+  const unlock = (): void => {
+    if (!exited) void audio.resume();
+  };
   window.addEventListener('pointerdown', unlock, { once: true });
   window.addEventListener('keydown', unlock, { once: true });
 
+  let exited = false;
+
+  /** Leave the game: stop all sound, drop fullscreen, close the tab when the browser allows it. */
+  function exitGame(): void {
+    exited = true;
+    race.toMenu();
+    placeDrone(spawnPos, LOFT_LEVEL.spawn.yaw);
+    void audio.suspend();
+    if (document.fullscreenElement) void document.exitFullscreen().catch(() => undefined);
+    window.close(); // only works for script-opened windows; otherwise the "closed" screen stays
+    hud.showScreen('bye');
+  }
+
+  // Sound must stop whenever the window is hidden, minimised or closed.
   document.addEventListener('visibilitychange', () => {
-    if (document.hidden && FLYING.has(race.snapshot().status) && race.snapshot().status !== 'crashed') {
-      race.pause();
-      hud.showScreen('pause');
+    if (document.hidden) {
+      void audio.suspend();
+      if (FLYING.has(race.snapshot().status) && race.snapshot().status !== 'crashed') {
+        race.pause();
+        hud.showScreen('pause');
+      }
+    } else if (!exited) {
+      void audio.resume();
     }
   });
+  window.addEventListener('pagehide', () => audio.dispose());
 
   const resize = (): void => view.resize(canvas.clientWidth, canvas.clientHeight);
   new ResizeObserver(resize).observe(canvas);
@@ -229,7 +259,7 @@ function boot(): void {
       }
       hasInjected = false;
     }
-    if (inp.buttons.confirm || inp.buttons.arm) void audio.resume();
+    if (!exited && (inp.buttons.confirm || inp.buttons.arm)) void audio.resume();
 
     const status = race.snapshot().status;
     const flying = FLYING.has(status);
@@ -321,6 +351,12 @@ function boot(): void {
       return cameraMode;
     },
     stats: () => view.stats(),
+    get audio() {
+      return audio.state;
+    },
+    get screen() {
+      return hud.screen;
+    },
     setControl(c: ControlInput | null) {
       override = c;
     },

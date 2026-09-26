@@ -1815,3 +1815,30 @@
   .ds-table th, .ds-table td { padding: 5px 6px; }
   .ds-logo__sub { letter-spacing: 0.3em; }
 }
+
+/* Quit controls */
+.ds-chip--quit {
+  pointer-events: auto;
+  cursor: pointer;
+  font: inherit;
+  color: #ffb4c0;
+  border-color: rgba(255, 90, 120, 0.45);
+  background: rgba(60, 10, 22, 0.55);
+  transition: background 0.15s, border-color 0.15s, color 0.15s;
+}
+.ds-chip--quit:hover,
+.ds-chip--quit:focus-visible {
+  color: #fff;
+  background: rgba(200, 40, 80, 0.7);
+  border-color: rgba(255, 120, 150, 0.9);
+  outline: none;
+}
+.ds-ui.has-screen .ds-chip--quit { visibility: hidden; }
+.ds-btn--quit span { color: #ff9fb1; }
+.ds-dialog__text {
+  margin: 0 0 18px;
+  color: rgba(220, 232, 255, 0.72);
+  font-size: 14px;
+  line-height: 1.5;
+  max-width: 34ch;
+}

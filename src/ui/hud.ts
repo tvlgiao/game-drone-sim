@@ -43,6 +43,7 @@ type Ref =
   | 'armed'
   | 'armedText'
   | 'fps'
+  | 'quit'
   | 'center'
   | 'centerSub'
   | 'hint'
@@ -84,6 +85,7 @@ const HUD_HTML = `
     <span class="ds-chip ds-chip--mode" data-r="mode">ANGLE</span>
     <span class="ds-chip" data-r="cam">FPV</span>
     <span class="ds-chip ds-chip--fps" data-r="fps">— fps</span>
+    <button type="button" class="ds-chip ds-chip--quit" data-r="quit" aria-label="Quit flight">✕ Quit</button>
   </div>
   <div class="ds-center">
     <div class="ds-center__big" data-r="center"></div>
@@ -146,6 +148,7 @@ export class Hud {
     });
     this.refs = refs;
     this.menus = new Menus(root, onAction, { ...DEFAULT_SETTINGS });
+    refs.quit.addEventListener('click', () => onAction({ type: 'request-quit' }));
     this.setStatus('menu');
     this.setSource('none', null);
   }
@@ -203,7 +206,7 @@ export class Hud {
     this.updateSticks(f.input);
   }
 
-  showScreen(s: 'main' | 'pause' | 'finish' | 'none' | 'settings' | 'controls' | 'controller' | 'rates', data?: FinishData & { best?: number | null }): void {
+  showScreen(s: 'main' | 'pause' | 'finish' | 'none' | 'settings' | 'controls' | 'controller' | 'rates' | 'confirm-quit' | 'bye', data?: FinishData & { best?: number | null }): void {
     if (s === 'main' && data && 'best' in data) this.menus.setMenuBest(data.best ?? null);
     this.menus.show(s as ScreenName, data);
   }

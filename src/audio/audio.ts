@@ -38,10 +38,12 @@ export class GameAudio {
   private volume = 0.7;
   private lastUpdate = 0;
   private failed = false;
+  private wantRunning = false;
 
   /** Creates (first call) and resumes the AudioContext. Call from a user gesture. */
   async resume(): Promise<void> {
     if (this.failed) return;
+    this.wantRunning = true;
     if (!this.ctx) {
       const Ctor = audioCtor();
       if (!Ctor) {
@@ -60,10 +62,17 @@ export class GameAudio {
     if (this.ctx.state !== 'running') {
       try {
         await this.ctx.resume();
+        // a suspend() issued while resume() was pending wins
+        if (!this.wantRunning) await this.ctx.suspend();
       } catch {
         /* resume blocked until a later gesture */
       }
     }
+  }
+
+  /** AudioContext state for diagnostics/tests: 'none' before the first gesture. */
+  get state(): AudioContextState | 'none' {
+    return this.ctx ? this.ctx.state : 'none';
   }
 
   get ready(): boolean {
@@ -160,6 +169,18 @@ export class GameAudio {
         this.tone(e.armed ? 880 : 440, t, 0.08, 'square', 0.08);
         this.tone(e.armed ? 1318.5 : 330, t + 0.09, 0.1, 'square', 0.08);
         break;
+    }
+  }
+
+  /** Silences everything immediately (tab hidden, quit); resume() brings it back. */
+  async suspend(): Promise<void> {
+    this.wantRunning = false;
+    if (this.ctx && this.ctx.state === 'running') {
+      try {
+        await this.ctx.suspend();
+      } catch {
+        /* already closed */
+      }
     }
   }
 
