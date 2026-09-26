@@ -47,6 +47,8 @@ describe('settings', () => {
       volume: 0.7,
       showFps: true,
       deadzone: 0.05,
+      touchThrottleCentre: false,
+      touchSticksFixed: false,
     });
   });
 
@@ -90,6 +92,8 @@ describe('settings', () => {
       volume: -3,
       showFps: 'yes',
       deadzone: Number.NaN,
+      touchThrottleCentre: 'on',
+      touchSticksFixed: true,
     });
     expect(s).toEqual({
       stickMode: 2,
@@ -111,6 +115,8 @@ describe('settings', () => {
       volume: 0,
       showFps: true,
       deadzone: 0.05,
+      touchThrottleCentre: false,
+      touchSticksFixed: true,
     });
   });
 

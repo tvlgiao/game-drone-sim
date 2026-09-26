@@ -48,6 +48,10 @@ export interface Settings {
   volume: number;
   showFps: boolean;
   deadzone: number;
+  /** touch sticks: throttle springs back to centre (hover) instead of holding like a real gimbal */
+  touchThrottleCentre: boolean;
+  /** touch sticks stay at fixed positions instead of spawning under the thumb */
+  touchSticksFixed: boolean;
 }
 
 export const SETTINGS_KEY = 'drone-sim.settings';
@@ -76,6 +80,8 @@ export const DEFAULT_SETTINGS: Readonly<Settings> = Object.freeze({
   volume: 0.7,
   showFps: true,
   deadzone: 0.05,
+  touchThrottleCentre: false,
+  touchSticksFixed: false,
 });
 
 /** Allowed values / numeric ranges, shared with the settings screens. */
@@ -228,6 +234,8 @@ export function validateSettings(raw: unknown): Settings {
     volume: num(r.volume, o.volume, d.volume),
     showFps: bool(r.showFps, d.showFps),
     deadzone: num(r.deadzone, o.deadzone, d.deadzone),
+    touchThrottleCentre: bool(r.touchThrottleCentre, d.touchThrottleCentre),
+    touchSticksFixed: bool(r.touchSticksFixed, d.touchSticksFixed),
   };
 }
 
