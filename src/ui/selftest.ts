@@ -17,6 +17,7 @@ export interface SelfTestHook {
   readonly pixelRatio: number;
   readonly renderScale: number;
   readonly touchVisible: boolean;
+  readonly rotateOverlay: boolean;
   readonly source: string;
   readonly device: DeviceInfo;
   touch: { layer: HTMLElement | null; sticks: TouchSticks };
@@ -69,6 +70,10 @@ export async function runSelfTest(h: SelfTestHook, stickMode: StickModeNum = 2):
   let moved = 0;
   let landedY = NaN;
   try {
+    // Phones in portrait show the rotate overlay (and pause): wait for landscape first.
+    if (h.rotateOverlay) status('Rotate to landscape to start…');
+    while (h.rotateOverlay) await sleep(200);
+    await sleep(500);
     status('Starting free fly…');
     h.action({ type: 'freefly' });
     if (!layer) throw new Error('no touch layer (not a touch device)');
@@ -165,6 +170,7 @@ export async function runSelfTest(h: SelfTestHook, stickMode: StickModeNum = 2):
     { name: 'FPS', ok: fps >= 50, detail: `${fps.toFixed(1)} (target 60)`, soft: true },
     { name: 'Tier / DPR / scale', ok: true, detail: `${h.tier} · ${h.pixelRatio.toFixed(2)} · ${h.renderScale.toFixed(2)}`, soft: true },
     { name: 'Device', ok: true, detail: `${d.form}${d.ios ? ' · iOS' : ''}${d.standalone ? ' · home-screen app' : ''}`, soft: true },
+    { name: 'Viewport', ok: true, detail: `${window.innerWidth}×${window.innerHeight} · zoom ${(window.visualViewport?.scale ?? 1).toFixed(2)} · dpr ${window.devicePixelRatio}`, soft: true },
     { name: 'Fullscreen API', ok: true, detail: d.standalone ? 'n/a (standalone)' : d.fullscreen ? 'supported' : 'unsupported → Add to Home Screen', soft: true },
   ];
   result.checks = c;
@@ -188,7 +194,7 @@ function makePanel(): Panel {
   root.className = 'ds-selftest';
   root.style.cssText =
     'position:fixed;z-index:100;top:max(8px,env(safe-area-inset-top));left:50%;transform:translateX(-50%);width:min(460px,calc(100% - 24px));max-height:calc(100% - 16px);overflow:auto;' +
-    'padding:10px 14px;border-radius:12px;background:rgba(4,8,16,.86);border:1px solid rgba(40,231,255,.45);color:#eaf6ff;font:12px/1.4 ui-monospace,Menlo,monospace;pointer-events:auto;';
+    'box-sizing:border-box;padding:10px 14px;border-radius:12px;background:rgba(4,8,16,.86);border:1px solid rgba(40,231,255,.45);color:#eaf6ff;font:12px/1.4 ui-monospace,Menlo,monospace;pointer-events:auto;';
   const title = document.createElement('div');
   title.style.cssText = 'font-weight:800;letter-spacing:.14em;margin-bottom:4px';
   title.textContent = 'SELFTEST · touch flight';
