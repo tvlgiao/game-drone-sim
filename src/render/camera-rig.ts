@@ -3,8 +3,8 @@ import * as THREE from 'three';
 import type { CameraMode, DroneState } from '../types';
 import { CAMERA_PIVOT, LENS_OFFSET } from './drone-model';
 
-const CHASE_BACK = 0.62;
-const CHASE_UP = 0.2;
+const CHASE_BACK = 1.0;
+const CHASE_UP = 0.35;
 const CHASE_OMEGA = 9;
 const BLEND_TIME = 0.45;
 
@@ -155,6 +155,10 @@ export class CameraRig {
     }
   }
 
+  private pullInside(from: THREE.Vector3, cam: THREE.Vector3): void {
+    pullInsideBox(this.bounds, from, cam);
+  }
+
   private updateChase(f: RigInput, dt: number): void {
     const d = f.drone;
     // yaw-only forward vector
@@ -166,9 +170,8 @@ export class CameraRig {
     _v.y += CHASE_UP;
     // feed-forward cancels the spring's steady-state lag (2v/ω) so the quad stays framed
     _v.addScaledVector(d.velocity, 2 / CHASE_OMEGA - 0.05);
-    this.bounds.clampPoint(_v, _v);
-    _v2.copy(d.position).addScaledVector(_fwd, 0.9).addScaledVector(d.velocity, 0.12);
-    _v2.y += 0.02;
+    this.pullInside(d.position, _v);
+    _v2.copy(d.position).addScaledVector(_fwd, 0.6).addScaledVector(d.velocity, 0.1);
     if (!this.chaseInit) {
       this.chasePos.copy(_v);
       this.chaseVel.set(0, 0, 0);
@@ -182,10 +185,31 @@ export class CameraRig {
     _pos.copy(_v).sub(this.chasePos).multiplyScalar(w * w).addScaledVector(this.chaseVel, -2 * w);
     this.chaseVel.addScaledVector(_pos, dt);
     this.chasePos.addScaledVector(this.chaseVel, dt);
-    this.bounds.clampPoint(this.chasePos, this.chasePos);
+    this.pullInside(d.position, this.chasePos);
     this.chaseLook.lerp(_v2, 1 - Math.exp(-dt * 12));
   }
 }
+
+/**
+ * Room-shell "raycast": if the segment drone→camera leaves the (inset) room box, pull the camera
+ * back along it to the exit point so walls/floor/ceiling never come between camera and drone.
+ */
+function pullInsideBox(box: THREE.Box3, from: THREE.Vector3, cam: THREE.Vector3): void {
+  box.clampPoint(from, _pv);
+  let t = 1;
+  for (let a = 0; a < 3; a++) {
+    const f = _pv.getComponent(a);
+    const c = cam.getComponent(a);
+    const d = c - f;
+    if (Math.abs(d) < 1e-9) continue;
+    const lim = d > 0 ? box.max.getComponent(a) : box.min.getComponent(a);
+    const ta = (lim - f) / d;
+    if (ta < t) t = Math.max(0, ta);
+  }
+  if (t < 1) cam.lerpVectors(_pv, cam, t);
+}
+
+const _pv = new THREE.Vector3();
 
 function lookQuat(eye: THREE.Vector3, target: THREE.Vector3, out: THREE.Quaternion): void {
   if (eye.distanceToSquared(target) < 1e-8) return;

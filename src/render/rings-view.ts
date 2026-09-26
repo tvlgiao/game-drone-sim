@@ -41,9 +41,9 @@ void main() {
   float chevron = smoothstep(0.0, 0.08, chev) * (1.0 - smoothstep(0.34, 0.46, chev));
   float fres = pow(1.0 - abs(dot(vN, vView)), 2.0);
   float core = 0.68 + 0.32 * chevron;
-  float pulse = 1.0 + uPulse * (0.35 * sin(uTime * 6.0) + 0.25);
-  vec3 col = uColor * (core * pulse + fres * 0.9) * uIntensity;
-  col += vec3(1.0) * uFlash * 2.5;
+  float pulse = 1.0 + uPulse * (0.3 * sin(uTime * 6.0) + 0.15);
+  vec3 col = uColor * (core * pulse + fres * 0.45) * uIntensity;
+  col += mix(uColor, vec3(1.0), 0.4) * uFlash * 2.0;
   // dark metallic base keeps the silhouette when dim
   col += vec3(0.05, 0.06, 0.08) * (0.4 + fres);
   gl_FragColor = vec4(col, 1.0);
@@ -78,7 +78,7 @@ void main() {
   float spokes = pow(0.5 + 0.5 * sin(a * 12.0 + uTime * 1.5), 12.0) * smoothstep(0.35, 0.95, r);
   float edge = smoothstep(0.55, 1.0, r);
   float alpha = (edge * 0.55 + waves * 0.18 * r + spokes * 0.12) * uIntensity * (1.0 - smoothstep(0.98, 1.0, r));
-  gl_FragColor = vec4(uColor * 1.6, alpha);
+  gl_FragColor = vec4(uColor * 0.9, alpha);
   #include <tonemapping_fragment>
   #include <colorspace_fragment>
   #include <fog_fragment>
@@ -197,7 +197,7 @@ export class RingsView {
       if (free) {
         _target.copy(r.base);
         intensity = 0.8;
-        mem = 0.25;
+        mem = 0.12;
         labelAlpha = 0.7;
       } else if (i < nextRing) {
         _target.copy(GREEN);
@@ -206,8 +206,8 @@ export class RingsView {
         labelAlpha = 0.12 + r.passT * 0.8;
       } else if (i === nextRing) {
         _target.copy(CYAN);
-        intensity = 1.5;
-        mem = 0.75;
+        intensity = 0.9;
+        mem = 0.45;
         pulse = 1;
         labelAlpha = 1;
       } else if (i === nextRing + 1) {

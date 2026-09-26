@@ -53,9 +53,11 @@ void main() {
   vec4 mv = modelViewMatrix * vec4(p, 1.0);
   gl_Position = projectionMatrix * mv;
   float tw = 0.6 + 0.4 * sin(uTime * (1.3 + ph) + ph * 17.0);
-  vB = aData.y * tw;
+  // fine dust: fade out close to the camera so motes never become big glowing orbs
+  float depth = -mv.z;
+  vB = aData.y * tw * smoothstep(0.35, 0.9, depth) * 0.55;
   vWarm = aData.w;
-  gl_PointSize = clamp(aData.z * uPx / max(0.1, -mv.z), 1.0, 12.0);
+  gl_PointSize = clamp(aData.z * uPx / max(0.1, depth), 1.0, 4.5);
 }`;
 
 const DUST_FRAG = /* glsl */ `
