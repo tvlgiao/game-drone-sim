@@ -1,9 +1,10 @@
-/** Merges gamepad + keyboard into one normalised InputFrame per render frame. */
+/** Merges gamepad + keyboard + touch into one normalised InputFrame per render frame. */
 import type { Settings } from '../core/settings';
 import type { InputFrame, InputSource, StickPositions } from '../types';
 import { GP, GamepadInput, prettyPadName } from './gamepad';
 import { KeyboardInput } from './keyboard';
 import { EdgeDetector, RepeatTrigger, VirtualSticks, mapSticks, throttleSlot, type StickMapOptions, type StickSlot } from './stick';
+import { TouchInput, throttleSideOf } from './touch';
 
 export { applyRadialDeadzone, applyAxialDeadzone, stickToThrottle, triggerToThrottle, mapSticks, squareGate, VirtualSticks, EdgeDetector } from './stick';
 
@@ -44,6 +45,8 @@ const NAV_PAD: Record<NavDir, number> = { up: GP.UP, down: GP.DOWN, left: GP.LEF
 export class InputManager {
   /** Called on gamepad connect / disconnect (e.g. hud.toast). */
   onConnection: ((e: GamepadConnectionEvent) => void) | null = null;
+  /** Virtual touch sticks + on-screen buttons (UI attaches its layer to it). */
+  readonly touch = new TouchInput();
 
   private settings: Settings;
   private readonly win: Window | null;
@@ -57,6 +60,12 @@ export class InputManager {
   private readonly padButtons: number[] = [];
   private readonly padRaw = { id: '', mapping: '', axes: this.padAxes as readonly number[], buttons: this.padButtons as readonly number[] };
   private source: InputSource = 'none';
+  /** Touch device: touch is the default source until a keyboard / gamepad is used. */
+  private readonly touchDevice: boolean;
+  /** mapSticks options for touch: square gate off (the virtual gate is already square), stick throttle. */
+  private readonly touchOpts: StickMapOptions;
+  /** keyboard has no trigger: its throttle is always the mode's throttle stick */
+  private readonly kbOpts: StickMapOptions;
   private readonly frame: InputFrame = {
     control: { throttle: 0, yaw: 0, pitch: 0, roll: 0 },
     buttons: { arm: false, toggleMode: false, cycleCamera: false, reset: false, pause: false, confirm: false },
@@ -74,17 +83,35 @@ export class InputManager {
     this.emitConnection(e, false);
   };
 
-  constructor(win: Window | null, settings: Settings) {
+  constructor(win: Window | null, settings: Settings, touchDevice = false) {
     this.win = win;
     this.settings = settings;
+    this.touchDevice = touchDevice;
+    this.touchOpts = { stickMode: settings.stickMode, throttleSource: 'stick', squareGate: false, invert: settings.invert, deadzone: settings.deadzone };
+    this.kbOpts = { ...this.touchOpts, squareGate: settings.squareGate };
     this.pad = new GamepadInput(win?.navigator ?? null);
     this.kb = new KeyboardInput(win);
+    if (win) this.touch.listen(win);
     win?.addEventListener('gamepadconnected', this.onConnected);
     win?.addEventListener('gamepaddisconnected', this.onDisconnected);
+    this.updateSettings(settings);
   }
 
   updateSettings(s: Settings): void {
     this.settings = s;
+    for (const o of [this.touchOpts, this.kbOpts]) {
+      o.stickMode = s.stickMode;
+      o.invert = s.invert;
+      o.deadzone = s.deadzone;
+    }
+    this.kbOpts.squareGate = s.squareGate;
+    const t = this.touch.sticks;
+    t.configure(throttleSideOf(throttleSlot(s.stickMode)), s.touchThrottleCentre, s.touchSticksFixed, t.opts.radius);
+  }
+
+  /** Current source (last used device). */
+  get activeSource(): InputSource {
+    return this.source;
   }
 
   /** Current keyboard throttle (0..1); lets the game zero it on respawn/disarm. */
@@ -119,9 +146,14 @@ export class InputManager {
       hold,
     );
 
-    if (kb.lastActivity > -Infinity && kb.lastActivity >= this.pad.lastActivity) this.source = 'keyboard';
-    else if (snap && (this.pad.lastActivity > kb.lastActivity || this.source === 'none')) this.source = 'gamepad';
-    if (!snap && this.source === 'gamepad') this.source = kb.lastActivity > -Infinity ? 'keyboard' : 'none';
+    const touchT = this.touch.lastActivity;
+    const kbT = kb.lastActivity;
+    const padT = this.pad.lastActivity;
+    if (touchT > -Infinity && touchT >= kbT && touchT >= padT) this.source = 'touch';
+    else if (kbT > -Infinity && kbT >= padT) this.source = 'keyboard';
+    else if (snap && (padT > Math.max(kbT, touchT) || this.source === 'none')) this.source = 'gamepad';
+    if (!snap && this.source === 'gamepad') this.source = touchT > kbT ? 'touch' : kbT > -Infinity ? 'keyboard' : 'none';
+    if (this.source === 'none' && this.touchDevice) this.source = 'touch';
 
     const opts: StickMapOptions = st;
     const sticks: StickPositions = f.sticks;
@@ -136,10 +168,10 @@ export class InputManager {
       this.raw.rx = read(am.rx);
       this.raw.ry = -read(am.ry);
       mapSticks(this.raw, snap.values[GP.RT]!, opts, sticks, f.control, true);
+    } else if (this.source === 'touch') {
+      mapSticks(this.touch.sticks.pos, 0, this.touchOpts, sticks, f.control, true);
     } else {
-      // Keyboard has no trigger: its throttle is always the mode's throttle stick.
-      const kbOpts: StickMapOptions = st.throttleSource === 'stick' ? opts : { ...opts, throttleSource: 'stick' };
-      mapSticks(this.vsticks.pos, 0, kbOpts, sticks, f.control, false);
+      mapSticks(this.vsticks.pos, 0, this.kbOpts, sticks, f.control, false);
     }
 
     if (snap) {
@@ -163,6 +195,7 @@ export class InputManager {
       if (name === 'back') back = padEdge || keyEdge;
       else b[name] = padEdge || keyEdge;
     }
+    this.touch.drainButtons(b);
 
     const n = f.nav;
     n.back = back;
@@ -209,6 +242,7 @@ export class InputManager {
 
   dispose(): void {
     this.kb.dispose();
+    this.touch.dispose();
     this.win?.removeEventListener('gamepadconnected', this.onConnected);
     this.win?.removeEventListener('gamepaddisconnected', this.onDisconnected);
     this.onConnection = null;

@@ -27,7 +27,7 @@ export interface ButtonEvents {
   confirm: boolean;
 }
 
-export type InputSource = 'gamepad' | 'keyboard' | 'none';
+export type InputSource = 'gamepad' | 'keyboard' | 'touch' | 'none';
 
 /** Edge-triggered menu navigation (d-pad / left stick flick / arrows / Enter / Esc / B). */
 export interface NavEvents {
@@ -62,7 +62,7 @@ export interface InputFrame {
   nav: NavEvents;
   source: InputSource;
   gamepadId: string | null;
-  /** processed stick positions (after deadzone / square gate) for the visualiser; keyboard = virtual sticks */
+  /** processed stick positions (after deadzone / square gate) for the visualiser; keyboard / touch = virtual sticks */
   sticks: StickPositions;
   pad: RawPad | null;
 }
