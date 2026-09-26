@@ -57,7 +57,7 @@ export class GamepadInput {
   private readonly getPads: GamepadsFn | null;
 
   constructor(nav: Navigator | null) {
-    this.getPads = nav && typeof nav.getGamepads === 'function' ? () => Array.from(nav.getGamepads()) : null;
+    this.getPads = nav && typeof nav.getGamepads === 'function' ? () => nav.getGamepads() : null;
   }
 
   /** Reads all pads; returns the selected pad snapshot or null when none is connected. */

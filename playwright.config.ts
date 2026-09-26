@@ -8,5 +8,5 @@ export default defineConfig({
     baseURL: 'http://localhost:4173',
     launchOptions: { args: ['--use-angle=metal', '--enable-gpu', '--ignore-gpu-blocklist'] },
   },
-  webServer: { command: 'npm run build && npm run preview', port: 4173, reuseExistingServer: true, timeout: 120_000 },
+  webServer: { command: 'npm run build && npm run preview', port: 4173, reuseExistingServer: false, timeout: 120_000 },
 });
