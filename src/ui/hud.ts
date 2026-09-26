@@ -3,8 +3,9 @@ import './styles.css';
 import { DEFAULT_SETTINGS, type Settings } from '../core/settings';
 import type { CameraMode, DroneState, FlightMode, GameEvent, InputFrame, InputSource, NavEvents, QualityTier, RaceSnapshot, RaceStatus } from '../types';
 import { formatDelta, formatTime } from './format';
-import { ICON_GAMEPAD, ICON_KEYBOARD, ICON_NONE } from './icons';
+import { ICON_GAMEPAD, ICON_KEYBOARD, ICON_NONE, ICON_TOUCH } from './icons';
 import { Menus, type FinishData, type ScreenName, type UiAction } from './menus';
+import { throttleSlot } from '../input/stick';
 import { stickShort, throttleControl, throttleDownHint } from './mode-labels';
 
 export type { UiAction, ScreenName, FinishData } from './menus';
@@ -83,7 +84,7 @@ const HUD_HTML = `
   <div class="ds-hud__tr">
     <span class="ds-chip ds-armed" data-r="armed"><i class="ds-dot"></i><span data-r="armedText">DISARMED</span></span>
     <span class="ds-chip ds-chip--mode" data-r="mode">ANGLE</span>
-    <span class="ds-chip" data-r="cam">FPV</span>
+    <span class="ds-chip ds-chip--cam" data-r="cam">FPV</span>
     <span class="ds-chip ds-chip--fps" data-r="fps">— fps</span>
     <button type="button" class="ds-chip ds-chip--quit" data-r="quit" aria-label="Quit flight">✕ Quit</button>
   </div>
@@ -216,6 +217,12 @@ export class Hud {
     return this.menus.current;
   }
 
+  /** Touch device: `is-touch` styling (44 pt targets, pan-y dialogs) and touch-only settings rows. */
+  enableTouch(fullscreen: boolean): void {
+    this.root.classList.add('is-touch');
+    this.menus.enableTouch(fullscreen);
+  }
+
   navigate(nav: NavEvents, confirm: boolean): void {
     this.menus.navigate(nav, confirm);
   }
@@ -329,13 +336,19 @@ export class Hud {
     const show = !f.drone.armed && f.altitude < 0.5 && (st === 'racing' || st === 'freefly' || st === 'countdown');
     let msg = '';
     if (show) {
-      const pad = f.input.source === 'gamepad';
-      const arm = pad ? 'A' : 'Space';
-      if (f.input.control.throttle > 0.05) {
-        const low = throttleDownHint(f.settings, !pad);
-        msg = `Throttle to zero — ${low}, then press ${arm} to arm`;
+      const src = f.input.source;
+      if (src === 'touch') {
+        const side = throttleSlot(f.settings.stickMode) === 'ly' ? 'left' : 'right';
+        msg = f.input.control.throttle > 0.05 ? `Pull the ${side} stick fully down, then tap ARM` : 'DISARMED — tap ARM to arm';
       } else {
-        msg = `DISARMED — press ${arm} to arm`;
+        const pad = src === 'gamepad';
+        const arm = pad ? 'A' : 'Space';
+        if (f.input.control.throttle > 0.05) {
+          const low = throttleDownHint(f.settings, !pad);
+          msg = `Throttle to zero — ${low}, then press ${arm} to arm`;
+        } else {
+          msg = `DISARMED — press ${arm} to arm`;
+        }
       }
     }
     this.text(this.refs.hint, msg);
@@ -375,8 +388,8 @@ export class Hud {
   private setSource(src: InputSource, id: string | null): void {
     this.source = src;
     const r = this.refs;
-    r.srcIcon.innerHTML = src === 'gamepad' ? ICON_GAMEPAD : src === 'keyboard' ? ICON_KEYBOARD : ICON_NONE;
-    this.text(r.srcName, src === 'gamepad' ? shortPad(id) : src === 'keyboard' ? 'Keyboard' : 'No input');
+    r.srcIcon.innerHTML = src === 'gamepad' ? ICON_GAMEPAD : src === 'keyboard' ? ICON_KEYBOARD : src === 'touch' ? ICON_TOUCH : ICON_NONE;
+    this.text(r.srcName, src === 'gamepad' ? shortPad(id) : src === 'keyboard' ? 'Keyboard' : src === 'touch' ? 'Touch' : 'No input');
     this.root.dataset.source = src;
   }
 

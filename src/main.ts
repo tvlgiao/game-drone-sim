@@ -5,7 +5,8 @@
 import { Vector3 } from 'three';
 import { GameAudio } from './audio/audio';
 import { FixedLoop, FpsMeter } from './core/loop';
-import { DynamicResolution, pickTier, probeGpu } from './core/quality';
+import { detectDevice, exitFullscreen, needsRotate, requestFullscreen, toggleFullscreen } from './core/device';
+import { DynamicResolution, pickTier, probeGpu, targetFps } from './core/quality';
 import { loadSettings, saveSettings, type Settings } from './core/settings';
 import { hoverThrottle } from './physics/drone-params';
 import { LOFT_LEVEL } from './game/level-data';
@@ -13,8 +14,11 @@ import { RaceController } from './game/race';
 import { InputManager } from './input/input-manager';
 import { Simulation } from './physics/simulation';
 import { GameView } from './render/game-view';
+import { stickRadius } from './input/touch';
 import { Hud, type UiAction } from './ui/hud';
-import type { ButtonEvents, CameraMode, ControlInput, DroneState, GameEvent, QualityTier } from './types';
+import { MobileShell, hardenGestures } from './ui/mobile-shell';
+import { TouchControls } from './ui/touch-controls';
+import type { ButtonEvents, CameraMode, ControlInput, DroneState, GameEvent, InputFrame, QualityTier } from './types';
 
 const PHYSICS_DT = 1 / 1000;
 const CAMERA_CYCLE: CameraMode[] = ['los', 'fpv', 'chase'];
@@ -47,14 +51,17 @@ function boot(): void {
   const storage = safeStorage();
   let settings: Settings = loadSettings(storage);
 
+  const device = detectDevice(window);
+  const params = new URLSearchParams(location.search);
+  const selftest = params.get('selftest') === '1';
   const hud = new Hud(uiRoot, (a) => onAction(a));
   const gpu = probeGpu();
-  const resolveTier = (s: Settings): QualityTier => (s.quality === 'auto' ? pickTier(gpu) : s.quality);
+  const resolveTier = (s: Settings): QualityTier => (s.quality === 'auto' ? pickTier(gpu, device.form) : s.quality);
   let tier = resolveTier(settings);
 
   let view: GameView;
   try {
-    view = new GameView(canvas, LOFT_LEVEL, tier);
+    view = new GameView(canvas, LOFT_LEVEL, tier, device.form);
   } catch (err) {
     hud.setError(`WebGL2 is not available on this device/browser (${(err as Error).message}). Enable hardware acceleration or try a recent Chrome, Edge, Firefox or Safari.`);
     return;
@@ -62,11 +69,36 @@ function boot(): void {
 
   const sim = new Simulation(LOFT_LEVEL);
   const race = new RaceController(LOFT_LEVEL, storage);
-  const input = new InputManager(window, settings);
+  const input = new InputManager(window, settings, device.touch);
   const audio = new GameAudio();
   const loop = new FixedLoop(PHYSICS_DT, 250);
   const fpsMeter = new FpsMeter();
-  const dynRes = new DynamicResolution(120);
+  const dynRes = new DynamicResolution(targetFps(device.form));
+
+  let touchUi: TouchControls | null = null;
+  let shell: MobileShell | null = null;
+  if (device.touch) {
+    hardenGestures(document);
+    hud.enableTouch(device.fullscreen && !device.standalone);
+    touchUi = new TouchControls(uiRoot, input.touch, stickRadius(device.form === 'phone'));
+    shell = new MobileShell(uiRoot, {
+      storage,
+      standalone: device.standalone,
+      onGateTap: () => {
+        // Runs inside the tap: the gesture both unlocks WebAudio and allows the fullscreen request.
+        void audio.resume();
+        if (device.standalone) return;
+        if (!device.fullscreen) {
+          if (device.ios) shell?.offerHomeScreen();
+          return;
+        }
+        void requestFullscreen(document).then((ok) => {
+          if (!ok && device.ios) shell?.offerHomeScreen();
+        });
+      },
+    });
+    if (!selftest) shell.showGate();
+  }
 
   const spawnPos = new Vector3(...LOFT_LEVEL.spawn.position);
   const prevPos = new Vector3();
@@ -110,6 +142,9 @@ function boot(): void {
 
   function newSession(kind: 'race' | 'freefly'): void {
     placeDrone(spawnPos, LOFT_LEVEL.spawn.yaw);
+    // A fresh flight starts with the touch throttle at the bottom (or centre when it auto-centres).
+    input.touch.sticks.releaseAll();
+    input.touch.sticks.setThrottle(settings.touchThrottleCentre ? 0.5 : 0);
     if (kind === 'race') race.startRace();
     else race.startFreeFly();
     hud.showScreen('none');
@@ -148,6 +183,9 @@ function boot(): void {
         applySettings(a.settings);
         saveSettings(a.settings, storage);
         break;
+      case 'fullscreen':
+        void toggleFullscreen(document).then((on) => hud.toast(on ? 'Full screen on' : 'Full screen off'));
+        break;
     }
   }
 
@@ -164,6 +202,7 @@ function boot(): void {
         break;
       case 'crash':
         input.rumble(1, 1, 380);
+        if (device.vibrate && input.activeSource === 'touch') navigator.vibrate?.(120);
         sim.setArmed(false, zeroThrottle);
         break;
       case 'respawn':
@@ -206,6 +245,9 @@ function boot(): void {
   };
   window.addEventListener('pointerdown', unlock, { once: true });
   window.addEventListener('keydown', unlock, { once: true });
+  // iOS only treats touchend / pointerup (not touchstart) as an audio-unlocking gesture.
+  window.addEventListener('touchend', unlock, { once: true });
+  window.addEventListener('pointerup', unlock, { once: true });
 
   let exited = false;
 
@@ -215,7 +257,7 @@ function boot(): void {
     race.toMenu();
     placeDrone(spawnPos, LOFT_LEVEL.spawn.yaw);
     void audio.suspend();
-    if (document.fullscreenElement) void document.exitFullscreen().catch(() => undefined);
+    void exitFullscreen(document);
     window.close(); // only works for script-opened windows; otherwise the "closed" screen stays
     hud.showScreen('bye');
   }
@@ -238,11 +280,18 @@ function boot(): void {
   new ResizeObserver(resize).observe(canvas);
   resize();
 
+  // Phones fly in landscape only: portrait shows the rotate overlay (the frame loop pauses the flight).
+  const checkOrientation = (): void => shell?.setRotate(needsRotate(device.form, window.innerWidth, window.innerHeight));
+  window.addEventListener('resize', checkOrientation);
+  window.addEventListener('orientationchange', checkOrientation);
+  checkOrientation();
+
   hud.showScreen('main');
   placeDrone(spawnPos, LOFT_LEVEL.spawn.yaw);
 
   let last = performance.now();
   let time = 0;
+  let lastInput: InputFrame | null = null;
 
   function frame(now: number): void {
     const frameSec = Math.min((now - last) / 1000, 0.1);
@@ -251,6 +300,7 @@ function boot(): void {
     fpsMeter.sample(frameSec);
 
     const inp = input.poll(frameSec);
+    lastInput = inp;
     if (override) Object.assign(inp.control, override);
     if (hasInjected) {
       for (const k of BUTTON_KEYS) {
@@ -263,6 +313,11 @@ function boot(): void {
 
     const status = race.snapshot().status;
     const flying = FLYING.has(status);
+
+    if (flying && shell?.rotateOpen && status !== 'crashed') {
+      race.pause();
+      hud.showScreen('pause');
+    }
 
     if (!flying) {
       hud.navigate(inp.nav, inp.buttons.confirm);
@@ -319,6 +374,10 @@ function boot(): void {
       tier,
       settings,
     });
+    if (touchUi) {
+      touchUi.setVisible(inp.source === 'touch' && FLYING.has(snap.status) && hud.screen === 'none' && !shell?.rotateOpen);
+      touchUi.update(settings, sim.fc.armed, sim.fc.mode, cameraMode);
+    }
     const mute = snap.status === 'paused';
     if (mute !== motorsMuted) {
       motorsMuted = mute;
@@ -330,8 +389,8 @@ function boot(): void {
   }
   requestAnimationFrame(frame);
 
-  // Debug / e2e hook.
-  (window as unknown as { __drone: unknown }).__drone = {
+  // Debug / e2e / selftest hook.
+  const hook = {
     get state() {
       return sim.world.state;
     },
@@ -368,7 +427,38 @@ function boot(): void {
     teleport(x: number, y: number, z: number, yaw = 0) {
       placeDrone(new Vector3(x, y, z), yaw);
     },
+    /** active input source ('touch' | 'gamepad' | 'keyboard' | 'none') */
+    get source() {
+      return input.activeSource;
+    },
+    /** last polled pilot command (after mode mapping / deadzone) */
+    get control() {
+      return lastInput?.control ?? null;
+    },
+    get mode() {
+      return sim.fc.mode;
+    },
+    get touchVisible() {
+      return touchUi?.isVisible ?? false;
+    },
+    device,
+    get pixelRatio() {
+      return view.pixelRatio;
+    },
+    get renderScale() {
+      return view.scale;
+    },
+    get rotateOverlay() {
+      return shell?.rotateOpen ?? false;
+    },
+    get gateOpen() {
+      return shell?.gateOpen ?? false;
+    },
+    touch: { layer: touchUi?.layer ?? null, sticks: input.touch.sticks },
   };
+  (window as unknown as { __drone: unknown }).__drone = hook;
+
+  if (selftest) void import('./ui/selftest').then((m) => m.runSelfTest(hook, settings.stickMode));
 }
 
 boot();

@@ -4,6 +4,8 @@ export const ICON_GAMEPAD = `<svg viewBox="0 0 24 24" aria-hidden="true"><path f
 
 export const ICON_KEYBOARD = `<svg viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M3.5 6h17A1.5 1.5 0 0 1 22 7.5v9a1.5 1.5 0 0 1-1.5 1.5h-17A1.5 1.5 0 0 1 2 16.5v-9A1.5 1.5 0 0 1 3.5 6Zm1 2.2v1.6h1.6V8.2H4.5Zm3 0v1.6h1.6V8.2H7.5Zm3 0v1.6h1.6V8.2h-1.6Zm3 0v1.6h1.6V8.2h-1.6Zm3 0v1.6h3v-1.6h-3Zm-12 3v1.6h3v-1.6h-3Zm4 0v1.6h1.6v-1.6H8.5Zm3 0v1.6h1.6v-1.6h-1.6Zm3 0v1.6h1.6v-1.6h-1.6Zm3 0v1.6h1.9v-1.6h-1.9ZM7 14.2v1.6h10v-1.6H7Z"/></svg>`;
 
+export const ICON_TOUCH = `<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="2.5" y="6" width="19" height="12" rx="2.5" fill="none" stroke="currentColor" stroke-width="1.6"/><circle cx="8" cy="13" r="2.2" fill="currentColor"/><circle cx="16" cy="11" r="2.2" fill="currentColor"/></svg>`;
+
 export const ICON_NONE = `<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="8" fill="none" stroke="currentColor" stroke-width="1.8" stroke-dasharray="3 3"/></svg>`;
 
 export interface DiagramLabels {
