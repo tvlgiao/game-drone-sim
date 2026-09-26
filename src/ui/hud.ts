@@ -203,7 +203,7 @@ export class Hud {
     this.updateSticks(f.input);
   }
 
-  showScreen(s: 'main' | 'pause' | 'finish' | 'none' | 'settings' | 'controls' | 'controller', data?: FinishData & { best?: number | null }): void {
+  showScreen(s: 'main' | 'pause' | 'finish' | 'none' | 'settings' | 'controls' | 'controller' | 'rates', data?: FinishData & { best?: number | null }): void {
     if (s === 'main' && data && 'best' in data) this.menus.setMenuBest(data.best ?? null);
     this.menus.show(s as ScreenName, data);
   }
