@@ -201,9 +201,18 @@
   box-shadow: 0 0 22px rgba(255, 197, 61, 0.25), 0 4px 14px rgba(0, 0, 0, 0.4);
 }
 
+.ds-tbtn--arm {
+  padding: 0;
+}
+
 .ds-tbtn--arm b {
-  font-size: 14px;
-  letter-spacing: 0.12em;
+  font-size: 13px;
+  letter-spacing: 0.1em;
+}
+
+.ds-tbtn--arm.is-armed b {
+  font-size: 10.5px;
+  letter-spacing: 0.04em;
 }
 
 .ds-tbtn--arm.is-armed {
@@ -293,7 +302,14 @@
 }
 
 .ds-ui.is-touch .ds-row__ctl {
-  grid-template-columns: 44px minmax(7.5em, 1fr) 44px;
+  grid-template-columns: 44px minmax(0, 1fr) 44px;
+}
+
+/* Wide enough screens: fixed value column so the arrows line up row to row. */
+@media (min-width: 641px) {
+  .ds-ui.is-touch .ds-row__ctl {
+    grid-template-columns: 44px 7.5em 44px;
+  }
 }
 
 .ds-ui.is-touch .ds-row__value {
@@ -565,4 +581,14 @@
   0%, 20% { transform: rotate(0deg); }
   55%, 80% { transform: rotate(-90deg); }
   100% { transform: rotate(0deg); }
+}
+
+/* Narrow screens: the per-axis rates table scrolls sideways instead of widening the page. */
+@media (max-width: 640px) {
+  .ds-ui.is-touch .ds-rtable {
+    display: block;
+    max-width: 100%;
+    overflow-x: auto;
+    touch-action: pan-x pan-y;
+  }
 }

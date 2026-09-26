@@ -281,7 +281,9 @@ function boot(): void {
   resize();
 
   // Phones fly in landscape only: portrait shows the rotate overlay (the frame loop pauses the flight).
-  const checkOrientation = (): void => shell?.setRotate(needsRotate(device.form, window.innerWidth, window.innerHeight));
+  // `?rotate=0` disables the overlay (automation on simulators that cannot be rotated).
+  const allowPortrait = params.get('rotate') === '0';
+  const checkOrientation = (): void => shell?.setRotate(!allowPortrait && needsRotate(device.form, window.innerWidth, window.innerHeight));
   window.addEventListener('resize', checkOrientation);
   window.addEventListener('orientationchange', checkOrientation);
   checkOrientation();
