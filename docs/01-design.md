@@ -27,6 +27,7 @@ Menu ──► Countdown (3-2-1) ──► Racing ──► Finished (time, best
   and ring is the *next* expected one. Out-of-order rings do nothing; next ring highlighted,
   subsequent ring dimmed; a HUD arrow points to the next ring.
 - Crash = impact normal speed > 5 m/s, or drone upside down on floor > 1 s. Light bumps bounce.
+  Race clock keeps running while crashed (≈1.5 s penalty, like a real race). Respawn 1.2 m past the last passed ring, facing the next.
 - Free-fly mode: no timer, rings optional.
 - Best time persisted in `localStorage` (try/catch).
 
@@ -61,10 +62,10 @@ Reference craft: 3-inch indoor quad (cinewhoop class), X-frame.
 | max static thrust / motor | 2.9 N | T/W ≈ 4.5 |
 | motor time constant τ | 0.025 s up, 0.040 s down | first order lag (spin-down slower) |
 | yaw torque coefficient kQ/kT | 0.012 m | reaction torque |
-| body drag CdA (x, y, z) | 0.0035, 0.0060, 0.0035 m² | quadratic, body axes |
+| body drag CdA (x, y, z) | 0.012, 0.018, 0.012 m² | quadratic, body axes; gives 15.7 m/s top speed at 55° tilt (cinewhoop-realistic) |
 | rotor drag (H-force) | 0.08 N/(m/s) per unit thrust-normalised | linear, horizontal-in-body |
 | ground effect | Cheeseman–Bennett `T/T∞ = 1/(1-(R/4z)²)`, clamped ≤ 1.4 | R = 0.038 m |
-| battery | 16.8 → 14.0 V sag over ~5 min, 3 % instant sag per amp-ish load | scales max thrust |
+| battery | 16.8 → 14.0 V over ~5 min, 0.08 V instant sag per unit normalised thrust | scales max thrust ∝ (V/Vfull)² |
 | gravity | 9.81 m/s² | air ρ = 1.225 kg/m³ |
 
 Equations (world frame W, body frame B, body +Y = up/thrust axis, −Z = forward):
