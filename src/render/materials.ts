@@ -62,7 +62,8 @@ export class Materials {
 
   readonly radial: THREE.Texture;
 
-  constructor(anisotropy: number) {
+  /** `maxTexture` caps canvas texture size (mobile memory budget). */
+  constructor(anisotropy: number, maxTexture = 2048) {
     const tex = <T extends THREE.Texture>(t: T): T => {
       t.anisotropy = Math.min(anisotropy, 8);
       this.textures.push(t);
@@ -121,7 +122,7 @@ export class Materials {
     this.bulbGlow = reg(new THREE.MeshStandardMaterial({ color: 0x000000, emissive: 0xffa95c, emissiveIntensity: 9, roughness: 0.3 }));
     this.lampGlow = reg(new THREE.MeshStandardMaterial({ color: 0x000000, emissive: 0xffc488, emissiveIntensity: 3.5, side: THREE.DoubleSide }));
     this.cord = reg(new THREE.MeshStandardMaterial({ color: 0x0c0c0c, roughness: 0.6 }));
-    const sky = tex(skylineTexture());
+    const sky = tex(skylineTexture(Math.min(2048, maxTexture), Math.min(1024, maxTexture / 2)));
     this.skyline = reg(new THREE.MeshBasicMaterial({ map: sky, fog: false, color: new THREE.Color(1.6, 1.6, 1.7) }));
     const neon = tex(neonTexture('FPV'));
     this.neon = reg(new THREE.MeshBasicMaterial({ map: neon, color: new THREE.Color(5, 0.6, 3.2), transparent: true, blending: THREE.AdditiveBlending, depthWrite: false, fog: false }));

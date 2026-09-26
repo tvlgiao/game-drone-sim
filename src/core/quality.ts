@@ -1,5 +1,6 @@
-/** Quality tiers, GPU probing and dynamic-resolution control (design §7). */
+/** Quality tiers, GPU probing and dynamic-resolution control (design §7, mobile: 04-mobile-design §6). */
 import type { QualityTier } from '../types';
+import type { FormFactor } from './device';
 
 export interface QualityProfile {
   tier: QualityTier;
@@ -84,14 +85,51 @@ function readRenderer(gl: WebGL2RenderingContext): string {
   return typeof r === 'string' ? r : 'unknown';
 }
 
-/** Map GPU info to a starting tier; dynamic resolution fine-tunes from there. */
-export function pickTier(info: GpuInfo): QualityTier {
+/**
+ * Map GPU info to a starting tier; dynamic resolution fine-tunes from there.
+ * Mobile GPUs report "Apple GPU" like Macs, so the form factor decides there: phone → medium, tablet → high.
+ */
+export function pickTier(info: GpuInfo, form: FormFactor = 'desktop'): QualityTier {
   if (!info.webgl2 || info.software) return 'low';
+  if (form === 'phone') return 'medium';
+  if (form === 'tablet') return 'high';
   const r = info.renderer.toLowerCase();
   if (/apple m\d+ (pro|max|ultra)|rtx [3-9]\d{3}|rtx \d{2}[5-9]0|radeon rx [67-9]\d{3}|radeon pro w/.test(r)) return 'ultra';
   if (/apple (m\d|gpu)|rtx|radeon rx|radeon pro|geforce gtx 1[06-9]|arc a\d/.test(r)) return 'high';
   if (/intel|iris|uhd|adreno|mali|powervr|radeon/.test(r)) return 'medium';
   return 'high';
+}
+
+/** Mobile DPR caps (Retina 3× would quadruple fill cost for little visible gain). */
+export const MOBILE_MAX_DPR: Readonly<Record<Exclude<FormFactor, 'desktop'>, number>> = { phone: 1.5, tablet: 1.75 };
+/** Mobile memory budget (iOS WebGL tab limit): shadow maps and canvas textures ≤ this. */
+export const MOBILE_MAX_TEXTURE = 1024;
+/** Dynamic-resolution frame-rate target: iOS Safari rAF runs at 60 Hz. */
+export function targetFps(form: FormFactor): number {
+  return form === 'desktop' ? 120 : 60;
+}
+
+const mobileCache = new Map<string, QualityProfile>();
+
+/**
+ * Tier profile adjusted for the device: on phones/tablets DPR is capped at 1.5 / 1.75 (low tier: 1),
+ * shadow maps ≤ 1024 and particle budgets reduced (phone ½, tablet ¾). Desktop returns the base profile.
+ */
+export function qualityProfile(tier: QualityTier, form: FormFactor = 'desktop'): QualityProfile {
+  const base = QUALITY_PROFILES[tier];
+  if (form === 'desktop') return base;
+  const key = `${tier}|${form}`;
+  let p = mobileCache.get(key);
+  if (!p) {
+    p = {
+      ...base,
+      maxDpr: tier === 'low' ? 1 : MOBILE_MAX_DPR[form],
+      shadowMapSize: Math.min(base.shadowMapSize, MOBILE_MAX_TEXTURE),
+      particles: Math.round(base.particles * (form === 'phone' ? 0.5 : 0.75)),
+    };
+    mobileCache.set(key, p);
+  }
+  return p;
 }
 
 /** EMA-filtered frame-time controller for render scale with hysteresis. */
