@@ -93,8 +93,18 @@ test('race: countdown, pass ring 0, crash + respawn', async ({ page }) => {
   await control(page, 0);
   await page.evaluate(() => window.__drone.press('arm'));
   await page.waitForTimeout(100);
-  await control(page, 0.54, 0.3);
+  // Closed-loop "pilot": PD altitude hold at the ring centre height while pitching forward.
+  await page.evaluate(() => {
+    const d = window.__drone;
+    (window as unknown as { __pilot: number }).__pilot = window.setInterval(() => {
+      const y = d.state.position.y;
+      const vy = d.state.velocity.y;
+      const throttle = Math.min(1, Math.max(0, 0.56 + 0.35 * (1.5 - y) - 0.15 * vy));
+      d.setControl({ throttle, pitch: 0.25, roll: 0, yaw: 0 });
+    }, 16);
+  });
   await page.waitForFunction(() => window.__drone.race.nextRing >= 1, null, { timeout: 5000 });
+  await page.evaluate(() => clearInterval((window as unknown as { __pilot: number }).__pilot));
 
   // Slam into the north wall at speed → crash → respawn.
   await page.evaluate(() => window.__drone.teleport(0, 2.5, -4.5, 0));
