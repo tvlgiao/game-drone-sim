@@ -23,7 +23,7 @@ gamepads after an input. Chrome/Edge recommended (rumble supported there).
 2. Pull the **left stick fully down** (throttle 0) → press **A** to arm. A real FC refuses to
    arm with throttle up or when tilted > 60°, and so does this one.
 3. Left stick up/down = throttle (centre ≈ hover in Angle mode), left X = yaw,
-   right stick = pitch/roll. **Y** Acro/Angle, **RB** camera FPV/Chase/LOS, **B** reset to checkpoint,
+   right stick = pitch/roll. **Y** Acro/Angle, **RB** camera LOS (default) → FPV → Chase, **B** reset to checkpoint,
    **Start** pause. Keyboard: W/S throttle, A/D yaw, arrows pitch/roll, Space arm, M, C, R, Esc.
 4. Fly through the rings in order (cyan = next, magenta = the one after). Impact > 5 m/s = crash
    → respawn after the last ring (clock keeps running, like a real race).

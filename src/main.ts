@@ -17,7 +17,7 @@ import { Hud, type UiAction } from './ui/hud';
 import type { ButtonEvents, CameraMode, ControlInput, DroneState, GameEvent, QualityTier } from './types';
 
 const PHYSICS_DT = 1 / 1000;
-const CAMERA_CYCLE: CameraMode[] = ['fpv', 'chase', 'los'];
+const CAMERA_CYCLE: CameraMode[] = ['los', 'fpv', 'chase'];
 const BUTTON_KEYS: readonly (keyof ButtonEvents)[] = ['arm', 'toggleMode', 'cycleCamera', 'reset', 'pause', 'confirm'];
 const FLYING = new Set(['countdown', 'racing', 'crashed', 'freefly']);
 
@@ -72,7 +72,7 @@ function boot(): void {
   const prevPos = new Vector3();
   const renderState = cloneState(sim.world.state);
   const zeroThrottle: ControlInput = { throttle: 0, yaw: 0, pitch: 0, roll: 0 };
-  let cameraMode: CameraMode = 'fpv';
+  let cameraMode: CameraMode = 'los';
   let respawnPending = false;
   let override: ControlInput | null = null;
   const injected: Partial<ButtonEvents> = {};
@@ -264,7 +264,7 @@ function boot(): void {
       drone,
       fanAngle: sim.world.fanAngle,
       nextRing: snap.status === 'freefly' ? -1 : snap.nextRing,
-      cameraMode: flying ? cameraMode : 'chase',
+      cameraMode: flying ? cameraMode : 'los',
       cameraTiltDeg: settings.cameraTiltDeg,
       fovDeg: settings.fovDeg,
       speed,
