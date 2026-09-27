@@ -228,7 +228,7 @@ const ROW_DEFS: Row[] = [
   {
     id: 'touchThrottleCentre',
     label: 'Touch throttle',
-    hint: 'Hold stays where released (like a radio) · Auto-centre = hover',
+    hint: 'Auto-centre: stick springs back, centre holds altitude (DJI-style) · Hold: stays where released like an FPV radio',
     kind: 'bool',
     on: 'Auto-centre',
     off: 'Hold',

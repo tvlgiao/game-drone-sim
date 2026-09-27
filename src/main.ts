@@ -16,6 +16,8 @@ import { Simulation } from './physics/simulation';
 import { GameView } from './render/game-view';
 import { stickRadius } from './input/touch';
 import { Hud, type UiAction } from './ui/hud';
+import { throttleDownHint } from './ui/mode-labels';
+import { throttleSlot } from './input/stick';
 import { MobileShell, hardenGestures } from './ui/mobile-shell';
 import { TouchControls } from './ui/touch-controls';
 import type { ButtonEvents, CameraMode, ControlInput, DroneState, GameEvent, InputFrame, QualityTier } from './types';
@@ -138,6 +140,7 @@ function boot(): void {
     sim.fc.reset();
     sim.setArmed(false, zeroThrottle);
     loop.reset();
+    input.touch.sticks.latchTakeoff();
   }
 
   function newSession(kind: 'race' | 'freefly'): void {
@@ -145,6 +148,7 @@ function boot(): void {
     // A fresh flight starts with the touch throttle at the bottom (or centre when it auto-centres).
     input.touch.sticks.releaseAll();
     input.touch.sticks.setThrottle(settings.touchThrottleCentre ? 0.5 : 0);
+    input.touch.sticks.latchTakeoff();
     if (kind === 'race') race.startRace();
     else race.startFreeFly();
     hud.showScreen('none');
@@ -217,11 +221,19 @@ function boot(): void {
     }
   }
 
+  function throttleZeroHint(): string {
+    const src = input.activeSource;
+    if (src === 'touch') return `drag the ${throttleSlot(settings.stickMode) === 'ly' ? 'left' : 'right'} stick fully down`;
+    return throttleDownHint(settings, src === 'keyboard').toLowerCase();
+  }
+
   function handleFlightButtons(b: ButtonEvents, control: ControlInput): void {
     if (b.arm) {
       const want = !sim.fc.armed;
       const ok = sim.setArmed(want, control);
-      if (want && !ok) hud.toast(control.throttle >= 0.05 ? 'Arming blocked: lower throttle to zero' : 'Arming blocked: level the drone');
+      if (want && !ok) hud.toast(control.throttle >= 0.05 ? `Arming blocked: ${throttleZeroHint()}` : 'Arming blocked: level the drone');
+      if (!sim.fc.armed) input.touch.sticks.latchTakeoff();
+      else if (input.activeSource === 'touch' && input.touch.sticks.latched) hud.toast('Armed — push the throttle stick up to take off');
       dispatch({ type: 'armed', armed: sim.fc.armed });
     }
     if (b.toggleMode) {
@@ -328,6 +340,8 @@ function boot(): void {
 
     let alpha = 1;
     if (flying) {
+      // Touch auto-centre sticks fly DJI-style: centre holds altitude (barometer hold), like 'A/Atti' mode.
+      sim.fc.altitudeHold = inp.source === 'touch' && settings.touchThrottleCentre;
       const control = status === 'countdown' ? { ...inp.control, throttle: 0 } : inp.control;
       alpha = loop.advance(frameSec, (dt) => {
         prevPos.copy(sim.world.state.position);

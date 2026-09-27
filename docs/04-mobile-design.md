@@ -45,6 +45,16 @@ Version 0.2 · 2026-09-26 · companion to 01-design.md
 - Visibility: shown when last input source is touch; hidden when gamepad/keyboard used; never
   shown on non-touch desktops.
 
+### 3.1 Default: auto-centre + altitude hold (v0.3, after user feedback)
+
+Players expect MOBA sticks to spring back. Default touch mode is therefore **Auto-centre**:
+both sticks re-centre on release and the throttle stick commands **climb rate** through a
+DJI-style altitude hold ("A/Atti" mode with barometer): centre = hold altitude (captured once the
+climb is braked, P on altitude → PI on vertical speed, tilt-compensated), full up +3 m/s, full down
+−2.5 m/s. A **take-off latch** keeps throttle at 0 after a new session/respawn/disarm, so ARM works
+with the stick at rest and the quad idles on the ground until the first push up.
+"Hold" (real FPV gimbal, manual throttle, no altitude hold) stays available in Settings.
+
 ## 4. Full-screen flow
 
 1. Start screen on touch devices shows **"Tap to play full screen"** — the tap is the user

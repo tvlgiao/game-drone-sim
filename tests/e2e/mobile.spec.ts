@@ -124,16 +124,16 @@ test.describe('touch devices', () => {
     await page.getByRole('button', { name: 'Settings' }).tap();
     const row = page.locator('.ds-screen--settings [data-key="touchThrottleCentre"]');
     await expect(row).toBeVisible();
-    await expect(row.locator('.ds-row__value')).toHaveText('Hold');
+    await expect(row.locator('.ds-row__value')).toHaveText('Auto-centre'); // MOBA-style default
     const arrow = row.locator('[data-dir="1"]');
     await page.waitForTimeout(500); // dialog rise animation scales the panel
     const box = (await arrow.boundingBox())!;
     expect(box.width).toBeGreaterThanOrEqual(44);
     expect(box.height).toBeGreaterThanOrEqual(44);
     await arrow.tap();
-    await expect(row.locator('.ds-row__value')).toHaveText('Auto-centre');
-    await arrow.tap();
     await expect(row.locator('.ds-row__value')).toHaveText('Hold');
+    await arrow.tap();
+    await expect(row.locator('.ds-row__value')).toHaveText('Auto-centre');
     await page.locator('.ds-screen--settings [data-act="back"]').tap();
     expect(await hook(page, (d) => d.screen)).toBe('main');
     expect(errors).toEqual([]);
@@ -175,7 +175,33 @@ test.describe('touch devices', () => {
     await page.screenshot({ path: test.info().outputPath(`touch-hud-${info.project.name}.png`) });
   });
 
-  test('two-thumb flight: throttle down + ARM tap arms, throttle up climbs, pitch stick moves forward', async ({ page }) => {
+  test('default auto-centre stick: rest → ARM, push up takes off, release hovers (stick returns to centre)', async ({ page }) => {
+    await boot(page);
+    await passGate(page);
+    await startFreeFly(page);
+    const thr = await knob(page, 'l');
+    expect(await hook(page, (d) => d.control!.throttle)).toBe(0); // take-off latch: idle at rest
+    await page.locator('[data-tbtn="arm"]').tap();
+    await page.waitForFunction(() => (window as unknown as { __drone: Hook }).__drone.armed, null, { timeout: 2000 });
+    await page.waitForTimeout(500);
+    expect(await hook(page, (d) => d.state.position.y)).toBeLessThan(0.1); // armed, still on the ground
+    await touch(page, 'pointerdown', 1, thr.x, thr.y);
+    await touch(page, 'pointermove', 1, thr.x, thr.y - thr.R * 0.7); // push up
+    await page.waitForFunction(() => (window as unknown as { __drone: Hook }).__drone.state.position.y > 1, null, { timeout: 4000 });
+    await touch(page, 'pointerup', 1, thr.x, thr.y - thr.R * 0.7); // let go
+    await page.waitForTimeout(100);
+    expect(await hook(page, (d) => d.control!.throttle)).toBeCloseTo(0.5, 1); // centre = hover
+    const y0 = await hook(page, (d) => d.state.position.y);
+    await page.waitForTimeout(1500);
+    const y1 = await hook(page, (d) => d.state.position.y);
+    expect(await hook(page, (d) => d.armed)).toBe(true);
+    expect(Math.abs(y1 - y0)).toBeLessThan(0.3); // altitude hold: stick centred = holds height
+    expect(y1).toBeGreaterThan(0.5);
+    expect(errors).toEqual([]);
+  });
+
+  test('two-thumb flight (hold-throttle mode): throttle down + ARM tap arms, throttle up climbs, pitch stick moves forward', async ({ page }) => {
+    await page.addInitScript(() => localStorage.setItem('drone-sim.settings', JSON.stringify({ v: 2, touchThrottleCentre: false })));
     await boot(page);
     await passGate(page);
     await startFreeFly(page);

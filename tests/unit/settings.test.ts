@@ -47,7 +47,7 @@ describe('settings', () => {
       volume: 0.7,
       showFps: true,
       deadzone: 0.05,
-      touchThrottleCentre: false,
+      touchThrottleCentre: true,
       touchSticksFixed: false,
     });
   });
@@ -115,7 +115,7 @@ describe('settings', () => {
       volume: 0,
       showFps: true,
       deadzone: 0.05,
-      touchThrottleCentre: false,
+      touchThrottleCentre: true,
       touchSticksFixed: true,
     });
   });
@@ -225,5 +225,17 @@ describe('settings', () => {
     expect(s.rates.yaw).toMatchObject({ center: 600, max: 670 });
     setRateValue(s, 'yaw', 'center', 5);
     expect(s.rates.yaw.center).toBe(20);
+  });
+});
+
+describe('settings v2 migration', () => {
+  it('touch throttle auto-centres by default and overrides an old stored hold default once', () => {
+    const store = new Map<string, string>();
+    const storage = { getItem: (k: string) => store.get(k) ?? null, setItem: (k: string, v: string) => void store.set(k, v) } as unknown as Storage;
+    expect(DEFAULT_SETTINGS.touchThrottleCentre).toBe(true);
+    store.set('drone-sim.settings', JSON.stringify({ ...DEFAULT_SETTINGS, touchThrottleCentre: false }));
+    expect(loadSettings(storage).touchThrottleCentre).toBe(true);
+    saveSettings({ ...loadSettings(storage), touchThrottleCentre: false }, storage);
+    expect(loadSettings(storage).touchThrottleCentre).toBe(false);
   });
 });

@@ -9,7 +9,7 @@
  */
 import { Euler, Quaternion, Vector3 } from 'three';
 import type { ControlInput, DroneState, FlightMode, AxisRates } from '../types';
-import { type DroneParams, hoverThrottle } from '../physics/drone-params';
+import { type DroneParams, GRAVITY, hoverThrottle } from '../physics/drone-params';
 import { Rng } from '../physics/rng';
 import { LowPass1 } from './filters';
 import { Mixer } from './mixer';
@@ -40,6 +40,16 @@ export const ARM_MAX_THROTTLE = 0.05;
 const I_RELAX_THROTTLE = 0.05;
 const I_RELAX_TAU = 0.05;
 const THROTTLE_EXPO = 0.3;
+/** Altitude hold (DJI 'A/Atti' with barometer): stick → climb rate, PI on vertical speed. */
+const ALT_MAX_CLIMB = 3; // m/s at full stick up
+const ALT_MAX_SINK = 2.5; // m/s at full stick down
+const ALT_DEADBAND = 0.08;
+const ALT_KP = 4; // (m/s²)/(m/s)
+const ALT_KI = 3;
+const ALT_I_LIMIT = 4; // m/s²
+const BARO_NOISE = 0.03; // m/s vertical-speed estimate noise
+const ALT_POS_KP = 1.5; // (m/s)/m: altitude error → climb rate while the stick is centred
+const ALT_POS_MAX_V = 1; // m/s
 
 export class FlightController {
   mode: FlightMode = 'angle';
@@ -51,6 +61,11 @@ export class FlightController {
   throttleExpo = THROTTLE_EXPO;
   /** throttle output scale 0.25..1 (Betaflight throttle_limit "scale") */
   throttleLimit = 1;
+  /** DJI-style altitude hold: throttle stick commands climb rate, centre holds altitude */
+  altitudeHold = false;
+  private altI = 0;
+  /** barometric altitude target captured when the stick returns to centre (NaN = not holding) */
+  private holdZ = Number.NaN;
   readonly params: DroneParams;
   readonly pidRoll: Pid;
   readonly pidPitch: Pid;
@@ -117,7 +132,39 @@ export class FlightController {
     this.rng.reseed(this.seed);
   }
 
+  /** Collective thrust fraction (0..1 per motor) that tracks the stick's climb-rate command. */
+  private altitudeCollective(dt: number, throttle: number, state: DroneState): number {
+    const s = (throttle - 0.5) * 2;
+    const a = Math.abs(s);
+    const shaped = a < ALT_DEADBAND ? 0 : (Math.sign(s) * (a - ALT_DEADBAND)) / (1 - ALT_DEADBAND);
+    let vzCmd = shaped >= 0 ? shaped * ALT_MAX_CLIMB : shaped * ALT_MAX_SINK;
+    if (shaped === 0 && throttle >= I_RELAX_THROTTLE) {
+      // stick centred: hold the altitude captured once the climb/sink has been braked
+      if (Number.isNaN(this.holdZ) && Math.abs(state.velocity.y) < 0.3) this.holdZ = state.position.y;
+      if (!Number.isNaN(this.holdZ)) {
+        const e = this.holdZ - state.position.y;
+        vzCmd = Math.max(-ALT_POS_MAX_V, Math.min(ALT_POS_MAX_V, ALT_POS_KP * e));
+      }
+    } else {
+      this.holdZ = Number.NaN;
+    }
+    const vz = state.velocity.y + this.rng.gaussian() * BARO_NOISE;
+    const err = vzCmd - vz;
+    const q = state.orientation;
+    const cosTilt = Math.max(0.35, 1 - 2 * (q.x * q.x + q.z * q.z));
+    const p = this.params;
+    const aCmd = ALT_KP * err + this.altI;
+    const frac = (p.mass * (GRAVITY + aCmd)) / (4 * p.maxThrustPerMotor * cosTilt);
+    const out = frac < 0 ? 0 : frac > 1 ? 1 : frac;
+    // integrate only while unsaturated; bleed off while the stick sits at the bottom (landed/idle)
+    if (throttle < I_RELAX_THROTTLE) this.altI *= Math.exp(-dt / 0.2);
+    else if (out === frac) this.altI = Math.max(-ALT_I_LIMIT, Math.min(ALT_I_LIMIT, this.altI + ALT_KI * err * dt));
+    return out;
+  }
+
   private resetLoops(): void {
+    this.altI = 0;
+    this.holdZ = Number.NaN;
     this.pidRoll.reset();
     this.pidPitch.reset();
     this.pidYaw.reset();
@@ -168,7 +215,8 @@ export class FlightController {
 
     const u = throttleCurve(input.throttle, this.throttleMid, this.throttleExpo) * this.throttleLimit;
     const idle = this.params.idle;
-    const thrust = this.mixer.mix(u * u, r, p, y, idle * idle);
+    const collective = this.altitudeHold ? this.altitudeCollective(dt, input.throttle, state) : u * u;
+    const thrust = this.mixer.mix(collective, r, p, y, idle * idle);
     // thrust fraction → normalised rpm command (T ∝ u²): linear torque authority at any throttle
     for (let i = 0; i < 4; i++) out[i] = Math.sqrt(thrust[i]);
     return out;
