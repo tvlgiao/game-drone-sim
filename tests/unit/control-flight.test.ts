@@ -289,3 +289,33 @@ describe('pilot-tunable FC parameters (Rates & Sensitivity)', () => {
     expect(vy(b)).toBeLessThan(vy(a));
   });
 });
+
+describe('altitude hold (touch auto-centre, DJI A/Atti style)', () => {
+  it('centred stick holds altitude within 5 cm for 5 s, even after a climb', () => {
+    const sim = airborne('angle', 1, 10);
+    sim.fc.altitudeHold = true;
+    run(sim, 1, input(1)); // climb at max rate
+    expect(sim.world.state.velocity.y).toBeGreaterThan(2.5);
+    run(sim, 1.5, input(0.5)); // release to centre
+    const y0 = sim.world.state.position.y;
+    run(sim, 5, input(0.5));
+    expect(Math.abs(sim.world.state.position.y - y0)).toBeLessThan(0.05);
+  });
+
+  it('full stick commands ≈ +3 m/s climb and ≈ −2.5 m/s sink', () => {
+    const sim = airborne('angle', 1, 50);
+    sim.fc.altitudeHold = true;
+    run(sim, 2, input(1));
+    expect(sim.world.state.velocity.y).toBeCloseTo(3, 0);
+    run(sim, 3, input(0));
+    expect(sim.world.state.velocity.y).toBeCloseTo(-2.5, 0);
+  });
+
+  it('holds altitude while tilted forward (tilt compensation)', () => {
+    const sim = airborne('angle', 1, 10);
+    sim.fc.altitudeHold = true;
+    const y0 = sim.world.state.position.y;
+    run(sim, 3, input(0.5, 0, 0.8, 0));
+    expect(Math.abs(sim.world.state.position.y - y0)).toBeLessThan(0.3);
+  });
+});

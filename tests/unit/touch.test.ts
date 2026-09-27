@@ -60,8 +60,10 @@ describe('TouchSticks (pure stick math)', () => {
 
   it('auto-centre throttle springs to centre (hover) on release', () => {
     const s = sticks('l', true);
-    expect(s.pos.ly).toBe(0);
+    expect(s.pos.ly).toBe(-1); // take-off latch: idle until first push up
     s.down('l', 1, 100, 300);
+    s.move(1, 100, 300 - R); // push up → latch released
+    expect(s.pos.ly).toBe(1);
     s.move(1, 100, 300 + R);
     expect(s.pos.ly).toBe(-1);
     s.up(1);
@@ -163,7 +165,7 @@ describe('TouchInput + InputManager', () => {
   });
 
   it('two thumbs: left pushes throttle, right pitches forward (deadzone applied, square gate off)', () => {
-    const { win, im, down } = setup();
+    const { win, im, down } = setup({ touchThrottleCentre: false }); // real-gimbal hold mode
     down(1, 100, 300); // grab throttle at bottom (value -1): base centre 60 px above
     ptr(win, 'pointermove', 1, 100, 240); // centre → throttle 0.5
     down(2, 600, 200);
@@ -223,11 +225,12 @@ describe('TouchInput + InputManager', () => {
     im.dispose();
   });
 
-  it('settings: stick mode moves the throttle to the right stick; auto-centre throttle rests at 50 %', () => {
+  it('settings: stick mode moves the throttle to the right stick; auto-centre idles at 0 until the first push', () => {
     const { im } = setup({ stickMode: 1, touchThrottleCentre: true });
     const f = im.poll(1 / 60);
     expect(im.touch.sticks.r.holdsThrottle).toBe(true);
-    expect(f.control.throttle).toBeCloseTo(0.5, 1);
+    expect(f.control.throttle).toBe(0);
+    expect(im.touch.sticks.r.y).toBe(0); // knob rests at centre
     im.dispose();
   });
 
@@ -237,5 +240,60 @@ describe('TouchInput + InputManager', () => {
     t.sticks.down('l', 1, 10, 10);
     t.sticks.move(1, 20, 20);
     expect(t.sticks.pos).toBe(pos);
+  });
+});
+
+describe('auto-centre throttle take-off latch (touch default)', () => {
+  function sticks(): TouchSticks {
+    const t = new TouchSticks();
+    t.configure('l', true, false, 60);
+    t.setThrottle(0.5);
+    t.latchTakeoff();
+    return t;
+  }
+
+  it('outputs zero throttle at rest after a new session, so the FC can arm', () => {
+    const t = sticks();
+    expect(t.l.y).toBe(0);
+    expect(t.pos.ly).toBe(-1);
+  });
+
+  it('releases the latch on the first push above centre; release then springs to hover (centre)', () => {
+    const t = sticks();
+    t.down('l', 1, 100, 300);
+    t.move(1, 100, 300 - 30); // +0.5
+    expect(t.latched).toBe(false);
+    expect(t.pos.ly).toBeCloseTo(0.5, 5);
+    t.up(1);
+    expect(t.pos.ly).toBe(0);
+  });
+
+  it('small wiggles below the push threshold keep the latch (no accidental take-off)', () => {
+    const t = sticks();
+    t.down('l', 1, 100, 300);
+    t.move(1, 100, 300 - 6); // +0.1
+    expect(t.latched).toBe(true);
+    expect(t.pos.ly).toBe(-1);
+  });
+
+  it('left stick X (yaw) always springs back to centre on release', () => {
+    const t = sticks();
+    t.down('l', 1, 100, 300);
+    t.move(1, 150, 300);
+    expect(t.pos.lx).toBeCloseTo(0.83, 1);
+    t.up(1);
+    expect(t.pos.lx).toBe(0);
+  });
+
+  it('hold-throttle mode (real gimbal) has no latch and keeps throttle where released', () => {
+    const t = new TouchSticks();
+    t.configure('l', false, false, 60);
+    t.setThrottle(0);
+    t.latchTakeoff();
+    expect(t.latched).toBe(false);
+    t.down('l', 1, 100, 300);
+    t.move(1, 100, 300 - 120); // grabbed relative at -1: two radii up = full
+    t.up(1);
+    expect(t.pos.ly).toBeCloseTo(1, 5);
   });
 });

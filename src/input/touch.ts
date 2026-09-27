@@ -13,6 +13,9 @@ export const TOUCH_BUTTONS: readonly TouchButton[] = ['arm', 'toggleMode', 'cycl
 const clamp = (v: number, lo: number, hi: number): number => (v < lo ? lo : v > hi ? hi : v);
 
 /** One virtual stick: base centre + value (−1..1 per axis, Y +up), square-clamped per axis. */
+/** Throttle stick deflection above centre that releases the take-off latch. */
+const TAKEOFF_PUSH = 0.15;
+
 export class StickTrack {
   /** pointerId holding the stick, −1 when free */
   pointerId = -1;
@@ -53,6 +56,11 @@ export class TouchSticks {
   /** stick positions in InputFrame convention, fed to mapSticks */
   readonly pos: Record<StickSlot, number> = { lx: 0, ly: -1, rx: 0, ry: 0 };
   readonly opts: TouchStickOptions = { radius: 60, centreThrottle: false, fixed: false };
+  /**
+   * Take-off latch for the auto-centring throttle: while set, the throttle output stays at 0 (so
+   * the FC can arm and the quad idles on the ground) until the pilot first pushes the stick up.
+   */
+  latched = false;
   private throttleSide: TouchSide = 'l';
 
   constructor() {
@@ -78,6 +86,8 @@ export class TouchSticks {
       o.centreThrottle = centreThrottle;
       const t = this.track(throttleSide);
       if (!t.active && centreThrottle) t.y = 0;
+      // entering auto-centre on the ground: idle until the first push up
+      this.latched = centreThrottle;
     }
     this.sync();
   }
@@ -140,6 +150,12 @@ export class TouchSticks {
     if (this.r.active) this.release(this.r);
   }
 
+  /** Re-arms the take-off latch (new session, respawn, disarm). No effect in hold-throttle mode. */
+  latchTakeoff(): void {
+    this.latched = this.opts.centreThrottle;
+    this.sync();
+  }
+
   /** Throttle 0..1 → throttle stick position (e.g. zero it for a new session). */
   setThrottle(v: number): void {
     const t = this.track(this.throttleSide);
@@ -164,11 +180,13 @@ export class TouchSticks {
   }
 
   private sync(): void {
+    const thr = this.track(this.throttleSide);
+    if (this.latched && (!this.opts.centreThrottle || thr.y > TAKEOFF_PUSH)) this.latched = false;
     const p = this.pos;
     p.lx = this.l.x;
-    p.ly = this.l.y;
+    p.ly = this.l.holdsThrottle && this.latched ? -1 : this.l.y;
     p.rx = this.r.x;
-    p.ry = this.r.y;
+    p.ry = this.r.holdsThrottle && this.latched ? -1 : this.r.y;
   }
 }
 

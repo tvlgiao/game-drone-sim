@@ -80,7 +80,7 @@ export const DEFAULT_SETTINGS: Readonly<Settings> = Object.freeze({
   volume: 0.7,
   showFps: true,
   deadzone: 0.05,
-  touchThrottleCentre: false,
+  touchThrottleCentre: true,
   touchSticksFixed: false,
 });
 
@@ -249,12 +249,18 @@ export function defaultStorage(): Storage | null {
 }
 
 /** Loads persisted settings; bad JSON / missing storage yield defaults. `undefined` = localStorage. */
+/** Bumped when a default changes in a way stored settings must not override. */
+const SETTINGS_VERSION = 2;
+
 export function loadSettings(storage: Storage | null = defaultStorage()): Settings {
   if (!storage) return cloneSettings(DEFAULT_SETTINGS);
   try {
     const text = storage.getItem(SETTINGS_KEY);
     if (!text) return cloneSettings(DEFAULT_SETTINGS);
-    return validateSettings(JSON.parse(text));
+    const raw = JSON.parse(text) as Record<string, unknown>;
+    // v2: touch throttle auto-centres by default (MOBA-style); drop the old stored default.
+    if (raw && raw.v !== SETTINGS_VERSION) delete raw.touchThrottleCentre;
+    return validateSettings(raw);
   } catch {
     return cloneSettings(DEFAULT_SETTINGS);
   }
@@ -264,7 +270,7 @@ export function loadSettings(storage: Storage | null = defaultStorage()): Settin
 export function saveSettings(s: Settings, storage: Storage | null = defaultStorage()): void {
   if (!storage) return;
   try {
-    storage.setItem(SETTINGS_KEY, JSON.stringify(validateSettings(s)));
+    storage.setItem(SETTINGS_KEY, JSON.stringify({ ...validateSettings(s), v: SETTINGS_VERSION }));
   } catch {
     /* storage unavailable */
   }
