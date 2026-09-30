@@ -11,8 +11,11 @@ interface Hook {
   armed: boolean;
   camera: string;
   screen: string;
-  xr: { presenting: boolean; source: string; latched: boolean };
+  xr: { presenting: boolean; source: string; latched: boolean; panelDraws: number };
+  pixelRatio: number;
+  renderScale: number;
   stats: () => { calls: number; triangles: number };
+  action: (a: { type: string }) => void;
 }
 
 type Hand = 'left' | 'right';
@@ -45,10 +48,15 @@ test('emulated Quest 2: enter VR, fly with Touch controllers, pause and exit', a
     if (m.type() === 'error') errors.push(m.text());
   });
   page.on('pageerror', (e) => errors.push(e.message));
+  // fixed quality: 'auto' resizes on its own as the frame rate moves, which would hide a stale DPR
+  await page.addInitScript(() => localStorage.setItem('drone-sim.settings', JSON.stringify({ quality: 'high' })));
   await page.goto('/?xremu=1');
   await page.waitForFunction(() => !!(window as unknown as Partial<W>).__drone && !!(window as unknown as Partial<W>).__xrDevice, null, { timeout: 20_000 });
 
   const flatTier = await page.evaluate(() => (window as unknown as W).__drone.tier);
+  // DPR cap of the tier (auto quality moves renderScale with the frame rate, so divide it out)
+  const dprCap = () => page.evaluate(() => { const d = (window as unknown as W).__drone; return Math.round((d.pixelRatio / d.renderScale) * 100) / 100; });
+  const flatDpr = await dprCap();
   const enter = page.getByRole('button', { name: 'Enter VR' });
   await expect(enter).toBeVisible();
   await enter.click();
@@ -72,6 +80,13 @@ test('emulated Quest 2: enter VR, fly with Touch controllers, pause and exit', a
   await page.waitForFunction((g) => (window as unknown as W).__drone.state.position.y > g + 0.8, ground, { timeout: 8_000 });
   expect(await page.evaluate(() => (window as unknown as W).__drone.xr.latched)).toBe(false);
 
+  // The VR card (canvas → texture upload) refreshes its speed/altitude at ≤ 10 Hz, not every frame
+  const d0 = await page.evaluate(() => (window as unknown as W).__drone.xr.panelDraws);
+  await page.waitForTimeout(2000);
+  const draws = (await page.evaluate(() => (window as unknown as W).__drone.xr.panelDraws)) - d0;
+  expect(draws).toBeGreaterThan(0);
+  expect(draws).toBeLessThanOrEqual(24);
+
   // Centre: altitude hold keeps it in the air
   await stick(page, 'left', 0, 0);
   await page.waitForTimeout(1200);
@@ -93,6 +108,29 @@ test('emulated Quest 2: enter VR, fly with Touch controllers, pause and exit', a
   await page.waitForFunction(() => !(window as unknown as W).__drone.xr.presenting, null, { timeout: 10_000 });
   expect(await page.evaluate(() => (window as unknown as W).__drone.screen)).toBe('pause');
   expect(await page.evaluate(() => (window as unknown as W).__drone.tier)).toBe(flatTier);
+  // the flat-screen pixel ratio is restored after three has handed the canvas back
+  await page.waitForTimeout(300);
+  expect(await dprCap()).toBe(flatDpr);
 
   expect(errors).toEqual([]);
+});
+
+test('two Enter VR requests in one tick start one working session (controllers still fly)', async ({ page }) => {
+  const errs: string[] = [];
+  page.on('pageerror', (e) => errs.push(e.message));
+  await page.goto('/?xremu=1');
+  await page.waitForFunction(() => !!(window as unknown as Partial<W>).__drone && !!(window as unknown as Partial<W>).__xrDevice, null, { timeout: 20_000 });
+  // two requests in the same tick: the second must neither start nor tear down a session
+  await page.evaluate(() => {
+    const d = (window as unknown as W).__drone;
+    d.action({ type: 'enter-vr' });
+    d.action({ type: 'enter-vr' });
+  });
+  await page.waitForFunction(() => (window as unknown as W).__drone.xr.presenting, null, { timeout: 10_000 });
+  await page.waitForTimeout(500);
+  expect(await page.evaluate(() => (window as unknown as W).__drone.xr.presenting)).toBe(true);
+  await press(page, 'left', 'x-button');
+  await page.waitForFunction(() => (window as unknown as W).__drone.race.status === 'freefly', null, { timeout: 5_000 });
+  expect(await page.evaluate(() => (window as unknown as W).__drone.xr.source)).toBe('xr');
+  expect(errs).toEqual([]);
 });

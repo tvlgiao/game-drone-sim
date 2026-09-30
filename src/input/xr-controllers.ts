@@ -78,6 +78,8 @@ export class XrControllers {
     if (!sources) {
       this.connected = false;
       this.clear();
+      // no stale edges or held state into the next session
+      for (const k of BUTTON_KEYS) this.pressed[k] = this.prev[k] = false;
     }
   }
 

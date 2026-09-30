@@ -29,6 +29,8 @@ export class XrPanel {
   private readonly ctx: CanvasRenderingContext2D;
   private readonly texture: THREE.CanvasTexture;
   private key = '';
+  /** canvas redraws + texture uploads so far (each is a full 1024×384 upload on the headset GPU) */
+  draws = 0;
   private layout: XrPanelContent['layout'] = 'menu';
 
   constructor() {
@@ -69,6 +71,7 @@ export class XrPanel {
   }
 
   private draw(c: XrPanelContent): void {
+    this.draws++;
     const g = this.ctx;
     g.clearRect(0, 0, W, H);
     const r = 36;
