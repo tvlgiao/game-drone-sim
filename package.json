@@ -14,7 +14,8 @@
     "cap:sync": "npm run build && cap sync",
     "ios": "npm run cap:sync && cap open ios",
     "android": "npm run cap:sync && cap open android",
-    "android:apk": "npm run cap:sync && cd android && ./gradlew assembleDebug"
+    "android:apk": "npm run cap:sync && cd android && ./gradlew assembleDebug",
+    "android:aab": "npm run cap:sync && cd android && DRONESIM_UPLOAD_STORE=$HOME/.keystores/cowork-dronesim-play-upload.jks DRONESIM_UPLOAD_PASSWORD=$(security find-generic-password -a cowork-dronesim-play -s \"Drone Sim Play upload keystore\" -w) ./gradlew bundleRelease"
   },
   "dependencies": {
     "@capacitor/android": "^8.5.2",
