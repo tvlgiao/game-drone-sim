@@ -27,6 +27,7 @@ import type { ButtonEvents, CameraMode, ControlInput, DroneState, GameEvent, Inp
 const PHYSICS_DT = 1 / 1000;
 const CAMERA_CYCLE: CameraMode[] = ['los', 'fpv', 'chase'];
 const BUTTON_KEYS: readonly (keyof ButtonEvents)[] = ['arm', 'toggleMode', 'cycleCamera', 'reset', 'pause', 'confirm'];
+const XR_PANEL_PERIOD = 0.1;
 const FLYING = new Set(['countdown', 'racing', 'crashed', 'freefly']);
 
 function safeStorage(): Storage | null {
@@ -81,6 +82,10 @@ function boot(): void {
   const dynRes = new DynamicResolution(targetFps(device.form));
 
   let xrSession: XRSession | null = null;
+  let xrStarting = false;
+  /** the VR card redraws a canvas texture: refresh its numbers at most every XR_PANEL_PERIOD */
+  let xrPanelAt = -Infinity;
+  let xrPanelStatus = '';
   let xrToast = '';
   let xrToastUntil = 0;
   /** Toast on the DOM HUD and, while in a headset, on the XR card. */
@@ -215,25 +220,37 @@ function boot(): void {
 
   /** Start an immersive-vr session (runs inside the menu click, which WebXR requires). */
   async function enterVr(): Promise<void> {
-    if (xrSession) return;
+    // a second click while the first request is pending must not start (or tear down) anything
+    if (xrSession || xrStarting) return;
+    xrStarting = true;
+    let session: XRSession | null = null;
     try {
-      const session = await requestVrSession(navigator);
+      session = await requestVrSession(navigator);
       xrSession = session;
-      session.addEventListener('end', onVrEnd);
-      input.xr.setSources(() => session.inputSources);
+      const granted = session;
+      input.xr.setSources(() => granted.inputSources);
       input.latchTakeoff();
       await view.startXr(session);
       loop.reset();
     } catch (err) {
-      if (xrSession) xrSession.removeEventListener('end', onVrEnd);
       xrSession = null;
       input.xr.setSources(null);
       view.endXr();
+      // a granted session that failed to start must not leave the headset stuck in immersive mode
+      if (session) void session.end().catch(() => undefined);
       toast(`VR unavailable: ${(err as Error).message}`);
+    } finally {
+      xrStarting = false;
     }
   }
 
+  /**
+   * three's 'sessionend' fires after it has restored the flat-screen pixel ratio and size and
+   * cleared isPresenting; the session's own 'end' event runs before that, too early to resize.
+   */
+  view.renderer.xr.addEventListener('sessionend', onVrEnd);
   function onVrEnd(): void {
+    if (!xrSession) return;
     xrSession = null;
     input.xr.setSources(null);
     view.endXr();
@@ -472,9 +489,13 @@ function boot(): void {
     if (inVr) {
       // the take-off prompt is stale as soon as the throttle leaves the latch
       if (xrToast && (performance.now() > xrToastUntil || (xrToast.startsWith('Armed') && !input.takeoffLatched))) xrToast = '';
-      view.xrPanel.set(
-        xrHudContent({ race: snap, armed: sim.fc.armed, latched: input.takeoffLatched, mode: sim.fc.mode, camera: cameraMode, altitude: drone.position.y, speed, toast: xrToast }),
-      );
+      if (time - xrPanelAt >= XR_PANEL_PERIOD || snap.status !== xrPanelStatus) {
+        xrPanelAt = time;
+        xrPanelStatus = snap.status;
+        view.xrPanel.set(
+          xrHudContent({ race: snap, armed: sim.fc.armed, latched: input.takeoffLatched, mode: sim.fc.mode, camera: cameraMode, altitude: drone.position.y, speed, toast: xrToast }),
+        );
+      }
     }
 
     hud.update({
@@ -525,7 +546,7 @@ function boot(): void {
       return cameraMode;
     },
     get xr() {
-      return { presenting: view.presenting, source: input.activeSource, latched: input.takeoffLatched };
+      return { presenting: view.presenting, source: input.activeSource, latched: input.takeoffLatched, panelDraws: view.xrPanel.draws };
     },
     stats: () => view.stats(),
     get audio() {
