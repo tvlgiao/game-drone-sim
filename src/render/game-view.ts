@@ -232,6 +232,8 @@ export class GameView {
     }
     this.drone.camera.visible = this.rig.fpvWeight < 0.5;
     this.drone.navLights.visible = this.rig.fpvWeight < 0.5;
+    // VR FPV: each eye sits ±32 mm beside the lens, inside the ducts, so the quad would fill the view
+    this.drone.root.visible = !(xr && this.rig.fpvWeight >= 0.5);
     this.drone.update(f.drone, dt, t, f.cameraTiltDeg, _eye);
     this.losMarker.update(f.drone.position, _eye, this.rig.losWeight, t);
     this.arrow.update(f.drone.position, f.drone.orientation, _eye, f.headingArrow === true && this.rig.fpvWeight < 0.5);
