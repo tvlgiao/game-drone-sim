@@ -40,6 +40,12 @@ describe('device detection', () => {
     expect(isStandalone(env({ displayModeApp: true }))).toBe(true);
   });
 
+  it('a Capacitor app shell counts as standalone (no Add to Home Screen prompt in the iOS / Android app)', () => {
+    expect(isStandalone(env({ native: 'ios' }))).toBe(true);
+    expect(isStandalone(env({ native: 'android' }))).toBe(true);
+    expect(isStandalone(env({ native: null }))).toBe(false);
+  });
+
   it('vibrate only when present and never on iOS', () => {
     expect(canVibrate(env({ userAgent: ANDROID, maxTouchPoints: 5, hasVibrate: true }))).toBe(true);
     expect(canVibrate(env({ userAgent: IPHONE, maxTouchPoints: 5, hasVibrate: true }))).toBe(false);

@@ -217,6 +217,11 @@ export class Hud {
     return this.menus.current;
   }
 
+  /** iOS app: hide the main-menu Quit button. */
+  hideExit(): void {
+    this.menus.hideExit();
+  }
+
   /** WebXR headset: show the Enter VR button on the main menu. */
   enableVr(): void {
     this.menus.enableVr();

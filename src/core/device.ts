@@ -4,7 +4,11 @@
  * iPadOS reports a Mac user agent, so touch is detected from touch points + pointer media, never UA alone.
  */
 
+import { Capacitor } from '@capacitor/core';
+
 export type FormFactor = 'phone' | 'tablet' | 'desktop';
+/** Capacitor app shell the game runs in, null in a browser. */
+export type NativeShell = 'ios' | 'android' | null;
 
 /** Raw browser facts the helpers decide on. */
 export interface DeviceEnv {
@@ -21,6 +25,8 @@ export interface DeviceEnv {
   displayModeApp: boolean;
   /** navigator.vibrate exists */
   hasVibrate: boolean;
+  /** running inside the Capacitor iOS / Android app */
+  native?: NativeShell;
 }
 
 export interface DeviceInfo {
@@ -31,6 +37,8 @@ export interface DeviceInfo {
   /** Fullscreen API usable on document.documentElement */
   fullscreen: boolean;
   vibrate: boolean;
+  /** Capacitor app shell (full screen already, no Add to Home Screen, platform quit rules) */
+  native: NativeShell;
 }
 
 /** Short screen side below this (CSS px) = phone. */
@@ -52,8 +60,8 @@ export function formFactor(env: Pick<DeviceEnv, 'maxTouchPoints' | 'coarsePointe
   return short > 0 && short < PHONE_MAX_SHORT_SIDE ? 'phone' : 'tablet';
 }
 
-export function isStandalone(env: Pick<DeviceEnv, 'navigatorStandalone' | 'displayModeApp'>): boolean {
-  return env.navigatorStandalone || env.displayModeApp;
+export function isStandalone(env: Pick<DeviceEnv, 'navigatorStandalone' | 'displayModeApp' | 'native'>): boolean {
+  return env.navigatorStandalone || env.displayModeApp || !!env.native;
 }
 
 /** Haptics: iOS Safari has no navigator.vibrate (and must never be asked). */
@@ -85,6 +93,7 @@ export function readEnv(win: Window): DeviceEnv {
     navigatorStandalone: nav.standalone === true,
     displayModeApp: media(win, '(display-mode: standalone)') || media(win, '(display-mode: fullscreen)'),
     hasVibrate: typeof nav.vibrate === 'function',
+    native: nativeShell(),
   };
 }
 
@@ -95,9 +104,17 @@ export function detectDevice(win: Window = window): DeviceInfo {
     form: formFactor(env),
     ios: isIOS(env),
     standalone: isStandalone(env),
-    fullscreen: fullscreenSupported(win.document),
+    // an app shell is already full screen; its WebView's Fullscreen API is absent or a no-op
+    fullscreen: !env.native && fullscreenSupported(win.document),
     vibrate: canVibrate(env),
+    native: env.native ?? null,
   };
+}
+
+function nativeShell(): NativeShell {
+  if (!Capacitor.isNativePlatform()) return null;
+  const p = Capacitor.getPlatform();
+  return p === 'ios' || p === 'android' ? p : null;
 }
 
 // ---------------------------------------------------------------- Fullscreen API (+ webkit prefix)

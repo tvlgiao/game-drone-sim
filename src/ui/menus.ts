@@ -379,6 +379,16 @@ export class Menus {
     if (this.current !== 'none') this.items = this.collectItems(this.screens.get(this.current)!);
   }
 
+  /** iOS app: no Quit (apps must not close themselves); the menu stays as the home screen. */
+  hideExit(): void {
+    for (const el of this.screens.values()) {
+      el.querySelectorAll<HTMLElement>('[data-act="exit"]').forEach((x) => {
+        x.hidden = true;
+      });
+    }
+    if (this.current !== 'none') this.items = this.collectItems(this.screens.get(this.current)!);
+  }
+
   /** WebXR headset (immersive-vr supported): reveal the Enter VR button. */
   enableVr(): void {
     for (const el of this.screens.values()) {

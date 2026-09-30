@@ -89,6 +89,7 @@ function boot(): void {
     xrToast = msg;
     xrToastUntil = performance.now() + 2200;
   }
+  if (device.native === 'ios') hud.hideExit();
   void vrSupported(navigator).then((ok) => {
     if (ok) hud.enableVr();
   });
@@ -339,6 +340,10 @@ function boot(): void {
     race.toMenu();
     placeDrone(spawnPos, LOFT_LEVEL.spawn.yaw);
     void audio.suspend();
+    if (device.native === 'android') {
+      void import('@capacitor/app').then(({ App }) => App.exitApp());
+      return;
+    }
     void exitFullscreen(document);
     window.close(); // only works for script-opened windows; otherwise the "closed" screen stays
     hud.showScreen('bye');
