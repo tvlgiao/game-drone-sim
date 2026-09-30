@@ -1,0 +1,10 @@
+[
+  {
+    "relation": ["delegate_permission/common.handle_all_urls"],
+    "target": {
+      "namespace": "android_app",
+      "package_name": "com.cowork.dronesim",
+      "sha256_cert_fingerprints": ["D3:4F:86:7E:4F:D6:1B:68:0D:4F:44:A8:5D:54:D5:49:B9:FC:A5:FB:EF:E1:60:BA:8C:1D:56:DA:24:B0:AA:12"]
+    }
+  }
+]
