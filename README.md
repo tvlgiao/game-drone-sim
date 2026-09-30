@@ -9,11 +9,13 @@ flight controller), Xbox controller support, 12-ring race through a night-time i
 landscape). iPad Safari goes full screen from the start tap. iPhone Safari cannot hide its bars for web
 games: tap **Share → Add to Home Screen** and launch *Drone Sim* from the Home Screen for full screen.
 
-**Meta Quest (VR):** open the link in the Quest Browser and press **Enter VR**. You stand at the pilot's
-spot and watch the quad (LOS); the right stick click switches to horizon-locked FPV / chase. Touch
-controllers, Mode 2: left thumbstick throttle/yaw (centre holds altitude), right thumbstick pitch/roll,
-**A** arm · **B** Angle/Acro · **X** reset · **Y** pause · left stick click recentres. On the VR menu card:
-A = primary, X = secondary, B = leave VR. Without a headset, add `?xremu=1` to emulate a Quest 2 (IWER).
+**Meta Quest (VR):** open the link in the Quest Browser and press **Enter VR**. You stand on a raised
+platform in the loft corner and watch the quad (LOS); the right stick click switches to horizon-locked
+FPV / chase. Touch controllers fly DJI-style, Mode 2: left thumbstick throttle/yaw (centre holds
+altitude), right thumbstick speed forward/sideways (release = brake and hold position, Angle mode),
+**A** arm · **B** Angle/Acro · **X** reset · **Y** pause · left trigger heading arrow · left stick click
+recentres. The quad's front is green, its rear red. On the VR menu card: A = primary, X = secondary,
+B = leave VR. Without a headset, add `?xremu=1` to emulate a Quest 2 (IWER).
 
 ```bash
 npm install && npm run dev   # local dev

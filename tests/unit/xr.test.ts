@@ -2,7 +2,9 @@ import { describe, expect, it } from 'vitest';
 import { DEFAULT_SETTINGS } from '../../src/core/settings';
 import { isQuestBrowser } from '../../src/core/xr';
 import { InputManager } from '../../src/input/input-manager';
-import { XR_BTN, XrControllers, type XrSourceLike } from '../../src/input/xr-controllers';
+import { XR_BTN, XR_YAW_SCALE, XrControllers, shapeXrControl, xrExpo, type XrSourceLike } from '../../src/input/xr-controllers';
+import { actualRate, RATE_PRESETS } from '../../src/control/rates';
+import { loadSettings } from '../../src/core/settings';
 import { xrHudContent, type XrHudState } from '../../src/ui/xr-hud';
 import type { RaceSnapshot } from '../../src/types';
 
@@ -153,5 +155,59 @@ describe('isQuestBrowser', () => {
   it('detects Quest Browser user agents only', () => {
     expect(isQuestBrowser('Mozilla/5.0 (X11; Linux x86_64; Quest 2) AppleWebKit/537.36 (KHTML, like Gecko) OculusBrowser/35.0 Chrome/128.0 VR Safari/537.36')).toBe(true);
     expect(isQuestBrowser('Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 Chrome/128.0 Safari/537.36')).toBe(false);
+  });
+});
+
+describe('XR stick shaping (softer thumbsticks)', () => {
+  it('expo keeps the ends and softens the centre', () => {
+    expect(xrExpo(1)).toBe(1);
+    expect(xrExpo(-1)).toBe(-1);
+    expect(xrExpo(0.5)).toBeCloseTo(0.275, 3);
+  });
+
+  it('full yaw stick turns ≈ 130°/s on the freestyle rates instead of 670°/s', () => {
+    const c = { yaw: 1, pitch: 0, roll: 0 };
+    shapeXrControl(c);
+    expect(c.yaw).toBe(XR_YAW_SCALE);
+    const rate = actualRate(c.yaw, RATE_PRESETS.freestyle);
+    expect(rate).toBeGreaterThan(100);
+    expect(rate).toBeLessThan(160);
+    expect(actualRate(1, RATE_PRESETS.freestyle)).toBe(670);
+  });
+
+  it('the input manager applies the shaping on the xr source only', () => {
+    const im = new InputManager(fakeWindow(), { ...DEFAULT_SETTINGS });
+    im.xr.setSources(() => [touch('left', 1, 0), touch('right', 0.5, 0)]);
+    im.xr.latched = false;
+    const f = im.poll(1 / 72);
+    expect(f.control.yaw).toBeCloseTo(XR_YAW_SCALE, 3);
+    expect(f.control.roll).toBeLessThan(0.35);
+  });
+});
+
+describe('left trigger (heading arrow toggle)', () => {
+  it('fires once when the analog trigger passes 0.6', () => {
+    const xr = new XrControllers();
+    const trig = (v: number): XrSourceLike => {
+      const src = touch('left');
+      (src.gamepad!.buttons as { pressed: boolean; value: number }[])[XR_BTN.TRIGGER] = { pressed: v > 0.1, value: v };
+      return src;
+    };
+    let v = 0.3;
+    xr.setSources(() => [trig(v), touch('right')]);
+    xr.poll(0);
+    expect(xr.pressed.lTrigger).toBe(false);
+    v = 0.9;
+    xr.poll(16);
+    expect(xr.pressed.lTrigger).toBe(true);
+    xr.poll(32);
+    expect(xr.pressed.lTrigger).toBe(false);
+  });
+
+  it('heading arrow defaults on and survives a settings round-trip', () => {
+    expect(DEFAULT_SETTINGS.headingArrow).toBe(true);
+    const store = new Map<string, string>([['drone-sim.settings', JSON.stringify({ headingArrow: false })]]);
+    const storage = { getItem: (k: string) => store.get(k) ?? null, setItem: () => undefined } as unknown as Storage;
+    expect(loadSettings(storage).headingArrow).toBe(false);
   });
 });

@@ -77,6 +77,8 @@ export interface XrButtonEdges {
   y: boolean;
   rStick: boolean;
   lStick: boolean;
+  /** left index trigger */
+  lTrigger: boolean;
 }
 
 export type FlightMode = 'acro' | 'angle';

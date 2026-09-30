@@ -9,6 +9,7 @@ import {
 } from '../../src/game/race';
 import type { Contact, DroneState, GameEvent, LevelDef } from '../../src/types';
 import { LOFT_LEVEL } from '../../src/game/level-data';
+import { Simulation } from '../../src/physics/simulation';
 
 class MemStorage implements Storage {
   private m = new Map<string, string>();
@@ -290,13 +291,13 @@ describe('RaceController respawn point', () => {
     expect(p.yaw).toBe(LEVEL.spawn.yaw);
   });
 
-  it('sits past the last passed ring facing the next one', () => {
+  it('sits on the floor past the last passed ring, facing the next one', () => {
     const rc = startedRace();
     const s = drone(new Vector3(0, 1.5, 0));
     fly(rc, s, new Vector3(0, 1.5, -3));
     const p = rc.respawnPoint();
     expect(p.position.x).toBeCloseTo(0);
-    expect(p.position.y).toBeCloseTo(1.5);
+    expect(p.position.y).toBeCloseTo(LEVEL.spawn.position[1]);
     expect(p.position.z).toBeCloseTo(-2 - RESPAWN_OFFSET);
     expect(p.yaw).toBeCloseTo(0); // next ring straight ahead along −Z
   });
@@ -307,7 +308,41 @@ describe('RaceController respawn point', () => {
     expect(yawTowards({ x: 0, z: 0 }, { x: 1, z: 0 })).toBeCloseTo(-Math.PI / 2);
   });
 
-  it('keeps y ≥ 0.3 for low rings on the real level', () => {
+  it('lands on a prop top below the checkpoint instead of the floor', () => {
+    const lvl: LevelDef = {
+      ...LEVEL,
+      props: [{ id: 'crate', kind: 'crate', position: [0, 0, -3.2], size: [1, 0.8, 1], colliders: [{ id: 'crate', shape: { kind: 'box', center: [0, 0.4, -3.2], half: [0.5, 0.4, 0.5] } }] }],
+    };
+    const rc = new RaceController(lvl, null);
+    rc.startRace();
+    idle(rc, 3.01);
+    fly(rc, drone(new Vector3(0, 1.5, 0)), new Vector3(0, 1.5, -3));
+    expect(rc.respawnPoint().position.y).toBeCloseTo(0.8 + LEVEL.spawn.position[1]);
+  });
+
+  it('never loops crash → respawn: a disarmed quad set down at every Loft checkpoint stays put', () => {
+    for (let i = 0; i < LOFT_LEVEL.rings.length - 1; i++) {
+      const rc = new RaceController(LOFT_LEVEL, null);
+      rc.startRace();
+      idle(rc, 3.01);
+      (rc as unknown as { lastPassed: number }).lastPassed = i;
+      const p = rc.respawnPoint();
+      const sim = new Simulation(LOFT_LEVEL);
+      sim.world.reset(p.position, p.yaw);
+      sim.setArmed(false, { throttle: 0, yaw: 0, pitch: 0, roll: 0 });
+      const prev = new Vector3();
+      const crashes: number[] = [];
+      for (let k = 0; k < 3000; k++) {
+        prev.copy(sim.world.state.position);
+        const contacts = sim.step(DT, { throttle: 0, yaw: 0, pitch: 0, roll: 0 });
+        for (const e of rc.step(DT, prev, sim.world.state, contacts)) if (e.type === 'crash') crashes.push(k);
+      }
+      expect({ ring: i, crashes }).toEqual({ ring: i, crashes: [] });
+      expect(sim.world.state.position.distanceTo(p.position)).toBeLessThan(0.2);
+    }
+  });
+
+  it('keeps the checkpoint on the floor for low rings on the real level', () => {
     const lvl: LevelDef = { ...LOFT_LEVEL, rings: [{ ...LOFT_LEVEL.rings[0]!, position: [0, 0.2, 0], direction: [0, -1, 0] }, LOFT_LEVEL.rings[1]!] };
     const rc = new RaceController(lvl, null);
     rc.startRace();
@@ -315,7 +350,7 @@ describe('RaceController respawn point', () => {
     const s = drone(new Vector3(0, 0.5, 0));
     fly(rc, s, new Vector3(0, -0.05, 0));
     expect(rc.snapshot().nextRing).toBe(1);
-    expect(rc.respawnPoint().position.y).toBeGreaterThanOrEqual(0.3);
+    expect(rc.respawnPoint().position.y).toBeCloseTo(LOFT_LEVEL.spawn.position[1]);
   });
 });
 
