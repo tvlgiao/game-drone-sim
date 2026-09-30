@@ -45,16 +45,33 @@ and is hidden on iOS (apps must not close themselves).
 
 ## Meta Horizon Store (Quest)
 
-Needs the game hosted at an HTTPS origin whose **root** serves `/.well-known/assetlinks.json`
-(a GitHub *project* page cannot) — a custom domain on GitHub Pages / Cloudflare Pages.
+Hosted at **https://dronesim.coworkgamestudio.com** (GitHub Pages custom domain, CNAME `dronesim` →
+`tvlgiao.github.io` on Namecheap). `public/.well-known/assetlinks.json` binds the domain to the
+package; `deploy.yml` sets `include-hidden-files` so it is published.
 
-1. Manifest for the store build: absolute `start_url` on that origin, `"display": "standalone"`,
-   `"ovr_package_name": "com.cowork.dronesim"`.
-2. `ovr-platform-util create-pwa -o drone-sim-quest.apk --android-sdk ~/Library/Android/sdk
-   --manifest-content-file manifest.json --package-name com.cowork.dronesim` (signs with a keystore).
-3. Publish `assetlinks.json` with that keystore's SHA-256 fingerprint.
-4. Meta Developer Dashboard → organisation → new Quest app → upload the APK to a release channel
-   (ALPHA for testers) → store listing, age rating (IARC), data-use checkup → submit for review.
+Signing key: `~/.keystores/cowork-dronesim-quest.jks`, alias `quest`, password in the macOS Keychain
+(`security find-generic-password -a cowork-dronesim-quest -s "Drone Sim Quest keystore" -w`).
+SHA-256 `D3:4F:86:7E:…:24:B0:AA:12` — must match `assetlinks.json`. **Back the keystore up**: the
+store rejects updates signed with any other key.
+
+Build (Meta's Bubblewrap fork; JDK 17 + SDK paths in `~/.bubblewrap/config.json`):
+
+```bash
+npm i -g @meta-quest/bubblewrap-cli          # once
+mkdir -p /tmp/qb && cp quest/twa-manifest.json /tmp/qb && cd /tmp/qb
+export BUBBLEWRAP_KEYSTORE_PASSWORD=$(security find-generic-password -a cowork-dronesim-quest -s "Drone Sim Quest keystore" -w)
+export BUBBLEWRAP_KEY_PASSWORD=$BUBBLEWRAP_KEYSTORE_PASSWORD
+bubblewrap update --skipVersionUpgrade && bubblewrap build --skipPwaValidation
+# → app-release-signed.apk (sideload / Horizon upload), app-release-bundle.aab
+```
+
+`quest/twa-manifest.json`: `isMetaQuest`, `horizonOSAppMode: "2D"` (the player presses Enter VR),
+landscape, minSdk 32. Bump `appVersionCode` for every upload. Builds are kept in `quest/dist/`
+(git-ignored).
+
+Store: Meta Developer Dashboard → organisation → new Meta Horizon Store app → upload the APK to the
+ALPHA channel → listing (screenshots 2560×1440, cover art), IARC age rating, data-use checkup →
+submit for review.
 
 The Capacitor Android APK is **not** for Quest (no VR there). Do not install both on one headset:
 they share the package name with different signatures.
