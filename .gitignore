@@ -9,3 +9,5 @@ playwright-report
 
 # Quest store builds (signed with the key outside the repo)
 quest/dist/
+# Google Play builds
+android-dist/

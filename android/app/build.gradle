@@ -16,8 +16,21 @@ android {
             ignoreAssetsPattern = '!.svn:!.git:!.ds_store:!*.scc:.*:!CVS:!thumbs.db:!picasa.ini:!*~'
         }
     }
+    // Play upload key: kept outside the repo, passed in by the release script (docs/05-store-release.md)
+    def uploadStore = System.getenv('DRONESIM_UPLOAD_STORE')
+    signingConfigs {
+        if (uploadStore) {
+            upload {
+                storeFile file(uploadStore)
+                storePassword System.getenv('DRONESIM_UPLOAD_PASSWORD')
+                keyAlias 'upload'
+                keyPassword System.getenv('DRONESIM_UPLOAD_PASSWORD')
+            }
+        }
+    }
     buildTypes {
         release {
+            if (uploadStore) signingConfig signingConfigs.upload
             minifyEnabled false
             proguardFiles getDefaultProguardFile('proguard-android.txt'), 'proguard-rules.pro'
         }
