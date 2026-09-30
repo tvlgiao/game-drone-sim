@@ -65,6 +65,11 @@ export class CameraRig {
   private readonly bounds: THREE.Box3;
   /** exposed for FX: FPV-ness 0..1 (1 while fully in FPV) */
   fpvWeight = 0;
+  /** camera shake / impact trauma; off in a headset, where shaking the view causes nausea */
+  shake = true;
+  /** this frame's pose for the current mode before the mode-change blend (XR teleports instead) */
+  readonly targetPos = new THREE.Vector3();
+  readonly targetQuat = new THREE.Quaternion();
 
   constructor(pilot: readonly [number, number, number], roomSize: readonly [number, number, number]) {
     this.camera = new THREE.PerspectiveCamera(70, 16 / 9, 0.02, 90);
@@ -81,6 +86,13 @@ export class CameraRig {
 
   get currentMode(): CameraMode {
     return this.mode;
+  }
+
+  /** Standing pilot's spot on the floor (y = 0) → `out`; returns the yaw facing the room overview. */
+  losFloorAnchor(out: THREE.Vector3): number {
+    out.set(this.pilot.x, 0, this.pilot.z);
+    _v2.copy(this.overview).sub(this.pilot);
+    return yawOf(_v2);
   }
 
   /** Add camera shake (0..1, accumulates, clamped). */
@@ -106,6 +118,8 @@ export class CameraRig {
     this.updateHead(f, dt);
 
     this.pose(f.mode, f, _pos, _q);
+    this.targetPos.copy(_pos);
+    this.targetQuat.copy(_q);
     const targetFov = this.fovV;
 
     const cam = this.camera;
@@ -131,7 +145,7 @@ export class CameraRig {
     const vib = f.mode === 'fpv' && f.drone.armed ? 0.0012 + motors * 0.0035 : 0;
     const tr = this.trauma * this.trauma;
     const amp = vib + tr * (f.mode === 'fpv' ? 0.09 : 0.05);
-    if (amp > 0) {
+    if (amp > 0 && this.shake) {
       const t = f.time;
       _e.set(
         amp * (Math.sin(t * 91.3) * 0.6 + Math.sin(t * 57.1 + 1.3) * 0.4),

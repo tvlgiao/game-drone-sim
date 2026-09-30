@@ -32,6 +32,8 @@ export type UiAction =
   | { type: 'exit' }
   /** touch devices: toggle the Fullscreen API (needs the tap gesture) */
   | { type: 'fullscreen' }
+  /** WebXR headsets: start an immersive-vr session (needs the click gesture) */
+  | { type: 'enter-vr' }
   | { type: 'settings'; settings: Settings };
 
 export interface FinishData {
@@ -367,6 +369,16 @@ export class Menus {
     if (this.current !== 'none') this.items = this.collectItems(this.screens.get(this.current)!);
   }
 
+  /** WebXR headset (immersive-vr supported): reveal the Enter VR button. */
+  enableVr(): void {
+    for (const el of this.screens.values()) {
+      el.querySelectorAll<HTMLElement>('[data-vr-only]').forEach((x) => {
+        x.hidden = false;
+      });
+    }
+    if (this.current !== 'none') this.items = this.collectItems(this.screens.get(this.current)!);
+  }
+
   setMenuBest(best: number | null): void {
     const text = best === null ? '' : `Best lap ${formatTime(best)}`;
     if (this.menuBest.textContent !== text) this.menuBest.textContent = text;
@@ -546,6 +558,7 @@ export class Menus {
       case 'menu':
       case 'retry':
       case 'exit':
+      case 'enter-vr':
         this.onAction({ type: act });
         break;
       case 'settings':
@@ -828,6 +841,7 @@ export class Menus {
           <p class="ds-logo__sub">FPV Racing · Night Loft</p>
         </header>
         <nav class="ds-menu" aria-label="Main menu">
+          ${this.btn('enter-vr', 'Enter VR', false, '', ' data-vr-only hidden')}
           ${this.btn('race', 'Race', true)}
           ${this.btn('freefly', 'Free Fly')}
           ${this.btn('settings', 'Settings')}

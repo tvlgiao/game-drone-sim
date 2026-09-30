@@ -18,6 +18,7 @@ import { Atmosphere } from './vfx/atmosphere';
 import { ContactShadow } from './vfx/contact-shadow';
 import { ParticlePool } from './vfx/particles';
 import { Shockwaves } from './vfx/shockwave';
+import { XrPanel } from './xr-panel';
 
 export interface ViewFrame {
   dt: number;
@@ -44,6 +45,21 @@ const _c2 = new THREE.Color();
 const _size = new THREE.Vector2();
 const WHITE = new THREE.Color(1, 1, 1);
 const SPARK = new THREE.Color(1, 0.55, 0.16);
+const _eye = new THREE.Vector3();
+const _yq = new THREE.Quaternion();
+const _ye = new THREE.Euler(0, 0, 0, 'YXZ');
+const Y_AXIS = new THREE.Vector3(0, 1, 0);
+/** Quest 2 budget (72 Hz, two eyes on a mobile GPU): no post FX, no shadow maps, small particle pools. */
+const XR_TIER: QualityTier = 'low';
+/** head height used until the headset reports a pose (local-floor space) */
+const XR_DEFAULT_HEAD = new THREE.Vector3(0, 1.6, 0);
+
+export interface GameViewOptions {
+  /** enable WebXR rendering (renderer.xr) */
+  xr?: boolean;
+  /** MSAA on the default framebuffer; the XR layer inherits it (headsets need it, post FX does not) */
+  antialias?: boolean;
+}
 
 export class GameView {
   readonly renderer: THREE.WebGLRenderer;
@@ -77,15 +93,26 @@ export class GameView {
 
   private readonly form: FormFactor;
 
+  /** XR: the headset camera rides in this dolly; the game moves the dolly, the player moves their head. */
+  private readonly xrDolly = new THREE.Group();
+  private readonly xrCam = new THREE.PerspectiveCamera(70, 1, 0.02, 90);
+  /** in-headset HUD / menu card */
+  readonly xrPanel = new XrPanel();
+  /** dolly-local head position captured at session start / camera change (anchors eye + panel) */
+  private readonly headRef = XR_DEFAULT_HEAD.clone();
+  private recenter = true;
+  private xrMode: CameraMode | null = null;
+  private tierBeforeXr: QualityTier | null = null;
+
   /** `form` = device class: phones/tablets get capped DPR, ≤ 1024 px textures and smaller particle pools. */
-  constructor(canvas: HTMLCanvasElement, level: LevelDef, tier: QualityTier, form: FormFactor = 'desktop') {
+  constructor(canvas: HTMLCanvasElement, level: LevelDef, tier: QualityTier, form: FormFactor = 'desktop', opts: GameViewOptions = {}) {
     this.level = level;
     this.form = form;
     const mobile = form !== 'desktop';
     this.profile = qualityProfile(tier, form);
     this.renderer = new THREE.WebGLRenderer({
       canvas,
-      antialias: tier === 'low',
+      antialias: tier === 'low' || opts.antialias === true,
       powerPreference: 'high-performance',
       stencil: false,
       alpha: false,
@@ -97,6 +124,7 @@ export class GameView {
     r.shadowMap.autoUpdate = true; // per-light autoUpdate=false keeps static maps static
     r.info.autoReset = false;
     r.toneMappingExposure = 1.05;
+    r.xr.enabled = opts.xr === true;
 
     const scene = this.scene;
     scene.background = new THREE.Color(0x04060b);
@@ -145,6 +173,10 @@ export class GameView {
     this.contact = new ContactShadow(level, this.mats.radial);
     scene.add(this.contact.group);
 
+    this.xrDolly.name = 'xr-dolly';
+    this.xrDolly.add(this.xrCam, this.xrPanel.mesh);
+    scene.add(this.xrDolly);
+
     this.applyQuality();
     this.resize(canvas.clientWidth || window.innerWidth, canvas.clientHeight || window.innerHeight);
   }
@@ -173,17 +205,27 @@ export class GameView {
     if (this.live.fan) this.live.fan.rotation.y = f.fanAngle;
     if (this.live.tvScreen) this.live.tvScreen.material.uniforms.uTime.value = t;
 
+    const xr = r.xr.isPresenting;
+    this.rig.shake = !xr;
     this.rig.update({ dt, time: t, drone: f.drone, mode: f.cameraMode, cameraTiltDeg: f.cameraTiltDeg, fovDeg: f.fovDeg, speed: f.speed });
-    const cam = this.rig.camera;
+    let cam: THREE.PerspectiveCamera = this.rig.camera;
+    if (xr) {
+      this.placeDolly(f.cameraMode);
+      cam = this.xrCam;
+      // head pose from the previous XR frame (three writes it during render)
+      this.xrCam.getWorldPosition(_eye);
+    } else {
+      _eye.copy(cam.position);
+    }
     this.drone.camera.visible = this.rig.fpvWeight < 0.5;
-    this.drone.update(f.drone, dt, t, f.cameraTiltDeg, cam.position);
-    this.losMarker.update(f.drone.position, cam.position, this.rig.losWeight, t);
+    this.drone.update(f.drone, dt, t, f.cameraTiltDeg, _eye);
+    this.losMarker.update(f.drone.position, _eye, this.rig.losWeight, t);
 
     this.rings.update(t, dt, f.nextRing);
     this.updateRingLight(t, dt, f.nextRing);
 
     // fill light near the camera so the quad reads clearly in chase/LOS
-    this.fill.position.copy(cam.position);
+    this.fill.position.copy(_eye);
     this.fill.intensity = 0.5 * (1 - this.rig.fpvWeight);
 
     // LED ground glow colour approximates the LED shader
@@ -200,14 +242,17 @@ export class GameView {
     if (f.drone.armed && motors > 0.18 && near > 0) this.emitPropWash(f.drone.position, motors, near, dt);
     const wash = f.drone.armed ? motors * Math.max(0, 1 - h / 2) : 0;
 
+    // pixels per unit of tan(angle): drawing-buffer height / 2 × projection y-scale (per eye in XR)
     r.getDrawingBufferSize(_size);
-    const px = _size.y / (2 * Math.tan(THREE.MathUtils.degToRad(cam.fov) / 2));
+    const px = (_size.y / 2) * cam.projectionMatrix.elements[5]!;
     this.atmos.update(t, px, f.drone.position, wash);
     this.fx.update(t, px);
     this.soft.update(t, px);
     this.waves.update(dt);
 
-    if (this.post) {
+    if (xr) {
+      r.render(this.scene, this.xrCam);
+    } else if (this.post) {
       const ca = this.rig.fpvWeight * THREE.MathUtils.clamp((f.speed - 5) / 14, 0, 1);
       this.post.setAberration(ca);
       this.bloomPulse = Math.max(0, this.bloomPulse - dt * 2.5);
@@ -216,6 +261,65 @@ export class GameView {
     } else {
       r.render(this.scene, cam);
     }
+  }
+
+  /**
+   * Moves the XR dolly for the camera mode. LOS: stand on the pilot's spot facing the room, head
+   * free (6-DoF). FPV / chase: horizon-locked (yaw only, never pitch/roll the world) at the mode's
+   * target, offset by the head reference so the eye starts at the lens. Mode changes teleport.
+   */
+  private placeDolly(mode: CameraMode): void {
+    const d = this.xrDolly;
+    if (this.recenter || mode !== this.xrMode) {
+      // (Re)capture the head reference once the headset reports a real pose.
+      if (this.xrCam.position.y > 0.3) {
+        this.headRef.copy(this.xrCam.position);
+        this.recenter = false;
+      }
+      this.xrMode = mode;
+    }
+    if (mode === 'los') {
+      const yaw = this.rig.losFloorAnchor(d.position);
+      d.quaternion.setFromAxisAngle(Y_AXIS, yaw);
+    } else {
+      _ye.setFromQuaternion(this.rig.targetQuat, 'YXZ');
+      _yq.setFromAxisAngle(Y_AXIS, _ye.y);
+      d.quaternion.copy(_yq);
+      d.position.copy(this.headRef).applyQuaternion(_yq).negate().add(this.rig.targetPos);
+    }
+    this.xrPanel.place(this.headRef);
+    d.updateMatrixWorld(true);
+  }
+
+  /** Start rendering into an XR session (call from the session request's promise). */
+  async startXr(session: XRSession): Promise<void> {
+    const r = this.renderer;
+    r.xr.setReferenceSpaceType('local-floor');
+    this.tierBeforeXr = this.profile.tier;
+    this.setQuality(XR_TIER);
+    this.headRef.copy(XR_DEFAULT_HEAD);
+    this.recenter = true;
+    this.xrMode = null;
+    this.xrPanel.mesh.visible = true;
+    await r.xr.setSession(session);
+  }
+
+  /** Session ended (by the user or the browser): restore the flat-screen quality and size. */
+  endXr(): void {
+    this.xrPanel.mesh.visible = false;
+    if (this.tierBeforeXr) this.setQuality(this.tierBeforeXr);
+    this.tierBeforeXr = null;
+    this.resize(this.width, this.height);
+  }
+
+  /** Re-anchor eye and panel to where the player's head is now. */
+  recenterXr(): void {
+    this.recenter = true;
+    this.xrMode = null;
+  }
+
+  get presenting(): boolean {
+    return this.renderer.xr.isPresenting;
   }
 
   private updateRingLight(t: number, dt: number, next: number): void {
@@ -432,6 +536,8 @@ export class GameView {
   resize(width: number, height: number): void {
     this.width = Math.max(1, Math.floor(width));
     this.height = Math.max(1, Math.floor(height));
+    // The XR layer owns the drawing buffer while presenting; endXr() resizes again afterwards.
+    if (this.renderer.xr.isPresenting) return;
     const dpr = typeof window !== 'undefined' ? window.devicePixelRatio || 1 : 1;
     this.renderer.setPixelRatio(Math.min(dpr, this.profile.maxDpr) * this.renderScale);
     this.renderer.setSize(this.width, this.height, false);
@@ -458,6 +564,7 @@ export class GameView {
     this.post?.dispose();
     this.post = null;
     this.losMarker.dispose();
+    this.xrPanel.dispose();
     for (const m of this.staticMeshes) m.geometry.dispose();
     for (const d of this.live.disposables) d.dispose();
     this.rings.dispose();
