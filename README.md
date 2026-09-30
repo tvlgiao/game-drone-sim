@@ -21,7 +21,8 @@ B = leave VR. Without a headset, add `?xremu=1` to emulate a Quest 2 (IWER).
 npm install && npm run dev   # local dev
 npm test                     # unit tests
 npm run test:e2e             # Playwright E2E (desktop Chrome + emulated Quest 2 + WebKit iPhone/iPad)
+npm run ios / npm run android   # native App Store / Google Play shells (Capacitor)
 ```
 
 Docs: [design](docs/01-design.md) · [implementation plan](docs/02-implementation-plan.md) ·
-[handover](docs/03-handover.md) · [mobile design](docs/04-mobile-design.md)
+[handover](docs/03-handover.md) · [mobile design](docs/04-mobile-design.md) · [store release](docs/05-store-release.md)
