@@ -406,6 +406,12 @@ function boot(): void {
 
     const inVr = view.presenting;
     if (inVr && inp.xr?.lStick) view.recenterXr();
+    if (inVr && inp.xr?.lTrigger) {
+      settings = { ...settings, headingArrow: !settings.headingArrow };
+      saveSettings(settings, storage);
+      hud.setSettings(settings);
+      toast(`Heading arrow ${settings.headingArrow ? 'on' : 'off'}`);
+    }
     if (!flying) {
       if (inVr && inp.xr) {
         handleXrMenu(status, inp.xr);
@@ -420,6 +426,8 @@ function boot(): void {
       // Touch auto-centre sticks fly DJI-style: centre holds altitude (barometer hold), like 'A/Atti' mode.
       // Quest thumbsticks always spring back to centre, so VR flies with altitude hold too.
       sim.fc.altitudeHold = (inp.source === 'touch' && settings.touchThrottleCentre) || inp.source === 'xr';
+      // …and the right thumbstick flies speed, braking to a stop when released (Angle mode).
+      sim.fc.positionHold = inp.source === 'xr';
       const control = status === 'countdown' ? { ...inp.control, throttle: 0 } : inp.control;
       alpha = loop.advance(frameSec, (dt) => {
         prevPos.copy(sim.world.state.position);
@@ -452,6 +460,7 @@ function boot(): void {
       cameraTiltDeg: settings.cameraTiltDeg,
       fovDeg: settings.fovDeg,
       speed,
+      headingArrow: settings.headingArrow,
     });
 
     if (settings.quality === 'auto' && !inVr) view.setRenderScale(dynRes.update(fpsMeter.frameMs));

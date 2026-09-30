@@ -5,7 +5,7 @@ import { GP, GamepadInput, prettyPadName } from './gamepad';
 import { KeyboardInput } from './keyboard';
 import { EdgeDetector, RepeatTrigger, VirtualSticks, mapSticks, throttleSlot, type StickMapOptions, type StickSlot } from './stick';
 import { TouchInput, throttleSideOf } from './touch';
-import { XrControllers, type XrButtons } from './xr-controllers';
+import { XrControllers, shapeXrControl, type XrButtons } from './xr-controllers';
 
 export { applyRadialDeadzone, applyAxialDeadzone, stickToThrottle, triggerToThrottle, mapSticks, squareGate, VirtualSticks, EdgeDetector } from './stick';
 
@@ -205,6 +205,7 @@ export class InputManager {
       mapSticks(this.raw, snap.values[GP.RT]!, opts, sticks, f.control, true);
     } else if (this.source === 'xr') {
       mapSticks(xr.pos, 0, this.xrOpts, sticks, f.control, true);
+      shapeXrControl(f.control);
     } else if (this.source === 'touch') {
       mapSticks(this.touch.sticks.pos, 0, this.touchOpts, sticks, f.control, true);
     } else {

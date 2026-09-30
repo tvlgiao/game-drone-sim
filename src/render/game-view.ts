@@ -19,6 +19,7 @@ import { ContactShadow } from './vfx/contact-shadow';
 import { ParticlePool } from './vfx/particles';
 import { Shockwaves } from './vfx/shockwave';
 import { XrPanel } from './xr-panel';
+import { HeadingArrow } from './heading-arrow';
 
 export interface ViewFrame {
   dt: number;
@@ -32,6 +33,8 @@ export interface ViewFrame {
   fovDeg: number;
   /** m/s, for FX intensity */
   speed: number;
+  /** draw the heading arrow (hidden in FPV regardless) */
+  headingArrow?: boolean;
 }
 
 const FX_SCALE: Record<QualityTier, number> = { ultra: 1, high: 0.85, medium: 0.55, low: 0.3 };
@@ -53,6 +56,11 @@ const Y_AXIS = new THREE.Vector3(0, 1, 0);
 const XR_TIER: QualityTier = 'low';
 /** head height used until the headset reports a pose (local-floor space) */
 const XR_DEFAULT_HEAD = new THREE.Vector3(0, 1.6, 0);
+/**
+ * VR LOS: the pilot stands on a platform this high in the loft corner (eye ≈ 4 m), looking down on
+ * the whole course instead of seeing rings stacked behind each other from floor level.
+ */
+export const XR_LOS_PLATFORM = 2.4;
 
 export interface GameViewOptions {
   /** enable WebXR rendering (renderer.xr) */
@@ -103,6 +111,9 @@ export class GameView {
   private recenter = true;
   private xrMode: CameraMode | null = null;
   private tierBeforeXr: QualityTier | null = null;
+  /** platform under the VR pilot's feet in LOS (dolly-local, top at y = 0) */
+  private readonly xrPlatform: THREE.Mesh;
+  private readonly arrow = new HeadingArrow();
 
   /** `form` = device class: phones/tablets get capped DPR, ≤ 1024 px textures and smaller particle pools. */
   constructor(canvas: HTMLCanvasElement, level: LevelDef, tier: QualityTier, form: FormFactor = 'desktop', opts: GameViewOptions = {}) {
@@ -173,8 +184,10 @@ export class GameView {
     this.contact = new ContactShadow(level, this.mats.radial);
     scene.add(this.contact.group);
 
+    this.xrPlatform = xrPlatform();
     this.xrDolly.name = 'xr-dolly';
-    this.xrDolly.add(this.xrCam, this.xrPanel.mesh);
+    this.xrDolly.add(this.xrCam, this.xrPanel.mesh, this.xrPlatform);
+    scene.add(this.arrow.mesh);
     scene.add(this.xrDolly);
 
     this.applyQuality();
@@ -218,8 +231,10 @@ export class GameView {
       _eye.copy(cam.position);
     }
     this.drone.camera.visible = this.rig.fpvWeight < 0.5;
+    this.drone.navLights.visible = this.rig.fpvWeight < 0.5;
     this.drone.update(f.drone, dt, t, f.cameraTiltDeg, _eye);
     this.losMarker.update(f.drone.position, _eye, this.rig.losWeight, t);
+    this.arrow.update(f.drone.position, f.drone.orientation, _eye, f.headingArrow === true && this.rig.fpvWeight < 0.5);
 
     this.rings.update(t, dt, f.nextRing);
     this.updateRingLight(t, dt, f.nextRing);
@@ -228,8 +243,8 @@ export class GameView {
     this.fill.position.copy(_eye);
     this.fill.intensity = 0.5 * (1 - this.rig.fpvWeight);
 
-    // LED ground glow colour approximates the LED shader
-    if (f.drone.armed) this.ledColor.setHSL((((-t * 0.7) % 1) + 1) % 1, 0.85, 0.55);
+    // LED ground glow: the green + red nav LEDs mixed on the floor read as a warm white
+    if (f.drone.armed) this.ledColor.setRGB(0.75, 0.7, 0.45);
     else this.ledColor.setRGB(1, 0.3, 0.07);
     this.contact.update(f.drone.position, this.ledColor, f.drone.armed ? 1 : 0.35);
 
@@ -278,8 +293,10 @@ export class GameView {
       }
       this.xrMode = mode;
     }
+    this.xrPlatform.visible = mode === 'los';
     if (mode === 'los') {
       const yaw = this.rig.losFloorAnchor(d.position);
+      d.position.y += XR_LOS_PLATFORM;
       d.quaternion.setFromAxisAngle(Y_AXIS, yaw);
     } else {
       _ye.setFromQuaternion(this.rig.targetQuat, 'YXZ');
@@ -307,6 +324,7 @@ export class GameView {
   /** Session ended (by the user or the browser): restore the flat-screen quality and size. */
   endXr(): void {
     this.xrPanel.mesh.visible = false;
+    this.xrPlatform.visible = false;
     if (this.tierBeforeXr) this.setQuality(this.tierBeforeXr);
     this.tierBeforeXr = null;
     this.resize(this.width, this.height);
@@ -565,6 +583,9 @@ export class GameView {
     this.post = null;
     this.losMarker.dispose();
     this.xrPanel.dispose();
+    this.arrow.dispose();
+    this.xrPlatform.geometry.dispose();
+    (this.xrPlatform.material as THREE.Material).dispose();
     for (const m of this.staticMeshes) m.geometry.dispose();
     for (const d of this.live.disposables) d.dispose();
     this.rings.dispose();
@@ -580,6 +601,19 @@ export class GameView {
     this.scene.clear();
     this.renderer.dispose();
   }
+}
+
+/** 1.6 m square deck with a glowing edge, top at y = 0 (the VR pilot's feet). */
+function xrPlatform(): THREE.Mesh {
+  const g = new THREE.BoxGeometry(1.6, 0.08, 1.6);
+  g.translate(0, -0.04, 0);
+  const mat = new THREE.MeshStandardMaterial({ color: 0x1b2230, roughness: 0.6, metalness: 0.5, emissive: 0x0b3a4a, emissiveIntensity: 0.6 });
+  const m = new THREE.Mesh(g, mat);
+  m.name = 'xr-platform';
+  m.visible = false;
+  const edge = new THREE.LineSegments(new THREE.EdgesGeometry(g), new THREE.LineBasicMaterial({ color: 0x7fe3ff, fog: false, toneMapped: false }));
+  m.add(edge);
+  return m;
 }
 
 /** Orthonormal basis perpendicular to unit n. */

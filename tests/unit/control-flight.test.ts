@@ -319,3 +319,52 @@ describe('altitude hold (touch auto-centre, DJI A/Atti style)', () => {
     expect(Math.abs(sim.world.state.position.y - y0)).toBeLessThan(0.3);
   });
 });
+
+describe('position hold (VR thumbsticks, DJI P style)', () => {
+  const hold = (sim: Simulation): Simulation => {
+    sim.fc.altitudeHold = true;
+    sim.fc.positionHold = true;
+    return sim;
+  };
+  const horiz = (sim: Simulation): number => Math.hypot(sim.world.state.velocity.x, sim.world.state.velocity.z);
+
+  it('released stick brakes a 3 m/s drift to a stop instead of coasting on momentum', () => {
+    const sim = hold(airborne('angle', 1, 10));
+    sim.world.state.velocity.set(2, 0, -2.2);
+    run(sim, 2.5, input(0.5));
+    expect(horiz(sim)).toBeLessThan(0.15);
+    const p0 = sim.world.state.position.clone();
+    run(sim, 3, input(0.5));
+    expect(sim.world.state.position.distanceTo(p0)).toBeLessThan(0.15);
+  });
+
+  it('without position hold the same drift keeps coasting', () => {
+    const sim = airborne('angle', 1, 10);
+    sim.fc.altitudeHold = true;
+    sim.world.state.velocity.set(2, 0, -2.2);
+    run(sim, 2.5, input(0.5));
+    expect(horiz(sim)).toBeGreaterThan(1);
+  });
+
+  it('full pitch stick flies forward (−Z at yaw 0) near the speed cap (P-only: drag leaves ≈ 3.2 of 4 m/s)', () => {
+    const sim = hold(airborne('angle', 1, 10));
+    run(sim, 5, input(0.5, 0, 1, 0));
+    const v = sim.world.state.velocity;
+    expect(-v.z).toBeGreaterThan(2.8);
+    expect(-v.z).toBeLessThan(4.5);
+    expect(Math.abs(v.x)).toBeLessThan(0.3);
+  });
+
+  it('full roll stick flies right (+X at yaw 0)', () => {
+    const sim = hold(airborne('angle', 1, 10));
+    run(sim, 5, input(0.5, 1, 0, 0));
+    expect(sim.world.state.velocity.x).toBeGreaterThan(2.8);
+  });
+
+  it('acro mode ignores position hold', () => {
+    const sim = hold(airborne('acro', 1, 10));
+    sim.world.state.velocity.set(3, 0, 0);
+    run(sim, 1, input(0.5));
+    expect(horiz(sim)).toBeGreaterThan(1.5);
+  });
+});

@@ -25,18 +25,39 @@ export interface XrSourceLike {
 /** Held (or, for `pressed`, rising-edge) state of the named Quest buttons. */
 export type XrButtons = XrButtonEdges;
 
+/**
+ * Short-throw thumbsticks are twitchy: pitch/roll/yaw get an expo curve (soft around centre) and
+ * yaw a lower ceiling (≈130°/s at full stick on the freestyle rates instead of 670°/s).
+ */
+export const XR_STICK_EXPO = 0.6;
+export const XR_YAW_SCALE = 0.45;
+
+/** Expo: x·((1−e) + e·x²), keeps ±1 at the ends. */
+export function xrExpo(x: number, e = XR_STICK_EXPO): number {
+  return x * (1 - e + e * x * x);
+}
+
+/** Softens the pilot's pitch / roll / yaw for Touch thumbsticks (throttle untouched). */
+export function shapeXrControl(c: { yaw: number; pitch: number; roll: number }): void {
+  c.pitch = xrExpo(c.pitch);
+  c.roll = xrExpo(c.roll);
+  c.yaw = xrExpo(c.yaw) * XR_YAW_SCALE;
+}
+
 /** Throttle deflection above centre that releases the take-off latch (same as the touch sticks). */
 export const XR_TAKEOFF_PUSH = 0.15;
 const ACTIVITY_AXIS = 0.3;
 
-const BUTTON_KEYS: readonly (keyof XrButtons)[] = ['a', 'b', 'x', 'y', 'rStick', 'lStick'];
+const BUTTON_KEYS: readonly (keyof XrButtons)[] = ['a', 'b', 'x', 'y', 'rStick', 'lStick', 'lTrigger'];
+/** analog trigger travel that counts as a press */
+const TRIGGER_PRESS = 0.6;
 
 export class XrControllers {
   /** Stick positions −1..1, Y +up (take-off latch applied to the throttle slot). */
   readonly pos: StickPositions = { lx: 0, ly: 0, rx: 0, ry: 0 };
-  readonly held: XrButtons = { a: false, b: false, x: false, y: false, rStick: false, lStick: false };
+  readonly held: XrButtons = { a: false, b: false, x: false, y: false, rStick: false, lStick: false, lTrigger: false };
   /** Rising edges of `held` for the last poll. */
-  readonly pressed: XrButtons = { a: false, b: false, x: false, y: false, rStick: false, lStick: false };
+  readonly pressed: XrButtons = { a: false, b: false, x: false, y: false, rStick: false, lStick: false, lTrigger: false };
   /** Both hands seen with a gamepad on the last poll. */
   connected = false;
   /** Timestamp (ms) of the last stick / button activity, −∞ if never. */
@@ -46,7 +67,7 @@ export class XrControllers {
 
   private sources: (() => Iterable<XrSourceLike>) | null = null;
   private throttleSlot: 'ly' | 'ry' = 'ly';
-  private readonly prev: XrButtons = { a: false, b: false, x: false, y: false, rStick: false, lStick: false };
+  private readonly prev: XrButtons = { a: false, b: false, x: false, y: false, rStick: false, lStick: false, lTrigger: false };
 
   /**
    * Reader of the session's input sources, called every poll (null when no XR session is running).
@@ -93,6 +114,7 @@ export class XrControllers {
           h.x = btn(XR_BTN.LOWER);
           h.y = btn(XR_BTN.UPPER);
           h.lStick = btn(XR_BTN.STICK);
+          h.lTrigger = (gp.buttons[XR_BTN.TRIGGER]?.value ?? 0) > TRIGGER_PRESS;
         } else if (src.handedness === 'right') {
           right = true;
           p.rx = x;

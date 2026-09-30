@@ -226,6 +226,16 @@ const ROW_DEFS: Row[] = [
       s.showFps = v;
     },
   },
+  {
+    id: 'headingArrow',
+    label: 'Heading arrow',
+    hint: 'Arrow under the quad pointing where the nose faces (VR: left trigger)',
+    kind: 'bool',
+    get: (s) => s.headingArrow,
+    set: (s, v) => {
+      s.headingArrow = v;
+    },
+  },
   rangeRow('deadzone', 'Stick deadzone', 'Radial deadzone for worn sticks', (v) => v.toFixed(2)),
   {
     id: 'touchThrottleCentre',
@@ -255,7 +265,7 @@ const ROW_DEFS: Row[] = [
 /** Rows only shown on touch devices. */
 const TOUCH_ROWS: ReadonlySet<string> = new Set(['touchThrottleCentre', 'touchSticksFixed']);
 const ROWS = new Map(ROW_DEFS.map((r) => [r.id, r]));
-const SETTINGS_ROWS = ['stickMode', 'touchThrottleCentre', 'touchSticksFixed', 'throttleSource', 'flightMode', 'ratePreset', 'cameraTiltDeg', 'fovDeg', 'quality', 'volume', 'showFps', 'deadzone'];
+const SETTINGS_ROWS = ['stickMode', 'touchThrottleCentre', 'touchSticksFixed', 'throttleSource', 'flightMode', 'ratePreset', 'cameraTiltDeg', 'fovDeg', 'quality', 'volume', 'showFps', 'headingArrow', 'deadzone'];
 const CONTROLLER_ROWS = ['stickMode', 'throttleSource', 'squareGate', 'invert.throttle', 'invert.yaw', 'invert.pitch', 'invert.roll'];
 const CHANNELS: readonly Channel[] = ['throttle', 'yaw', 'pitch', 'roll'];
 const SLOT_NAME: Record<StickSlot, string> = { lx: 'LX', ly: 'LY', rx: 'RX', ry: 'RY' };
