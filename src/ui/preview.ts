@@ -141,6 +141,7 @@ const fakeInput: InputFrame = {
     axes: fakeAxes,
     buttons: fakeButtons,
   },
+  xr: null,
 };
 const fakeRaw = { lx: 0, ly: 0, rx: 0, ry: 0 };
 
