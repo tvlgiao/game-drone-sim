@@ -46,6 +46,7 @@ describe('settings', () => {
       quality: 'auto',
       volume: 0.7,
       showFps: true,
+      headingArrow: true,
       deadzone: 0.05,
       touchThrottleCentre: true,
       touchSticksFixed: false,
@@ -91,6 +92,7 @@ describe('settings', () => {
       quality: 'low',
       volume: -3,
       showFps: 'yes',
+      headingArrow: 'yes',
       deadzone: Number.NaN,
       touchThrottleCentre: 'on',
       touchSticksFixed: true,
@@ -114,6 +116,7 @@ describe('settings', () => {
       quality: 'low',
       volume: 0,
       showFps: true,
+      headingArrow: true,
       deadzone: 0.05,
       touchThrottleCentre: true,
       touchSticksFixed: true,
@@ -131,6 +134,7 @@ describe('settings', () => {
       axisMap: { lx: 0, ly: 1, rx: 3, ry: 4 },
       fovDeg: 120,
       showFps: false,
+      headingArrow: false,
     };
     saveSettings(custom, st);
     expect(loadSettings(st)).toEqual(custom);

@@ -19,12 +19,21 @@ import { Hud, type UiAction } from './ui/hud';
 import { throttleDownHint } from './ui/mode-labels';
 import { throttleSlot } from './input/stick';
 import { MobileShell, hardenGestures } from './ui/mobile-shell';
+import { isQuestBrowser, requestVrSession, vrSupported } from './core/xr';
+import { xrHudContent } from './ui/xr-hud';
 import { TouchControls } from './ui/touch-controls';
 import type { ButtonEvents, CameraMode, ControlInput, DroneState, GameEvent, InputFrame, QualityTier } from './types';
 
 const PHYSICS_DT = 1 / 1000;
 const CAMERA_CYCLE: CameraMode[] = ['los', 'fpv', 'chase'];
 const BUTTON_KEYS: readonly (keyof ButtonEvents)[] = ['arm', 'toggleMode', 'cycleCamera', 'reset', 'pause', 'confirm'];
+const XR_PANEL_PERIOD = 0.1;
+/**
+ * Frames rendered after a DOM menu (main / pause / settings / tap gate / rotate) opens before the 3D view
+ * behind it freezes: the menus blur the canvas with backdrop-filter, which mobile GPUs (iPhone, Quest
+ * Browser) would otherwise recompute for a full-screen moving scene every frame.
+ */
+const MENU_SETTLE_FRAMES = 2;
 const FLYING = new Set(['countdown', 'racing', 'crashed', 'freefly']);
 
 function safeStorage(): Storage | null {
@@ -63,7 +72,8 @@ function boot(): void {
 
   let view: GameView;
   try {
-    view = new GameView(canvas, LOFT_LEVEL, tier, device.form);
+    const xrCapable = 'xr' in navigator;
+    view = new GameView(canvas, LOFT_LEVEL, tier, device.form, { xr: xrCapable, antialias: isQuestBrowser(navigator.userAgent) });
   } catch (err) {
     hud.setError(`WebGL2 is not available on this device/browser (${(err as Error).message}). Enable hardware acceleration or try a recent Chrome, Edge, Firefox or Safari.`);
     return;
@@ -76,6 +86,26 @@ function boot(): void {
   const loop = new FixedLoop(PHYSICS_DT, 250);
   const fpsMeter = new FpsMeter();
   const dynRes = new DynamicResolution(targetFps(device.form));
+
+  let xrSession: XRSession | null = null;
+  let xrStarting = false;
+  /** the VR card redraws a canvas texture: refresh its numbers at most every XR_PANEL_PERIOD */
+  let xrPanelAt = -Infinity;
+  let xrPanelStatus = '';
+  let menuRenders = 0;
+  let lastOverlayKey = '';
+  let xrToast = '';
+  let xrToastUntil = 0;
+  /** Toast on the DOM HUD and, while in a headset, on the XR card. */
+  function toast(msg: string): void {
+    hud.toast(msg);
+    xrToast = msg;
+    xrToastUntil = performance.now() + 2200;
+  }
+  if (device.native === 'ios') hud.hideExit();
+  void vrSupported(navigator).then((ok) => {
+    if (ok) hud.enableVr();
+  });
 
   let touchUi: TouchControls | null = null;
   let shell: MobileShell | null = null;
@@ -115,6 +145,7 @@ function boot(): void {
 
   function applySettings(s: Settings): void {
     settings = s;
+    menuRenders = 0; // quality / FOV changes must show behind the settings screen
     sim.fc.mode = s.flightMode;
     const r = s.rates;
     sim.fc.rates = { roll: { ...r.roll }, pitch: { ...r.pitch }, yaw: { ...r.yaw } };
@@ -133,14 +164,14 @@ function boot(): void {
   }
   applySettings(settings);
   hud.setSettings(settings);
-  input.onConnection = (c) => hud.toast(c.connected ? `Controller connected: ${c.name}` : `Controller disconnected: ${c.name}`);
+  input.onConnection = (c) => toast(c.connected ? `Controller connected: ${c.name}` : `Controller disconnected: ${c.name}`);
 
   function placeDrone(position: Vector3, yaw: number): void {
     sim.world.reset(position, yaw);
     sim.fc.reset();
     sim.setArmed(false, zeroThrottle);
     loop.reset();
-    input.touch.sticks.latchTakeoff();
+    input.latchTakeoff();
   }
 
   function newSession(kind: 'race' | 'freefly'): void {
@@ -148,7 +179,7 @@ function boot(): void {
     // A fresh flight starts with the touch throttle at the bottom (or centre when it auto-centres).
     input.touch.sticks.releaseAll();
     input.touch.sticks.setThrottle(settings.touchThrottleCentre ? 0.5 : 0);
-    input.touch.sticks.latchTakeoff();
+    input.latchTakeoff();
     if (kind === 'race') race.startRace();
     else race.startFreeFly();
     hud.showScreen('none');
@@ -187,9 +218,75 @@ function boot(): void {
         applySettings(a.settings);
         saveSettings(a.settings, storage);
         break;
+      case 'enter-vr':
+        void enterVr();
+        break;
       case 'fullscreen':
         void toggleFullscreen(document).then((on) => hud.toast(on ? 'Full screen on' : 'Full screen off'));
         break;
+    }
+  }
+
+  /** Start an immersive-vr session (runs inside the menu click, which WebXR requires). */
+  async function enterVr(): Promise<void> {
+    // a second click while the first request is pending must not start (or tear down) anything
+    if (xrSession || xrStarting) return;
+    xrStarting = true;
+    let session: XRSession | null = null;
+    try {
+      session = await requestVrSession(navigator);
+      xrSession = session;
+      const granted = session;
+      input.xr.setSources(() => granted.inputSources);
+      input.latchTakeoff();
+      await view.startXr(session);
+      loop.reset();
+    } catch (err) {
+      xrSession = null;
+      input.xr.setSources(null);
+      view.endXr();
+      // a granted session that failed to start must not leave the headset stuck in immersive mode
+      if (session) void session.end().catch(() => undefined);
+      toast(`VR unavailable: ${(err as Error).message}`);
+    } finally {
+      xrStarting = false;
+    }
+  }
+
+  /**
+   * three's 'sessionend' fires after it has restored the flat-screen pixel ratio and size and
+   * cleared isPresenting; the session's own 'end' event runs before that, too early to resize.
+   */
+  view.renderer.xr.addEventListener('sessionend', onVrEnd);
+  function onVrEnd(): void {
+    if (!xrSession) return;
+    xrSession = null;
+    input.xr.setSources(null);
+    view.endXr();
+    const status = race.snapshot().status;
+    if (FLYING.has(status) && status !== 'crashed') {
+      race.pause();
+      hud.showScreen('pause');
+    }
+    loop.reset();
+  }
+
+  /** VR menu screens on the XR card: A = primary, X = secondary, B = leave VR. */
+  function handleXrMenu(status: string, b: NonNullable<InputFrame['xr']>): void {
+    if (b.b) {
+      // a second B before 'sessionend' finds the session already ending: InvalidStateError
+      void xrSession?.end().catch(() => undefined);
+      return;
+    }
+    if (status === 'menu') {
+      if (b.a) onAction({ type: 'race' });
+      else if (b.x) onAction({ type: 'freefly' });
+    } else if (status === 'paused') {
+      if (b.a || b.y) onAction({ type: 'resume' });
+      else if (b.x) onAction({ type: 'menu' });
+    } else if (status === 'finished') {
+      if (b.a) onAction({ type: 'retry' });
+      else if (b.x) onAction({ type: 'menu' });
     }
   }
 
@@ -224,6 +321,7 @@ function boot(): void {
   function throttleZeroHint(): string {
     const src = input.activeSource;
     if (src === 'touch') return `drag the ${throttleSlot(settings.stickMode) === 'ly' ? 'left' : 'right'} stick fully down`;
+    if (src === 'xr') return `release the ${throttleSlot(settings.stickMode) === 'ly' ? 'left' : 'right'} thumbstick`;
     return throttleDownHint(settings, src === 'keyboard').toLowerCase();
   }
 
@@ -231,9 +329,9 @@ function boot(): void {
     if (b.arm) {
       const want = !sim.fc.armed;
       const ok = sim.setArmed(want, control);
-      if (want && !ok) hud.toast(control.throttle >= 0.05 ? `Arming blocked: ${throttleZeroHint()}` : 'Arming blocked: level the drone');
-      if (!sim.fc.armed) input.touch.sticks.latchTakeoff();
-      else if (input.activeSource === 'touch' && input.touch.sticks.latched) hud.toast('Armed — push the throttle stick up to take off');
+      if (want && !ok) toast(control.throttle >= 0.05 ? `Arming blocked: ${throttleZeroHint()}` : 'Arming blocked: level the drone');
+      if (!sim.fc.armed) input.latchTakeoff();
+      else if (input.takeoffLatched) toast('Armed — push the throttle stick up to take off');
       dispatch({ type: 'armed', armed: sim.fc.armed });
     }
     if (b.toggleMode) {
@@ -241,7 +339,7 @@ function boot(): void {
       sim.fc.mode = settings.flightMode;
       saveSettings(settings, storage);
       hud.setSettings(settings);
-      hud.toast(`${settings.flightMode.toUpperCase()} mode`);
+      toast(`${settings.flightMode.toUpperCase()} mode`);
     }
     if (b.cycleCamera) cameraMode = CAMERA_CYCLE[(CAMERA_CYCLE.indexOf(cameraMode) + 1) % CAMERA_CYCLE.length];
     if (b.reset) race.requestReset();
@@ -269,6 +367,13 @@ function boot(): void {
     race.toMenu();
     placeDrone(spawnPos, LOFT_LEVEL.spawn.yaw);
     void audio.suspend();
+    if (device.native === 'android') {
+      // if the shell cannot close, fall back to the "closed" screen like the web build
+      void import('@capacitor/app')
+        .then(({ App }) => App.exitApp())
+        .catch(() => hud.showScreen('bye'));
+      return;
+    }
     void exitFullscreen(document);
     window.close(); // only works for script-opened windows; otherwise the "closed" screen stays
     hud.showScreen('bye');
@@ -288,7 +393,10 @@ function boot(): void {
   });
   window.addEventListener('pagehide', () => audio.dispose());
 
-  const resize = (): void => view.resize(canvas.clientWidth, canvas.clientHeight);
+  const resize = (): void => {
+    view.resize(canvas.clientWidth, canvas.clientHeight);
+    menuRenders = 0;
+  };
   new ResizeObserver(resize).observe(canvas);
   resize();
 
@@ -308,7 +416,8 @@ function boot(): void {
   let lastInput: InputFrame | null = null;
 
   function frame(now: number): void {
-    const frameSec = Math.min((now - last) / 1000, 0.1);
+    // XR frame times share the performance.now() timebase, but never trust a backwards step.
+    const frameSec = Math.min(Math.max((now - last) / 1000, 0), 0.1);
     last = now;
     time += frameSec;
     fpsMeter.sample(frameSec);
@@ -333,15 +442,30 @@ function boot(): void {
       hud.showScreen('pause');
     }
 
+    const inVr = view.presenting;
+    if (inVr && inp.xr?.lStick) view.recenterXr();
+    if (inVr && inp.xr?.lTrigger) {
+      settings = { ...settings, headingArrow: !settings.headingArrow };
+      saveSettings(settings, storage);
+      hud.setSettings(settings);
+      toast(`Heading arrow ${settings.headingArrow ? 'on' : 'off'}`);
+    }
     if (!flying) {
-      hud.navigate(inp.nav, inp.buttons.confirm);
-      if (status === 'paused' && inp.buttons.pause) onAction({ type: 'resume' });
+      if (inVr && inp.xr) {
+        handleXrMenu(status, inp.xr);
+      } else {
+        hud.navigate(inp.nav, inp.buttons.confirm);
+        if (status === 'paused' && inp.buttons.pause) onAction({ type: 'resume' });
+      }
     }
 
     let alpha = 1;
     if (flying) {
       // Touch auto-centre sticks fly DJI-style: centre holds altitude (barometer hold), like 'A/Atti' mode.
-      sim.fc.altitudeHold = inp.source === 'touch' && settings.touchThrottleCentre;
+      // Quest thumbsticks always spring back to centre, so VR flies with altitude hold too.
+      sim.fc.altitudeHold = (inp.source === 'touch' && settings.touchThrottleCentre) || inp.source === 'xr';
+      // …and the right thumbstick flies speed, braking to a stop when released (Angle mode).
+      sim.fc.positionHold = inp.source === 'xr';
       const control = status === 'countdown' ? { ...inp.control, throttle: 0 } : inp.control;
       alpha = loop.advance(frameSec, (dt) => {
         prevPos.copy(sim.world.state.position);
@@ -364,19 +488,44 @@ function boot(): void {
     const speed = drone.velocity.length();
     const snap = race.snapshot();
 
-    view.frame({
-      dt: frameSec,
-      time,
-      drone,
-      fanAngle: sim.world.fanAngle,
-      nextRing: snap.status === 'freefly' ? -1 : snap.nextRing,
-      cameraMode: flying ? cameraMode : 'los',
-      cameraTiltDeg: settings.cameraTiltDeg,
-      fovDeg: settings.fovDeg,
-      speed,
-    });
+    // In a headset the view must follow the head every frame; on a flat screen a DOM menu freezes it.
+    const overlay = !inVr && (hud.screen !== 'none' || (shell?.gateOpen ?? false) || (shell?.rotateOpen ?? false));
+    const overlayKey = overlay ? `${hud.screen}|${shell?.gateOpen}|${shell?.rotateOpen}` : '';
+    if (overlayKey !== lastOverlayKey) {
+      lastOverlayKey = overlayKey;
+      menuRenders = 0;
+    }
+    const renderNow = !overlay || menuRenders < MENU_SETTLE_FRAMES;
+    if (renderNow) {
+      if (overlay) menuRenders++;
+      view.frame({
+        dt: frameSec,
+        time,
+        drone,
+        fanAngle: sim.world.fanAngle,
+        nextRing: snap.status === 'freefly' ? -1 : snap.nextRing,
+        // pause keeps the flight camera (no swing to LOS behind the menu, no VR teleport to the platform)
+        cameraMode: flying || snap.status === 'paused' ? cameraMode : 'los',
+        cameraTiltDeg: settings.cameraTiltDeg,
+        fovDeg: settings.fovDeg,
+        speed,
+        headingArrow: settings.headingArrow,
+      });
+    }
 
-    if (settings.quality === 'auto') view.setRenderScale(dynRes.update(fpsMeter.frameMs));
+    // a frozen view's frame time says nothing about the GPU, so dynamic resolution only adapts while rendering
+    if (settings.quality === 'auto' && !inVr && !overlay) view.setRenderScale(dynRes.update(fpsMeter.frameMs));
+    if (inVr) {
+      // the take-off prompt is stale as soon as the throttle leaves the latch
+      if (xrToast && (performance.now() > xrToastUntil || (xrToast.startsWith('Armed') && !input.takeoffLatched))) xrToast = '';
+      if (time - xrPanelAt >= XR_PANEL_PERIOD || snap.status !== xrPanelStatus) {
+        xrPanelAt = time;
+        xrPanelStatus = snap.status;
+        view.xrPanel.set(
+          xrHudContent({ race: snap, armed: sim.fc.armed, latched: input.takeoffLatched, mode: sim.fc.mode, camera: cameraMode, altitude: drone.position.y, speed, toast: xrToast }),
+        );
+      }
+    }
 
     hud.update({
       race: snap,
@@ -400,10 +549,9 @@ function boot(): void {
       audio.setMotorsMuted(mute);
     }
     audio.update(drone.motors, drone.armed, speed);
-
-    requestAnimationFrame(frame);
   }
-  requestAnimationFrame(frame);
+  // setAnimationLoop = requestAnimationFrame on a flat screen, the XR session's frame loop in a headset.
+  view.renderer.setAnimationLoop(frame);
 
   // Debug / e2e / selftest hook.
   const hook = {
@@ -416,8 +564,9 @@ function boot(): void {
     get fps() {
       return fpsMeter.fps;
     },
+    /** tier actually rendering (the XR session overrides the chosen one) */
     get tier() {
-      return tier;
+      return view.tier;
     },
     get armed() {
       return sim.fc.armed;
@@ -425,7 +574,18 @@ function boot(): void {
     get camera() {
       return cameraMode;
     },
+    get xr() {
+      return { presenting: view.presenting, source: input.activeSource, latched: input.takeoffLatched, panelDraws: view.xrPanel.draws };
+    },
     stats: () => view.stats(),
+    /** camera the view is rendering (menus show LOS; pause keeps the flight camera) */
+    get renderedCamera() {
+      return view.renderedCamera;
+    },
+    /** 3D frames drawn so far (the view freezes behind DOM menus) */
+    get renders() {
+      return view.frames;
+    },
     get audio() {
       return audio.state;
     },
@@ -477,4 +637,12 @@ function boot(): void {
   if (selftest) void import('./ui/selftest').then((m) => m.runSelfTest(hook, settings.stickMode));
 }
 
-boot();
+// `?xremu=1` emulates a Quest 2 (IWER) before boot so navigator.xr is the emulated runtime.
+if (new URLSearchParams(location.search).get('xremu') === '1') {
+  void import('./core/xr-emulator').then((m) => {
+    m.installXrEmulator();
+    boot();
+  });
+} else {
+  boot();
+}

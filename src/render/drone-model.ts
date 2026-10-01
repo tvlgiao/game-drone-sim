@@ -24,6 +24,15 @@ const _s = new THREE.Vector3(1, 1, 1);
 const _up = new THREE.Vector3(0, 1, 0);
 const _v = new THREE.Vector3();
 
+/**
+ * Orientation colours, like aircraft nav lights: the front half (−Z, camera side) is green, the rear
+ * red, on LEDs, props, blur discs, ducts and the two nav-light glows — readable from across the loft.
+ */
+export const FRONT_COLOR = new THREE.Color(0.1, 1, 0.32);
+export const REAR_COLOR = new THREE.Color(1, 0.12, 0.08);
+/** screen-space size of the nav-light glows (fraction of the view height, sizeAttenuation off) */
+const NAV_GLOW_SIZE = 0.022;
+
 function scaleUV(g: THREE.BufferGeometry, k: number): THREE.BufferGeometry {
   const uv = g.attributes.uv as THREE.BufferAttribute | undefined;
   if (uv) for (let i = 0; i < uv.count; i++) uv.setXY(i, uv.getX(i) * k, uv.getY(i) * k);
@@ -207,22 +216,25 @@ function ductGeometry(): THREE.BufferGeometry {
 
 const BLUR_VERT = /* glsl */ `
 attribute float aRpm;
+attribute vec3 aTint;
 varying vec2 vP;
 varying float vRpm;
+varying vec3 vTint;
 #include <common>
 #include <fog_pars_vertex>
 void main() {
   vP = position.xz / ${PROP_R.toFixed(4)};
   vRpm = aRpm;
+  vTint = aTint;
   vec4 mvPosition = modelViewMatrix * instanceMatrix * vec4(position, 1.0);
   gl_Position = projectionMatrix * mvPosition;
   #include <fog_vertex>
 }`;
 
 const BLUR_FRAG = /* glsl */ `
-uniform vec3 uTint;
 varying vec2 vP;
 varying float vRpm;
+varying vec3 vTint;
 #include <common>
 #include <fog_pars_fragment>
 void main() {
@@ -233,7 +245,7 @@ void main() {
   float tip = smoothstep(0.84, 0.94, r) * (1.0 - smoothstep(0.95, 1.0, r));
   float alpha = vRpm * (radial * (0.16 + ghosts * 0.22) + tip * 0.5);
   if (alpha < 0.004) discard;
-  vec3 col = uTint * (0.7 + 0.5 * ghosts) + vec3(1.0) * tip * 0.8;
+  vec3 col = vTint * (0.7 + 0.5 * ghosts) + vec3(1.0) * tip * 0.8;
   gl_FragColor = vec4(col, alpha);
   #include <tonemapping_fragment>
   #include <colorspace_fragment>
@@ -251,19 +263,16 @@ const LED_FRAG = /* glsl */ `
 uniform float uTime;
 uniform float uArmed;
 uniform float uBoost;
+uniform vec3 uFront;
+uniform vec3 uRear;
 varying vec3 vBody;
-vec3 hsv2rgb(vec3 c) {
-  vec3 p = abs(fract(c.xxx + vec3(0.0, 2.0/3.0, 1.0/3.0)) * 6.0 - 3.0);
-  return c.z * mix(vec3(1.0), clamp(p - 1.0, 0.0, 1.0), c.y);
-}
 void main() {
-  float ang = atan(vBody.z, vBody.x) / 6.28318;
+  // front (−Z) green, rear red: disarmed breathes, armed is solid with a running chase
   float rad = length(vBody.xz) / 0.05;
-  vec3 idle = vec3(1.0, 0.28, 0.06) * (0.35 + 0.65 * (0.5 + 0.5 * sin(uTime * 2.6)));
-  float hue = fract(ang + rad * 0.35 - uTime * 0.7);
-  float chase = 0.55 + 0.45 * smoothstep(0.3, 0.0, abs(fract(rad * 1.5 - uTime * 3.0) - 0.5));
-  vec3 armed = hsv2rgb(vec3(hue, 0.85, 1.0)) * chase;
-  vec3 col = mix(idle, armed, uArmed) * (3.2 + uBoost);
+  vec3 side = vBody.z < 0.0 ? uFront : uRear;
+  float breathe = 0.35 + 0.65 * (0.5 + 0.5 * sin(uTime * 2.6));
+  float chase = 0.7 + 0.3 * smoothstep(0.3, 0.0, abs(fract(rad * 1.5 - uTime * 3.0) - 0.5));
+  vec3 col = side * mix(breathe, chase, uArmed) * (3.2 + uBoost);
   gl_FragColor = vec4(col, 1.0);
   #include <tonemapping_fragment>
   #include <colorspace_fragment>
@@ -278,8 +287,11 @@ export class DroneModel {
   private readonly blur: THREE.InstancedMesh;
   private readonly blurRpm: THREE.InstancedBufferAttribute;
   private readonly ledMat: THREE.ShaderMaterial;
+  private readonly propMat: THREE.MeshPhysicalMaterial;
   private readonly blurMat: THREE.ShaderMaterial;
   private readonly glint: THREE.Sprite;
+  /** front (green) / rear (red) glows of constant screen size; hidden from the FPV lens */
+  readonly navLights = new THREE.Group();
   private readonly angles = [0, 0, 0, 0];
   private readonly propIndex: { mesh: THREE.InstancedMesh; slot: number }[] = [];
   private readonly geometries: THREE.BufferGeometry[] = [];
@@ -287,7 +299,7 @@ export class DroneModel {
   private armedBlend = 0;
   private tiltDeg = NaN;
 
-  constructor(private readonly mats: Materials) {
+  constructor(mats: Materials) {
     this.root.name = 'drone';
     const batch = new StaticBatcher();
     const I = new THREE.Matrix4();
@@ -316,20 +328,30 @@ export class DroneModel {
 
     // Motors, ducts, bumpers
     const duct = ductGeometry();
+    const tpuFront = mats.tpu.clone();
+    tpuFront.color.set(0x2c9a4e);
+    tpuFront.sheenColor.set(0x9fffc0);
+    const tpuRear = mats.tpu.clone();
+    tpuRear.color.set(0xa3302a);
+    tpuRear.sheenColor.set(0xffb0a0);
+    this.ownMaterials.push(tpuFront, tpuRear);
     for (const m of MOTOR_LAYOUT) {
       const [mx, , mz] = m.position;
+      const front = mz < 0;
+      const tpuKey = front ? 'tpuFront' : 'tpuRear';
+      const tpu = front ? tpuFront : tpuRear;
       batch.add('motorBase', mats.motorBase, new THREE.CylinderGeometry(0.0095, 0.0098, 0.0026, 24), at(mx, 0.0024, mz), opts);
       batch.add('copper', mats.copper, new THREE.CylinderGeometry(0.0086, 0.0086, 0.004, 24), at(mx, 0.0056, mz), opts);
       batch.add('anodized', mats.anodized, new THREE.CylinderGeometry(0.0094, 0.0096, 0.0085, 28), at(mx, 0.0118, mz), opts);
       batch.add('motorBase', mats.motorBase, new THREE.CylinderGeometry(0.0068, 0.0092, 0.0012, 28), at(mx, 0.0166, mz), opts);
       batch.add('aluminium', mats.aluminium, new THREE.CylinderGeometry(0.0012, 0.0012, 0.006, 8), at(mx, 0.0185, mz), opts);
-      batch.add('tpu', mats.tpu, duct.clone(), at(mx, 0, mz), opts);
+      batch.add(tpuKey, tpu, duct.clone(), at(mx, 0, mz), opts);
       const len = Math.hypot(mx, mz);
       const ox = mx / len;
       const oz = mz / len;
       batch.add('wireBlack', mats.wireBlack, new THREE.CylinderGeometry(0.0042, 0.0034, 0.012, 12), at(mx + ox * 0.043, -0.018, mz + oz * 0.043), opts);
       // arm bracing ribs (TPU) from duct to frame body
-      batch.add('tpu', mats.tpu, new THREE.BoxGeometry(0.004, 0.012, 0.02), at(mx - ox * 0.035, -0.006, mz - oz * 0.035, 0, Math.atan2(ox, oz), 0), opts);
+      batch.add(tpuKey, tpu, new THREE.BoxGeometry(0.004, 0.012, 0.02), at(mx - ox * 0.035, -0.006, mz - oz * 0.035, 0, Math.atan2(ox, oz), 0), opts);
     }
     duct.dispose();
 
@@ -415,13 +437,21 @@ export class DroneModel {
     const cwG = propGeometry(false);
     this.geometries.push(ccwG, cwG);
     const nCCW = MOTOR_LAYOUT.filter((m) => m.spin === 1).length;
-    this.propsCCW = new THREE.InstancedMesh(ccwG, mats.propMat, nCCW);
-    this.propsCW = new THREE.InstancedMesh(cwG, mats.propMat, MOTOR_LAYOUT.length - nCCW);
+    // white base: the per-instance colour (front green / rear red) is the prop colour
+    this.propMat = mats.propMat.clone();
+    this.propMat.color.set(0xffffff);
+    this.propMat.emissive.set(0x151515);
+    this.ownMaterials.push(this.propMat);
+    this.propsCCW = new THREE.InstancedMesh(ccwG, this.propMat, nCCW);
+    this.propsCW = new THREE.InstancedMesh(cwG, this.propMat, MOTOR_LAYOUT.length - nCCW);
     let a = 0;
     let b = 0;
     for (const m of MOTOR_LAYOUT) {
-      if (m.spin === 1) this.propIndex.push({ mesh: this.propsCCW, slot: a++ });
-      else this.propIndex.push({ mesh: this.propsCW, slot: b++ });
+      const col = m.position[2] < 0 ? FRONT_COLOR : REAR_COLOR;
+      const mesh = m.spin === 1 ? this.propsCCW : this.propsCW;
+      const slot = m.spin === 1 ? a++ : b++;
+      mesh.setColorAt(slot, col);
+      this.propIndex.push({ mesh, slot });
     }
     const discG = new THREE.CircleGeometry(PROP_R + 0.001, 48);
     discG.rotateX(-Math.PI / 2);
@@ -429,8 +459,11 @@ export class DroneModel {
     this.blurRpm = new THREE.InstancedBufferAttribute(new Float32Array(MOTOR_LAYOUT.length), 1);
     this.blurRpm.setUsage(THREE.DynamicDrawUsage);
     discG.setAttribute('aRpm', this.blurRpm);
+    const tints = new Float32Array(MOTOR_LAYOUT.length * 3);
+    MOTOR_LAYOUT.forEach((m, i) => (m.position[2] < 0 ? FRONT_COLOR : REAR_COLOR).toArray(tints, i * 3));
+    discG.setAttribute('aTint', new THREE.InstancedBufferAttribute(tints, 3));
     this.blurMat = new THREE.ShaderMaterial({
-      uniforms: THREE.UniformsUtils.merge([THREE.UniformsLib.fog, { uTint: { value: new THREE.Color(0.35, 0.85, 1.0) } }]),
+      uniforms: THREE.UniformsUtils.merge([THREE.UniformsLib.fog]),
       vertexShader: BLUR_VERT,
       fragmentShader: BLUR_FRAG,
       transparent: true,
@@ -466,13 +499,24 @@ export class DroneModel {
     const ledG = mergeSimple(ledParts);
     this.geometries.push(ledG);
     this.ledMat = new THREE.ShaderMaterial({
-      uniforms: { uTime: { value: 0 }, uArmed: { value: 0 }, uBoost: { value: 0 } },
+      uniforms: { uTime: { value: 0 }, uArmed: { value: 0 }, uBoost: { value: 0 }, uFront: { value: FRONT_COLOR.clone() }, uRear: { value: REAR_COLOR.clone() } },
       vertexShader: LED_VERT,
       fragmentShader: LED_FRAG,
     });
     this.ownMaterials.push(this.ledMat);
     const led = new THREE.Mesh(ledG, this.ledMat);
     this.root.add(led);
+
+    for (const [z, col] of [[-0.05, FRONT_COLOR], [0.045, REAR_COLOR]] as const) {
+      const m = new THREE.SpriteMaterial({ map: mats.radial, color: col.clone().multiplyScalar(2.2), transparent: true, blending: THREE.AdditiveBlending, depthWrite: false, sizeAttenuation: false, fog: false });
+      this.ownMaterials.push(m);
+      const glow = new THREE.Sprite(m);
+      glow.scale.setScalar(NAV_GLOW_SIZE);
+      glow.position.set(0, 0.012, z);
+      this.navLights.add(glow);
+    }
+    this.navLights.name = 'nav-lights';
+    this.root.add(this.navLights);
 
     this.updateProps([0, 0, 0, 0]);
   }
@@ -492,7 +536,7 @@ export class DroneModel {
     let avg = 0;
     for (let i = 0; i < 4; i++) avg += state.motors[i];
     avg *= 0.25;
-    this.mats.propMat.opacity = 0.9 - Math.min(1, avg * 1.6) * 0.72;
+    this.propMat.opacity = 0.9 - Math.min(1, avg * 1.6) * 0.72;
 
     this.armedBlend += ((state.armed ? 1 : 0) - this.armedBlend) * Math.min(1, dt * 6);
     this.ledMat.uniforms.uTime.value = time;

@@ -27,7 +27,7 @@ export interface ButtonEvents {
   confirm: boolean;
 }
 
-export type InputSource = 'gamepad' | 'keyboard' | 'touch' | 'none';
+export type InputSource = 'gamepad' | 'keyboard' | 'touch' | 'xr' | 'none';
 
 /** Edge-triggered menu navigation (d-pad / left stick flick / arrows / Enter / Esc / B). */
 export interface NavEvents {
@@ -65,6 +65,20 @@ export interface InputFrame {
   /** processed stick positions (after deadzone / square gate) for the visualiser; keyboard / touch = virtual sticks */
   sticks: StickPositions;
   pad: RawPad | null;
+  /** WebXR controller button edges (A/B/X/Y, stick clicks) while an XR session runs, else null */
+  xr: XrButtonEdges | null;
+}
+
+/** Rising edges of the Quest Touch buttons for one frame. */
+export interface XrButtonEdges {
+  a: boolean;
+  b: boolean;
+  x: boolean;
+  y: boolean;
+  rStick: boolean;
+  lStick: boolean;
+  /** left index trigger */
+  lTrigger: boolean;
 }
 
 export type FlightMode = 'acro' | 'angle';

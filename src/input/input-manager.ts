@@ -1,10 +1,11 @@
-/** Merges gamepad + keyboard + touch into one normalised InputFrame per render frame. */
+/** Merges gamepad + keyboard + touch + WebXR controllers into one normalised InputFrame per render frame. */
 import type { Settings } from '../core/settings';
 import type { InputFrame, InputSource, StickPositions } from '../types';
 import { GP, GamepadInput, prettyPadName } from './gamepad';
 import { KeyboardInput } from './keyboard';
 import { EdgeDetector, RepeatTrigger, VirtualSticks, mapSticks, throttleSlot, type StickMapOptions, type StickSlot } from './stick';
 import { TouchInput, throttleSideOf } from './touch';
+import { XrControllers, shapeXrControl, type XrButtons } from './xr-controllers';
 
 export { applyRadialDeadzone, applyAxialDeadzone, stickToThrottle, triggerToThrottle, mapSticks, squareGate, VirtualSticks, EdgeDetector } from './stick';
 
@@ -36,6 +37,16 @@ const KEY_BUTTON: Record<ButtonName, readonly string[]> = {
   confirm: ['Enter', 'NumpadEnter'],
   back: ['Escape', 'Backspace'],
 };
+/** Quest Touch layout: A arm/confirm, B mode/back, X reset, Y pause, right stick click = camera. */
+const XR_BUTTON: Record<ButtonName, keyof XrButtons> = {
+  arm: 'a',
+  toggleMode: 'b',
+  cycleCamera: 'rStick',
+  reset: 'x',
+  pause: 'y',
+  confirm: 'a',
+  back: 'b',
+};
 const BUTTON_NAMES = Object.keys(PAD_BUTTON) as ButtonName[];
 type NavDir = 'up' | 'down' | 'left' | 'right';
 const NAV_DIRS: readonly NavDir[] = ['up', 'down', 'left', 'right'];
@@ -47,6 +58,8 @@ export class InputManager {
   onConnection: ((e: GamepadConnectionEvent) => void) | null = null;
   /** Virtual touch sticks + on-screen buttons (UI attaches its layer to it). */
   readonly touch = new TouchInput();
+  /** WebXR (Quest Touch) controllers; fed the session's input sources by main while presenting. */
+  readonly xr = new XrControllers();
 
   private settings: Settings;
   private readonly win: Window | null;
@@ -66,6 +79,8 @@ export class InputManager {
   private readonly touchOpts: StickMapOptions;
   /** keyboard has no trigger: its throttle is always the mode's throttle stick */
   private readonly kbOpts: StickMapOptions;
+  /** XR thumbsticks: radial deadzone on the flight stick, throttle raw (altitude hold centres it) */
+  private readonly xrOpts: StickMapOptions;
   private readonly frame: InputFrame = {
     control: { throttle: 0, yaw: 0, pitch: 0, roll: 0 },
     buttons: { arm: false, toggleMode: false, cycleCamera: false, reset: false, pause: false, confirm: false },
@@ -74,6 +89,7 @@ export class InputManager {
     gamepadId: null,
     sticks: { lx: 0, ly: -1, rx: 0, ry: 0 },
     pad: null,
+    xr: null,
   };
 
   private readonly onConnected = (e: Event): void => this.emitConnection(e, true);
@@ -89,6 +105,7 @@ export class InputManager {
     this.touchDevice = touchDevice;
     this.touchOpts = { stickMode: settings.stickMode, throttleSource: 'stick', squareGate: false, invert: settings.invert, deadzone: settings.deadzone };
     this.kbOpts = { ...this.touchOpts, squareGate: settings.squareGate };
+    this.xrOpts = { ...this.touchOpts };
     this.pad = new GamepadInput(win?.navigator ?? null);
     this.kb = new KeyboardInput(win);
     if (win) this.touch.listen(win);
@@ -99,7 +116,7 @@ export class InputManager {
 
   updateSettings(s: Settings): void {
     this.settings = s;
-    for (const o of [this.touchOpts, this.kbOpts]) {
+    for (const o of [this.touchOpts, this.kbOpts, this.xrOpts]) {
       o.stickMode = s.stickMode;
       o.invert = s.invert;
       o.deadzone = s.deadzone;
@@ -107,6 +124,19 @@ export class InputManager {
     this.kbOpts.squareGate = s.squareGate;
     const t = this.touch.sticks;
     t.configure(throttleSideOf(throttleSlot(s.stickMode)), s.touchThrottleCentre, s.touchSticksFixed, t.opts.radius);
+    this.xr.setThrottleSlot(throttleSlot(s.stickMode));
+  }
+
+  /** Re-arms the take-off latch of the centring throttles (touch auto-centre, XR thumbstick). */
+  latchTakeoff(): void {
+    this.touch.sticks.latchTakeoff();
+    this.xr.latchTakeoff();
+  }
+
+  /** The active source's throttle is still latched at the bottom (armed but not yet pushed up). */
+  get takeoffLatched(): boolean {
+    if (this.source === 'xr') return this.xr.latched;
+    return this.source === 'touch' && this.touch.sticks.latched;
   }
 
   /** Current source (last used device). */
@@ -128,6 +158,8 @@ export class InputManager {
     const f = this.frame;
     const snap = this.pad.poll(now);
     const kb = this.kb;
+    const xr = this.xr;
+    if (xr.active) xr.poll(now);
 
     const st = this.settings;
     const hold = throttleSlot(st.stickMode);
@@ -154,6 +186,9 @@ export class InputManager {
     else if (snap && (padT > Math.max(kbT, touchT) || this.source === 'none')) this.source = 'gamepad';
     if (!snap && this.source === 'gamepad') this.source = touchT > kbT ? 'touch' : kbT > -Infinity ? 'keyboard' : 'none';
     if (this.source === 'none' && this.touchDevice) this.source = 'touch';
+    // In a headset the Touch controllers are the default; a paired gamepad used more recently wins.
+    if (xr.active && xr.connected && !(snap && padT > xr.lastActivity)) this.source = 'xr';
+    else if (!xr.active && this.source === 'xr') this.source = 'none';
 
     const opts: StickMapOptions = st;
     const sticks: StickPositions = f.sticks;
@@ -168,6 +203,9 @@ export class InputManager {
       this.raw.rx = read(am.rx);
       this.raw.ry = -read(am.ry);
       mapSticks(this.raw, snap.values[GP.RT]!, opts, sticks, f.control, true);
+    } else if (this.source === 'xr') {
+      mapSticks(xr.pos, 0, this.xrOpts, sticks, f.control, true);
+      shapeXrControl(f.control);
     } else if (this.source === 'touch') {
       mapSticks(this.touch.sticks.pos, 0, this.touchOpts, sticks, f.control, true);
     } else {
@@ -192,8 +230,9 @@ export class InputManager {
     for (const name of BUTTON_NAMES) {
       const padEdge = this.padEdges.get(name)!.update(snap ? snap.pressed[PAD_BUTTON[name]]! : false);
       const keyEdge = KEY_BUTTON[name].some((k) => kb.wasPressed(k));
-      if (name === 'back') back = padEdge || keyEdge;
-      else b[name] = padEdge || keyEdge;
+      const xrEdge = xr.active && xr.pressed[XR_BUTTON[name]];
+      if (name === 'back') back = padEdge || keyEdge || xrEdge;
+      else b[name] = padEdge || keyEdge || xrEdge;
     }
     this.touch.drainButtons(b);
 
@@ -214,6 +253,7 @@ export class InputManager {
       n[d] = this.navRepeat.get(d)!.update(held, dt);
     }
 
+    f.xr = xr.active ? xr.pressed : null;
     f.source = this.source;
     f.gamepadId = snap ? snap.id : null;
     kb.endFrame();
@@ -222,6 +262,10 @@ export class InputManager {
 
   /** Dual-rumble on the active pad when supported; magnitudes 0..1. */
   rumble(strong: number, weak: number, ms: number): void {
+    if (this.source === 'xr') {
+      this.xr.pulse(Math.max(strong, weak), ms);
+      return;
+    }
     const pad = this.pad.activePad();
     if (!pad) return;
     const act = (pad as { vibrationActuator?: GamepadHapticActuator | null }).vibrationActuator;

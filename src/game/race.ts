@@ -1,6 +1,7 @@
 /** Race state machine: countdown, ordered ring passes, crash/respawn, timing and best-time persistence. DOM-free. */
 import { Vector3 } from 'three';
 import type { Contact, DroneState, GameEvent, LevelDef, RaceSnapshot, RaceStatus } from '../types';
+import { buildSurfaces, surfaceBelow, type TopSurface } from './surfaces';
 
 export const COUNTDOWN_SECONDS = 3;
 export const CRASH_SPEED = 5;
@@ -11,7 +12,6 @@ export const UPSIDE_DOWN_DOT = -0.5;
 export const UPSIDE_DOWN_HEIGHT = 0.3;
 export const UPSIDE_DOWN_TIME = 1;
 export const RESPAWN_OFFSET = 1.2;
-export const RESPAWN_MIN_Y = 0.3;
 /** A step moving further than this is a teleport (respawn), never a ring pass. */
 const MAX_STEP_TRAVEL = 1;
 
@@ -82,12 +82,14 @@ export class RaceController {
   private readonly events: GameEvent[] = [];
   private readonly hit = new Vector3();
   private readonly storage: Storage | null;
+  private readonly surfaces: TopSurface[];
 
   constructor(
     private readonly level: LevelDef,
     storage: Storage | null = defaultStorage(),
   ) {
     this.storage = storage;
+    this.surfaces = buildSurfaces(level);
     this.bestTime = this.readBest();
     this.bestSplits = this.readSplits();
   }
@@ -177,7 +179,11 @@ export class RaceController {
     return ev;
   }
 
-  /** Checkpoint: 1.2 m past the last passed ring along its direction, facing the next ring; else level spawn. */
+  /**
+   * Checkpoint: 1.2 m past the last passed ring along its direction, set down on the floor / prop top
+   * below it (respawns are disarmed: left in mid-air the quad would fall, crash and respawn forever),
+   * facing the next ring; else the level spawn.
+   */
   respawnPoint(): { position: Vector3; yaw: number } {
     const rings = this.level.rings;
     if (this.mode !== 'race' || this.lastPassed < 0) {
@@ -185,11 +191,10 @@ export class RaceController {
       return { position: new Vector3(s.position[0], s.position[1], s.position[2]), yaw: s.yaw };
     }
     const r = rings[this.lastPassed]!;
-    const pos = new Vector3(
-      r.position[0] + r.direction[0] * RESPAWN_OFFSET,
-      Math.max(RESPAWN_MIN_Y, r.position[1] + r.direction[1] * RESPAWN_OFFSET),
-      r.position[2] + r.direction[2] * RESPAWN_OFFSET,
-    );
+    const x = r.position[0] + r.direction[0] * RESPAWN_OFFSET;
+    const z = r.position[2] + r.direction[2] * RESPAWN_OFFSET;
+    const air = r.position[1] + r.direction[1] * RESPAWN_OFFSET;
+    const pos = new Vector3(x, surfaceBelow(this.surfaces, x, air, z) + this.level.spawn.position[1], z);
     const next = rings[this.lastPassed + 1];
     let yaw: number;
     if (next) {

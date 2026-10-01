@@ -47,6 +47,8 @@ export interface Settings {
   quality: QualityTier | 'auto';
   volume: number;
   showFps: boolean;
+  /** arrow on the floor under the quad pointing where its nose faces (LOS / chase orientation aid) */
+  headingArrow: boolean;
   deadzone: number;
   /** touch sticks: throttle springs back to centre (hover) instead of holding like a real gimbal */
   touchThrottleCentre: boolean;
@@ -79,6 +81,7 @@ export const DEFAULT_SETTINGS: Readonly<Settings> = Object.freeze({
   quality: 'auto',
   volume: 0.7,
   showFps: true,
+  headingArrow: true,
   deadzone: 0.05,
   touchThrottleCentre: true,
   touchSticksFixed: false,
@@ -233,6 +236,7 @@ export function validateSettings(raw: unknown): Settings {
     quality: pick(r.quality, o.quality, d.quality),
     volume: num(r.volume, o.volume, d.volume),
     showFps: bool(r.showFps, d.showFps),
+    headingArrow: bool(r.headingArrow, d.headingArrow),
     deadzone: num(r.deadzone, o.deadzone, d.deadzone),
     touchThrottleCentre: bool(r.touchThrottleCentre, d.touchThrottleCentre),
     touchSticksFixed: bool(r.touchSticksFixed, d.touchSticksFixed),

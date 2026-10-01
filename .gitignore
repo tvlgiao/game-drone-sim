@@ -6,3 +6,8 @@ playwright-report
 .playwright-mcp
 *.local
 .env*
+
+# Quest store builds (signed with the key outside the repo)
+quest/dist/
+# Google Play builds
+android-dist/

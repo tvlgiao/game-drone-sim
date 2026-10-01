@@ -32,6 +32,8 @@ export type UiAction =
   | { type: 'exit' }
   /** touch devices: toggle the Fullscreen API (needs the tap gesture) */
   | { type: 'fullscreen' }
+  /** WebXR headsets: start an immersive-vr session (needs the click gesture) */
+  | { type: 'enter-vr' }
   | { type: 'settings'; settings: Settings };
 
 export interface FinishData {
@@ -224,6 +226,16 @@ const ROW_DEFS: Row[] = [
       s.showFps = v;
     },
   },
+  {
+    id: 'headingArrow',
+    label: 'Heading arrow',
+    hint: 'Arrow under the quad pointing where the nose faces (VR: left trigger)',
+    kind: 'bool',
+    get: (s) => s.headingArrow,
+    set: (s, v) => {
+      s.headingArrow = v;
+    },
+  },
   rangeRow('deadzone', 'Stick deadzone', 'Radial deadzone for worn sticks', (v) => v.toFixed(2)),
   {
     id: 'touchThrottleCentre',
@@ -253,7 +265,7 @@ const ROW_DEFS: Row[] = [
 /** Rows only shown on touch devices. */
 const TOUCH_ROWS: ReadonlySet<string> = new Set(['touchThrottleCentre', 'touchSticksFixed']);
 const ROWS = new Map(ROW_DEFS.map((r) => [r.id, r]));
-const SETTINGS_ROWS = ['stickMode', 'touchThrottleCentre', 'touchSticksFixed', 'throttleSource', 'flightMode', 'ratePreset', 'cameraTiltDeg', 'fovDeg', 'quality', 'volume', 'showFps', 'deadzone'];
+const SETTINGS_ROWS = ['stickMode', 'touchThrottleCentre', 'touchSticksFixed', 'throttleSource', 'flightMode', 'ratePreset', 'cameraTiltDeg', 'fovDeg', 'quality', 'volume', 'showFps', 'headingArrow', 'deadzone'];
 const CONTROLLER_ROWS = ['stickMode', 'throttleSource', 'squareGate', 'invert.throttle', 'invert.yaw', 'invert.pitch', 'invert.roll'];
 const CHANNELS: readonly Channel[] = ['throttle', 'yaw', 'pitch', 'roll'];
 const SLOT_NAME: Record<StickSlot, string> = { lx: 'LX', ly: 'LY', rx: 'RX', ry: 'RY' };
@@ -363,6 +375,26 @@ export class Menus {
           x.hidden = false;
         });
       }
+    }
+    if (this.current !== 'none') this.items = this.collectItems(this.screens.get(this.current)!);
+  }
+
+  /** iOS app: no Quit (apps must not close themselves); the menu stays as the home screen. */
+  hideExit(): void {
+    for (const el of this.screens.values()) {
+      el.querySelectorAll<HTMLElement>('[data-act="exit"]').forEach((x) => {
+        x.hidden = true;
+      });
+    }
+    if (this.current !== 'none') this.items = this.collectItems(this.screens.get(this.current)!);
+  }
+
+  /** WebXR headset (immersive-vr supported): reveal the Enter VR button. */
+  enableVr(): void {
+    for (const el of this.screens.values()) {
+      el.querySelectorAll<HTMLElement>('[data-vr-only]').forEach((x) => {
+        x.hidden = false;
+      });
     }
     if (this.current !== 'none') this.items = this.collectItems(this.screens.get(this.current)!);
   }
@@ -546,6 +578,7 @@ export class Menus {
       case 'menu':
       case 'retry':
       case 'exit':
+      case 'enter-vr':
         this.onAction({ type: act });
         break;
       case 'settings':
@@ -828,6 +861,7 @@ export class Menus {
           <p class="ds-logo__sub">FPV Racing · Night Loft</p>
         </header>
         <nav class="ds-menu" aria-label="Main menu">
+          ${this.btn('enter-vr', 'Enter VR', false, '', ' data-vr-only hidden')}
           ${this.btn('race', 'Race', true)}
           ${this.btn('freefly', 'Free Fly')}
           ${this.btn('settings', 'Settings')}
