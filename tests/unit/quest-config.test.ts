@@ -3,6 +3,8 @@ import { describe, expect, it } from 'vitest';
 
 const manifest = JSON.parse(readFileSync(new URL('../../quest/twa-manifest.json', import.meta.url), 'utf8')) as {
   packageId: string;
+  applicationId: string;
+  horizonOSAppMode: string;
   signingKey: { path: string; alias: string };
 };
 const assetlinks = JSON.parse(readFileSync(new URL('../../public/.well-known/assetlinks.json', import.meta.url), 'utf8')) as {
@@ -13,6 +15,12 @@ describe('Quest store config', () => {
   it('keeps the signing key path relative (no build-machine home directory in the repo)', () => {
     expect(manifest.signingKey.path.startsWith('./')).toBe(true);
     expect(JSON.stringify(manifest)).not.toMatch(/\/(Users|home)\//);
+  });
+
+  it('is an immersive app with no placeholder Meta app id (OCULUS_APP_ID "0" shows "App name unavailable")', () => {
+    expect(manifest.horizonOSAppMode).toBe('immersive');
+    // empty until the Horizon Store assigns the real numeric id; never the generator default "0"
+    expect(manifest.applicationId === '' || /^[1-9][0-9]{6,}$/.test(manifest.applicationId)).toBe(true);
   });
 
   it('assetlinks binds the same package the Quest APK is built as', () => {

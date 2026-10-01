@@ -164,3 +164,32 @@ test('sessiongranted with a refused session: no unhandled rejection, toast, Ente
   await expect(page.getByRole('button', { name: 'Enter VR' })).toBeVisible();
   expect(errs).toEqual([]);
 });
+
+const QUEST_UA = 'Mozilla/5.0 (X11; Linux x86_64; Quest 2) AppleWebKit/537.36 (KHTML, like Gecko) OculusBrowser/152.0.0.44.30 Chrome/152.0.7977.64 VR Safari/537.36';
+
+for (const installed of [true, false]) {
+  test(`Quest ${installed ? 'installed app (standalone) enters VR at launch' : 'browser tab does not auto-enter VR'}`, async ({ browser }) => {
+    const ctx = await browser.newContext({ userAgent: QUEST_UA });
+    if (installed) {
+      // the Horizon OS app shows the page in display-mode standalone
+      await ctx.addInitScript(() => {
+        const mm = window.matchMedia.bind(window);
+        window.matchMedia = (q: string) => (q.includes('display-mode: standalone') ? ({ ...mm(q), matches: true, media: q } as MediaQueryList) : mm(q));
+      });
+    }
+    const page = await ctx.newPage();
+    const errs: string[] = [];
+    page.on('pageerror', (e) => errs.push(e.message));
+    await page.goto('/?xremu=1');
+    await page.waitForFunction(() => !!(window as unknown as Partial<W>).__drone && !!(window as unknown as Partial<W>).__xrDevice, null, { timeout: 20_000 });
+    if (installed) {
+      await page.waitForFunction(() => (window as unknown as W).__drone.xr.presenting, null, { timeout: 10_000 });
+    } else {
+      await page.waitForTimeout(1500);
+      expect(await page.evaluate(() => (window as unknown as W).__drone.xr.presenting)).toBe(false);
+      await expect(page.getByRole('button', { name: 'Enter VR' })).toBeVisible();
+    }
+    expect(errs).toEqual([]);
+    await ctx.close();
+  });
+}

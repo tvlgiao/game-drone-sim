@@ -110,8 +110,13 @@ function boot(): void {
   if (import.meta.env.PROD && !device.native && window.isSecureContext && 'serviceWorker' in navigator) {
     navigator.serviceWorker.register('./sw.js').catch((err: unknown) => console.warn('Service worker registration failed (no offline play):', err));
   }
+  // The installed Quest app (immersive Horizon OS app, display-mode standalone) goes straight into VR:
+  // its launch carries user activation, so requestSession needs no click. A plain browser tab does not.
+  const questApp = isQuestBrowser(navigator.userAgent) && device.standalone;
   void vrSupported(navigator).then((ok) => {
-    if (ok) hud.enableVr();
+    if (!ok) return;
+    hud.enableVr();
+    if (questApp && !selftest) void enterVr();
   });
   // The Quest app launches in immersive mode: go straight into VR when the browser grants a session.
   onSessionGranted(navigator, () => void enterVr());
