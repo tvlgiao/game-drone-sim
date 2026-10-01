@@ -23,8 +23,8 @@
     "path": "./quest-upload.jks",
     "alias": "quest"
   },
-  "appVersionName": "1.0.0",
-  "appVersionCode": 1,
+  "appVersionName": "1.0.1",
+  "appVersionCode": 2,
   "shortcuts": [],
   "generatorApp": "bubblewrap-cli",
   "webManifestUrl": "https://dronesim.coworkgamestudio.com/manifest.webmanifest",
@@ -36,7 +36,7 @@
   "enableSiteSettingsShortcut": false,
   "isChromeOSOnly": false,
   "isMetaQuest": true,
-  "horizonOSAppMode": "2D",
+  "horizonOSAppMode": "immersive",
   "fullScopeUrl": "https://dronesim.coworkgamestudio.com/",
   "minSdkVersion": 32,
   "orientation": "landscape",
@@ -50,5 +50,5 @@
     "fullscreen",
     "standalone"
   ],
-  "appVersion": "1.0.0"
+  "appVersion": "1.0.1"
 }

@@ -19,7 +19,7 @@ import { Hud, type UiAction } from './ui/hud';
 import { throttleDownHint } from './ui/mode-labels';
 import { throttleSlot } from './input/stick';
 import { MobileShell, hardenGestures } from './ui/mobile-shell';
-import { isQuestBrowser, requestVrSession, vrSupported } from './core/xr';
+import { isQuestBrowser, onSessionGranted, requestVrSession, vrSupported } from './core/xr';
 import { xrHudContent } from './ui/xr-hud';
 import { TouchControls } from './ui/touch-controls';
 import type { ButtonEvents, CameraMode, ControlInput, DroneState, GameEvent, InputFrame, QualityTier } from './types';
@@ -113,6 +113,8 @@ function boot(): void {
   void vrSupported(navigator).then((ok) => {
     if (ok) hud.enableVr();
   });
+  // The Quest app launches in immersive mode: go straight into VR when the browser grants a session.
+  onSessionGranted(navigator, () => void enterVr());
 
   let touchUi: TouchControls | null = null;
   let shell: MobileShell | null = null;
