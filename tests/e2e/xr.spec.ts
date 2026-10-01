@@ -134,3 +134,33 @@ test('two Enter VR requests in one tick start one working session (controllers s
   expect(await page.evaluate(() => (window as unknown as W).__drone.xr.source)).toBe('xr');
   expect(errs).toEqual([]);
 });
+
+test('Quest immersive app launch: sessiongranted enters VR without a click', async ({ page }) => {
+  const errs: string[] = [];
+  page.on('pageerror', (e) => errs.push(e.message));
+  await page.goto('/?xremu=1');
+  await page.waitForFunction(() => !!(window as unknown as Partial<W>).__drone && !!(window as unknown as Partial<W>).__xrDevice, null, { timeout: 20_000 });
+  expect(await page.evaluate(() => (window as unknown as W).__drone.xr.presenting)).toBe(false);
+  // what Quest Browser fires when the Horizon OS app is launched in immersive mode
+  await page.evaluate(() => (navigator as Navigator & { xr: EventTarget }).xr.dispatchEvent(new Event('sessiongranted')));
+  await page.waitForFunction(() => (window as unknown as W).__drone.xr.presenting, null, { timeout: 10_000 });
+  expect(errs).toEqual([]);
+});
+
+test('sessiongranted with a refused session: no unhandled rejection, toast, Enter VR still offered', async ({ page }) => {
+  const errs: string[] = [];
+  page.on('pageerror', (e) => errs.push(e.message));
+  await page.goto('/?xremu=1');
+  await page.waitForFunction(() => !!(window as unknown as Partial<W>).__drone && !!(window as unknown as Partial<W>).__xrDevice, null, { timeout: 20_000 });
+  await expect(page.getByRole('button', { name: 'Enter VR' })).toBeVisible();
+  await page.evaluate(() => {
+    const xr = (navigator as Navigator & { xr: EventTarget & { requestSession: () => Promise<never> } }).xr;
+    xr.requestSession = () => Promise.reject(new DOMException('denied', 'NotAllowedError'));
+    xr.dispatchEvent(new Event('sessiongranted'));
+  });
+  await expect(page.locator('.ds-toast', { hasText: 'VR unavailable' })).toBeVisible();
+  await page.waitForTimeout(300);
+  expect(await page.evaluate(() => (window as unknown as W).__drone.xr.presenting)).toBe(false);
+  await expect(page.getByRole('button', { name: 'Enter VR' })).toBeVisible();
+  expect(errs).toEqual([]);
+});
