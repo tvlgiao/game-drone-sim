@@ -265,7 +265,8 @@ function boot(): void {
   /** VR menu screens on the XR card: A = primary, X = secondary, B = leave VR. */
   function handleXrMenu(status: string, b: NonNullable<InputFrame['xr']>): void {
     if (b.b) {
-      void xrSession?.end();
+      // a second B before 'sessionend' finds the session already ending: InvalidStateError
+      void xrSession?.end().catch(() => undefined);
       return;
     }
     if (status === 'menu') {
@@ -358,7 +359,10 @@ function boot(): void {
     placeDrone(spawnPos, LOFT_LEVEL.spawn.yaw);
     void audio.suspend();
     if (device.native === 'android') {
-      void import('@capacitor/app').then(({ App }) => App.exitApp());
+      // if the shell cannot close, fall back to the "closed" screen like the web build
+      void import('@capacitor/app')
+        .then(({ App }) => App.exitApp())
+        .catch(() => hud.showScreen('bye'));
       return;
     }
     void exitFullscreen(document);
