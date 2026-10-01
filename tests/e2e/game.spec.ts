@@ -232,10 +232,11 @@ test('menu backdrop does not shift when moving between menu screens or changing 
   expect(await page.evaluate(() => window.__drone.screen)).toBe('settings');
   expect(await page.evaluate(() => window.__drone.renders)).toBe(r0); // menu-to-menu: no redraw
   expect(await page.evaluate(() => window.__drone.cameraPose)).toBe(pose0);
-  // a setting change redraws behind the menu, but as a still frame
+  // a setting change redraws behind the menu (so quality/FOV show), but as a still frame
   await page.keyboard.press('ArrowDown');
   await page.keyboard.press('ArrowRight');
   await page.waitForTimeout(400);
+  expect(await page.evaluate(() => window.__drone.renders)).toBeGreaterThan(r0);
   expect(await page.evaluate(() => window.__drone.cameraPose)).toBe(pose0);
   expect(errors).toEqual([]);
 });
