@@ -111,6 +111,8 @@ export class GameView {
   private recenter = true;
   private xrMode: CameraMode | null = null;
   private tierBeforeXr: QualityTier | null = null;
+  /** frames drawn so far (main.ts freezes the view behind DOM menus) */
+  frames = 0;
   /** platform under the VR pilot's feet in LOS (dolly-local, top at y = 0) */
   private readonly xrPlatform: THREE.Mesh;
   private readonly arrow = new HeadingArrow();
@@ -203,6 +205,7 @@ export class GameView {
   }
 
   frame(f: ViewFrame): void {
+    this.frames++;
     const dt = Math.min(Math.max(f.dt, 0), 0.1);
     const t = f.time;
     const r = this.renderer;
@@ -336,6 +339,11 @@ export class GameView {
   recenterXr(): void {
     this.recenter = true;
     this.xrMode = null;
+  }
+
+  /** camera mode actually being rendered (the rig's, after main.ts picks LOS for menus) */
+  get renderedCamera(): CameraMode {
+    return this.rig.currentMode;
   }
 
   get presenting(): boolean {

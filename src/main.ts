@@ -28,6 +28,12 @@ const PHYSICS_DT = 1 / 1000;
 const CAMERA_CYCLE: CameraMode[] = ['los', 'fpv', 'chase'];
 const BUTTON_KEYS: readonly (keyof ButtonEvents)[] = ['arm', 'toggleMode', 'cycleCamera', 'reset', 'pause', 'confirm'];
 const XR_PANEL_PERIOD = 0.1;
+/**
+ * Frames rendered after a DOM menu (main / pause / settings / tap gate / rotate) opens before the 3D view
+ * behind it freezes: the menus blur the canvas with backdrop-filter, which mobile GPUs (iPhone, Quest
+ * Browser) would otherwise recompute for a full-screen moving scene every frame.
+ */
+const MENU_SETTLE_FRAMES = 2;
 const FLYING = new Set(['countdown', 'racing', 'crashed', 'freefly']);
 
 function safeStorage(): Storage | null {
@@ -86,6 +92,8 @@ function boot(): void {
   /** the VR card redraws a canvas texture: refresh its numbers at most every XR_PANEL_PERIOD */
   let xrPanelAt = -Infinity;
   let xrPanelStatus = '';
+  let menuRenders = 0;
+  let lastOverlayKey = '';
   let xrToast = '';
   let xrToastUntil = 0;
   /** Toast on the DOM HUD and, while in a headset, on the XR card. */
@@ -137,6 +145,7 @@ function boot(): void {
 
   function applySettings(s: Settings): void {
     settings = s;
+    menuRenders = 0; // quality / FOV changes must show behind the settings screen
     sim.fc.mode = s.flightMode;
     const r = s.rates;
     sim.fc.rates = { roll: { ...r.roll }, pitch: { ...r.pitch }, yaw: { ...r.yaw } };
@@ -384,7 +393,10 @@ function boot(): void {
   });
   window.addEventListener('pagehide', () => audio.dispose());
 
-  const resize = (): void => view.resize(canvas.clientWidth, canvas.clientHeight);
+  const resize = (): void => {
+    view.resize(canvas.clientWidth, canvas.clientHeight);
+    menuRenders = 0;
+  };
   new ResizeObserver(resize).observe(canvas);
   resize();
 
@@ -476,20 +488,33 @@ function boot(): void {
     const speed = drone.velocity.length();
     const snap = race.snapshot();
 
-    view.frame({
-      dt: frameSec,
-      time,
-      drone,
-      fanAngle: sim.world.fanAngle,
-      nextRing: snap.status === 'freefly' ? -1 : snap.nextRing,
-      cameraMode: flying ? cameraMode : 'los',
-      cameraTiltDeg: settings.cameraTiltDeg,
-      fovDeg: settings.fovDeg,
-      speed,
-      headingArrow: settings.headingArrow,
-    });
+    // In a headset the view must follow the head every frame; on a flat screen a DOM menu freezes it.
+    const overlay = !inVr && (hud.screen !== 'none' || (shell?.gateOpen ?? false) || (shell?.rotateOpen ?? false));
+    const overlayKey = overlay ? `${hud.screen}|${shell?.gateOpen}|${shell?.rotateOpen}` : '';
+    if (overlayKey !== lastOverlayKey) {
+      lastOverlayKey = overlayKey;
+      menuRenders = 0;
+    }
+    const renderNow = !overlay || menuRenders < MENU_SETTLE_FRAMES;
+    if (renderNow) {
+      if (overlay) menuRenders++;
+      view.frame({
+        dt: frameSec,
+        time,
+        drone,
+        fanAngle: sim.world.fanAngle,
+        nextRing: snap.status === 'freefly' ? -1 : snap.nextRing,
+        // pause keeps the flight camera (no swing to LOS behind the menu, no VR teleport to the platform)
+        cameraMode: flying || snap.status === 'paused' ? cameraMode : 'los',
+        cameraTiltDeg: settings.cameraTiltDeg,
+        fovDeg: settings.fovDeg,
+        speed,
+        headingArrow: settings.headingArrow,
+      });
+    }
 
-    if (settings.quality === 'auto' && !inVr) view.setRenderScale(dynRes.update(fpsMeter.frameMs));
+    // a frozen view's frame time says nothing about the GPU, so dynamic resolution only adapts while rendering
+    if (settings.quality === 'auto' && !inVr && !overlay) view.setRenderScale(dynRes.update(fpsMeter.frameMs));
     if (inVr) {
       // the take-off prompt is stale as soon as the throttle leaves the latch
       if (xrToast && (performance.now() > xrToastUntil || (xrToast.startsWith('Armed') && !input.takeoffLatched))) xrToast = '';
@@ -553,6 +578,14 @@ function boot(): void {
       return { presenting: view.presenting, source: input.activeSource, latched: input.takeoffLatched, panelDraws: view.xrPanel.draws };
     },
     stats: () => view.stats(),
+    /** camera the view is rendering (menus show LOS; pause keeps the flight camera) */
+    get renderedCamera() {
+      return view.renderedCamera;
+    },
+    /** 3D frames drawn so far (the view freezes behind DOM menus) */
+    get renders() {
+      return view.frames;
+    },
     get audio() {
       return audio.state;
     },
