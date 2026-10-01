@@ -31,7 +31,7 @@ android {
     buildTypes {
         release {
             if (uploadStore) signingConfig signingConfigs.upload
-            minifyEnabled false
+            minifyEnabled true
             proguardFiles getDefaultProguardFile('proguard-android.txt'), 'proguard-rules.pro'
         }
     }

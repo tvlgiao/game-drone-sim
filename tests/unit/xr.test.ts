@@ -211,3 +211,21 @@ describe('left trigger (heading arrow toggle)', () => {
     expect(loadSettings(storage).headingArrow).toBe(false);
   });
 });
+
+describe('XR source while a controller loses tracking', () => {
+  it('stays on xr (no flicker to none/gamepad) and the lost hand reads centred', () => {
+    const im = new InputManager(fakeWindow(), { ...DEFAULT_SETTINGS });
+    let srcs: XrSourceLike[] = [touch('left'), touch('right')];
+    im.xr.setSources(() => srcs);
+    im.xr.latched = false;
+    expect(im.poll(1 / 72).source).toBe('xr');
+    srcs = [touch('right', 0.4, 0)];
+    for (let i = 0; i < 3; i++) {
+      const f = im.poll(1 / 72);
+      expect(f.source).toBe('xr');
+      expect(f.sticks.lx).toBe(0);
+    }
+    srcs = [touch('left'), touch('right')];
+    expect(im.poll(1 / 72).source).toBe('xr');
+  });
+});
