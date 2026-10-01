@@ -35,6 +35,8 @@ export interface ViewFrame {
   speed: number;
   /** draw the heading arrow (hidden in FPV regardless) */
   headingArrow?: boolean;
+  /** still frame behind a DOM menu: nothing animates (dt = 0) and the camera jumps to its pose */
+  still?: boolean;
 }
 
 const FX_SCALE: Record<QualityTier, number> = { ultra: 1, high: 0.85, medium: 0.55, low: 0.3 };
@@ -223,7 +225,7 @@ export class GameView {
 
     const xr = r.xr.isPresenting;
     this.rig.shake = !xr;
-    this.rig.update({ dt, time: t, drone: f.drone, mode: f.cameraMode, cameraTiltDeg: f.cameraTiltDeg, fovDeg: f.fovDeg, speed: f.speed });
+    this.rig.update({ dt, time: t, drone: f.drone, mode: f.cameraMode, cameraTiltDeg: f.cameraTiltDeg, fovDeg: f.fovDeg, speed: f.speed, instant: f.still });
     let cam: THREE.PerspectiveCamera = this.rig.camera;
     if (xr) {
       this.placeDolly(f.cameraMode);
