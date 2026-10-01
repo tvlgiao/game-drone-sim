@@ -20,7 +20,7 @@
   "maskableIconUrl": "https://dronesim.coworkgamestudio.com/icons/icon-maskable-512.png",
   "splashScreenFadeOutDuration": 300,
   "signingKey": {
-    "path": "/Users/tvlgiao/.keystores/cowork-dronesim-quest.jks",
+    "path": "./quest-upload.jks",
     "alias": "quest"
   },
   "appVersionName": "1.0.0",
