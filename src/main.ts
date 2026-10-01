@@ -93,7 +93,9 @@ function boot(): void {
   let xrPanelAt = -Infinity;
   let xrPanelStatus = '';
   let menuRenders = 0;
-  let lastOverlayKey = '';
+  let wasOverlay = false;
+  /** scene time frozen while a DOM menu covers the view */
+  let overlayTime = 0;
   let xrToast = '';
   let xrToastUntil = 0;
   /** Toast on the DOM HUD and, while in a headset, on the XR card. */
@@ -490,17 +492,20 @@ function boot(): void {
 
     // In a headset the view must follow the head every frame; on a flat screen a DOM menu freezes it.
     const overlay = !inVr && (hud.screen !== 'none' || (shell?.gateOpen ?? false) || (shell?.rotateOpen ?? false));
-    const overlayKey = overlay ? `${hud.screen}|${shell?.gateOpen}|${shell?.rotateOpen}` : '';
-    if (overlayKey !== lastOverlayKey) {
-      lastOverlayKey = overlayKey;
+    // Re-render only when a menu first covers the view (not on menu-to-menu navigation), on resize and
+    // on settings changes; those frames are still (dt = 0, frozen time) so the backdrop never shifts.
+    if (overlay && !wasOverlay) {
       menuRenders = 0;
+      overlayTime = time;
     }
+    wasOverlay = overlay;
     const renderNow = !overlay || menuRenders < MENU_SETTLE_FRAMES;
     if (renderNow) {
       if (overlay) menuRenders++;
       view.frame({
-        dt: frameSec,
-        time,
+        dt: overlay ? 0 : frameSec,
+        time: overlay ? overlayTime : time,
+        still: overlay,
         drone,
         fanAngle: sim.world.fanAngle,
         nextRing: snap.status === 'freefly' ? -1 : snap.nextRing,
@@ -581,6 +586,11 @@ function boot(): void {
     /** camera the view is rendering (menus show LOS; pause keeps the flight camera) */
     get renderedCamera() {
       return view.renderedCamera;
+    },
+    /** rendered camera position + orientation (4 dp), to check the backdrop stays put behind menus */
+    get cameraPose() {
+      const c = view.camera;
+      return [...c.position.toArray(), ...c.quaternion.toArray()].map((v) => v.toFixed(4)).join(',');
     },
     /** 3D frames drawn so far (the view freezes behind DOM menus) */
     get renders() {

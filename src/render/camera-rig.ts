@@ -35,6 +35,8 @@ export interface RigInput {
   cameraTiltDeg: number;
   fovDeg: number;
   speed: number;
+  /** jump straight to the mode's pose (no blend): still frames behind a menu */
+  instant?: boolean;
 }
 
 export class CameraRig {
@@ -112,7 +114,7 @@ export class CameraRig {
       this.fromQuat.copy(this.camera.quaternion);
       this.fromFov = this.camera.fov;
       this.mode = f.mode;
-      this.blend = 0;
+      this.blend = f.instant ? 1 : 0;
     }
     this.updateChase(f, dt);
     this.updateHead(f, dt);
