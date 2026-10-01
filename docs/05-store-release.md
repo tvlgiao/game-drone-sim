@@ -59,6 +59,7 @@ Build (Meta's Bubblewrap fork; JDK 17 + SDK paths in `~/.bubblewrap/config.json`
 ```bash
 npm i -g @meta-quest/bubblewrap-cli          # once
 mkdir -p /tmp/qb && cp quest/twa-manifest.json /tmp/qb && cd /tmp/qb
+ln -sf ~/.keystores/cowork-dronesim-quest.jks quest-upload.jks   # signingKey.path is relative
 export BUBBLEWRAP_KEYSTORE_PASSWORD=$(security find-generic-password -a cowork-dronesim-quest -s "Drone Sim Quest keystore" -w)
 export BUBBLEWRAP_KEY_PASSWORD=$BUBBLEWRAP_KEYSTORE_PASSWORD
 bubblewrap update --skipVersionUpgrade && bubblewrap build --skipPwaValidation
