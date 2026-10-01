@@ -134,3 +134,15 @@ test('two Enter VR requests in one tick start one working session (controllers s
   expect(await page.evaluate(() => (window as unknown as W).__drone.xr.source)).toBe('xr');
   expect(errs).toEqual([]);
 });
+
+test('Quest immersive app launch: sessiongranted enters VR without a click', async ({ page }) => {
+  const errs: string[] = [];
+  page.on('pageerror', (e) => errs.push(e.message));
+  await page.goto('/?xremu=1');
+  await page.waitForFunction(() => !!(window as unknown as Partial<W>).__drone && !!(window as unknown as Partial<W>).__xrDevice, null, { timeout: 20_000 });
+  expect(await page.evaluate(() => (window as unknown as W).__drone.xr.presenting)).toBe(false);
+  // what Quest Browser fires when the Horizon OS app is launched in immersive mode
+  await page.evaluate(() => (navigator as Navigator & { xr: EventTarget }).xr.dispatchEvent(new Event('sessiongranted')));
+  await page.waitForFunction(() => (window as unknown as W).__drone.xr.presenting, null, { timeout: 10_000 });
+  expect(errs).toEqual([]);
+});
