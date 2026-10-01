@@ -53,7 +53,6 @@ const ALT_POS_MAX_V = 1; // m/s
 /** Position hold (DJI 'P' with GPS/optical flow): pitch/roll stick → horizontal speed, centre brakes. */
 export const POS_MAX_SPEED = 4; // m/s at full stick
 const POS_KV = 1.6; // (m/s²)/(m/s) speed error → acceleration
-const POS_DEADBAND = 0.05;
 
 export class FlightController {
   mode: FlightMode = 'angle';
@@ -245,9 +244,10 @@ export class FlightController {
     // heading frame: forward = (−sin, 0, −cos), right = (cos, 0, −sin)
     const vf = -s * v.x - c * v.z;
     const vr = c * v.x - s * v.z;
-    const dz = (x: number): number => (Math.abs(x) < POS_DEADBAND ? 0 : (x - Math.sign(x) * POS_DEADBAND) / (1 - POS_DEADBAND));
-    const af = POS_KV * (dz(clampS(input.pitch)) * POS_MAX_SPEED - vf);
-    const ar = POS_KV * (dz(clampS(input.roll)) * POS_MAX_SPEED - vr);
+    // no deadband here: the input layer already applied the stick deadzone + expo, and a second
+    // one stacked on the expo swallowed the first ~17 % of thumbstick travel
+    const af = POS_KV * (clampS(input.pitch) * POS_MAX_SPEED - vf);
+    const ar = POS_KV * (clampS(input.roll) * POS_MAX_SPEED - vr);
     const maxTilt = this.angleMaxTiltDeg * DEG;
     h.pitch = clampS(Math.atan(af / GRAVITY) / maxTilt);
     h.roll = clampS(Math.atan(ar / GRAVITY) / maxTilt);
