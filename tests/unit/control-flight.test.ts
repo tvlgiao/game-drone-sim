@@ -368,3 +368,13 @@ describe('position hold (VR thumbsticks, DJI P style)', () => {
     expect(horiz(sim)).toBeGreaterThan(1.5);
   });
 });
+
+describe('position hold fine control (no deadband stacked on the XR stick shaping)', () => {
+  it('a small shaped stick (0.03 ≈ 15 % thumbstick travel after deadzone + expo) still creeps forward', () => {
+    const sim = airborne('angle', 1, 10);
+    sim.fc.altitudeHold = true;
+    sim.fc.positionHold = true;
+    run(sim, 4, input(0.5, 0, 0.03, 0));
+    expect(-sim.world.state.velocity.z).toBeGreaterThan(0.05);
+  });
+});
