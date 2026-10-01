@@ -238,5 +238,12 @@ test('menu backdrop does not shift when moving between menu screens or changing 
   await page.waitForTimeout(400);
   expect(await page.evaluate(() => window.__drone.renders)).toBeGreaterThan(r0);
   expect(await page.evaluate(() => window.__drone.cameraPose)).toBe(pose0);
+  // resizing (e.g. rotating a tablet) redraws the same frozen moment at the new size
+  const r1 = await page.evaluate(() => window.__drone.renders);
+  const vp = page.viewportSize()!;
+  await page.setViewportSize({ width: vp.width - 120, height: vp.height });
+  await page.waitForTimeout(400);
+  expect(await page.evaluate(() => window.__drone.renders)).toBeGreaterThan(r1);
+  expect(await page.evaluate(() => window.__drone.cameraPose)).toBe(pose0);
   expect(errors).toEqual([]);
 });
