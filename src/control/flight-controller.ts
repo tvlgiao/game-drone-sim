@@ -50,6 +50,9 @@ const ALT_I_LIMIT = 4; // m/s²
 const BARO_NOISE = 0.03; // m/s vertical-speed estimate noise
 const ALT_POS_KP = 1.5; // (m/s)/m: altitude error → climb rate while the stick is centred
 const ALT_POS_MAX_V = 1; // m/s
+/** Position hold (DJI 'P' with GPS/optical flow): pitch/roll stick → horizontal speed, centre brakes. */
+export const POS_MAX_SPEED = 4; // m/s at full stick
+const POS_KV = 1.6; // (m/s²)/(m/s) speed error → acceleration
 
 export class FlightController {
   mode: FlightMode = 'angle';
@@ -63,6 +66,12 @@ export class FlightController {
   throttleLimit = 1;
   /** DJI-style altitude hold: throttle stick commands climb rate, centre holds altitude */
   altitudeHold = false;
+  /**
+   * Angle mode only: pitch/roll stick commands horizontal speed in the heading frame and a centred
+   * stick brakes to a stop (no drifting on momentum), like a DJI in P mode.
+   */
+  positionHold = false;
+  private readonly holdInput: ControlInput = { throttle: 0, yaw: 0, pitch: 0, roll: 0 };
   private altI = 0;
   /** barometric altitude target captured when the stick returns to centre (NaN = not holding) */
   private holdZ = Number.NaN;
@@ -199,7 +208,7 @@ export class FlightController {
       sp.x = actualRate(input.roll, this.rates.roll) * DEG;
       sp.y = actualRate(input.pitch, this.rates.pitch) * DEG;
     } else {
-      this.angleSetpoints(input, state);
+      this.angleSetpoints(this.positionHold ? this.velocityToTilt(input, state) : input, state);
     }
 
     const lowThrottle = input.throttle < I_RELAX_THROTTLE;
@@ -220,6 +229,29 @@ export class FlightController {
     // thrust fraction → normalised rpm command (T ∝ u²): linear torque authority at any throttle
     for (let i = 0; i < 4; i++) out[i] = Math.sqrt(thrust[i]);
     return out;
+  }
+
+  /** Position hold: stick → speed command, speed error → tilt (as an Angle-mode stick deflection). */
+  private velocityToTilt(input: ControlInput, state: DroneState): ControlInput {
+    const h = this.holdInput;
+    h.throttle = input.throttle;
+    h.yaw = input.yaw;
+    this.euler.setFromQuaternion(state.orientation, 'YXZ');
+    const yaw = this.euler.y;
+    const s = Math.sin(yaw);
+    const c = Math.cos(yaw);
+    const v = state.velocity;
+    // heading frame: forward = (−sin, 0, −cos), right = (cos, 0, −sin)
+    const vf = -s * v.x - c * v.z;
+    const vr = c * v.x - s * v.z;
+    // no deadband here: the input layer already applied the stick deadzone + expo, and a second
+    // one stacked on the expo swallowed the first ~17 % of thumbstick travel
+    const af = POS_KV * (clampS(input.pitch) * POS_MAX_SPEED - vf);
+    const ar = POS_KV * (clampS(input.roll) * POS_MAX_SPEED - vr);
+    const maxTilt = this.angleMaxTiltDeg * DEG;
+    h.pitch = clampS(Math.atan(af / GRAVITY) / maxTilt);
+    h.roll = clampS(Math.atan(ar / GRAVITY) / maxTilt);
+    return h;
   }
 
   /** Angle mode: tilt error between current and stick-commanded body-up vectors → roll/pitch rates. */

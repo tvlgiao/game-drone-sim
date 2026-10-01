@@ -14,6 +14,8 @@ interface DroneHook {
   press: (name: string) => void;
   action: (a: { type: string }) => void;
   teleport: (x: number, y: number, z: number, yaw?: number) => void;
+  renders: number;
+  renderedCamera: string;
 }
 
 declare global {
@@ -188,5 +190,29 @@ test('sound stops when the window is hidden and when quitting the game', async (
   expect(await page.evaluate(() => window.__drone.screen)).toBe('bye');
   await page.waitForTimeout(300); // a late resume() must not bring the sound back
   expect(await page.evaluate(() => window.__drone.audio)).toBe('suspended');
+  expect(errors).toEqual([]);
+});
+
+test('3D view freezes behind menus (no blurred full-screen redraws) and pause keeps the flight camera', async ({ page }) => {
+  await boot(page);
+  const perSecond = async () => {
+    const a = await page.evaluate(() => window.__drone.renders);
+    await page.waitForTimeout(1000);
+    return (await page.evaluate(() => window.__drone.renders)) - a;
+  };
+  await page.waitForTimeout(500);
+  expect(await perSecond()).toBe(0); // main menu
+  await page.evaluate(() => window.__drone.action({ type: 'freefly' }));
+  await page.waitForTimeout(300);
+  expect(await perSecond()).toBeGreaterThan(20); // flying
+  await page.evaluate(() => window.__drone.press('cycleCamera'));
+  await page.waitForTimeout(200);
+  const cam = await page.evaluate(() => window.__drone.camera);
+  expect(cam).not.toBe('los');
+  await page.evaluate(() => window.__drone.press('pause'));
+  await page.waitForTimeout(300);
+  expect(await page.evaluate(() => window.__drone.screen)).toBe('pause');
+  expect(await perSecond()).toBe(0); // paused
+  expect(await page.evaluate(() => window.__drone.renderedCamera)).toBe(cam);
   expect(errors).toEqual([]);
 });

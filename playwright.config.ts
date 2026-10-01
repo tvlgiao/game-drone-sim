@@ -9,9 +9,9 @@ export default defineConfig({
   },
   projects: [
     {
-      // Desktop Chrome on the real GPU: the original game specs + the "no touch UI on desktop" check.
+      // Desktop Chrome on the real GPU: the original game specs, the "no touch UI on desktop" check and the emulated Quest 2 (IWER) VR flight.
       name: 'chromium',
-      testMatch: ['game.spec.ts', 'mobile.spec.ts'],
+      testMatch: ['game.spec.ts', 'mobile.spec.ts', 'xr.spec.ts'],
       use: { browserName: 'chromium', launchOptions: { args: ['--use-angle=metal', '--enable-gpu', '--ignore-gpu-blocklist'] } },
     },
     {

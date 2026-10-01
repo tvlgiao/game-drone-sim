@@ -217,6 +217,16 @@ export class Hud {
     return this.menus.current;
   }
 
+  /** iOS app: hide the main-menu Quit button. */
+  hideExit(): void {
+    this.menus.hideExit();
+  }
+
+  /** WebXR headset: show the Enter VR button on the main menu. */
+  enableVr(): void {
+    this.menus.enableVr();
+  }
+
   /** Touch device: `is-touch` styling (44 pt targets, pan-y dialogs) and touch-only settings rows. */
   enableTouch(fullscreen: boolean): void {
     this.root.classList.add('is-touch');
@@ -388,8 +398,8 @@ export class Hud {
   private setSource(src: InputSource, id: string | null): void {
     this.source = src;
     const r = this.refs;
-    r.srcIcon.innerHTML = src === 'gamepad' ? ICON_GAMEPAD : src === 'keyboard' ? ICON_KEYBOARD : src === 'touch' ? ICON_TOUCH : ICON_NONE;
-    this.text(r.srcName, src === 'gamepad' ? shortPad(id) : src === 'keyboard' ? 'Keyboard' : src === 'touch' ? 'Touch' : 'No input');
+    r.srcIcon.innerHTML = src === 'gamepad' || src === 'xr' ? ICON_GAMEPAD : src === 'keyboard' ? ICON_KEYBOARD : src === 'touch' ? ICON_TOUCH : ICON_NONE;
+    this.text(r.srcName, src === 'gamepad' ? shortPad(id) : src === 'xr' ? 'Quest Touch' : src === 'keyboard' ? 'Keyboard' : src === 'touch' ? 'Touch' : 'No input');
     this.root.dataset.source = src;
   }
 
