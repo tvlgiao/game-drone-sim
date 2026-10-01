@@ -1,6 +1,6 @@
 {
   "packageId": "com.cowork.dronesim",
-  "applicationId": "0",
+  "applicationId": "",
   "host": "dronesim.coworkgamestudio.com",
   "name": "Drone Sim",
   "launcherName": "Drone Sim",
@@ -23,8 +23,8 @@
     "path": "./quest-upload.jks",
     "alias": "quest"
   },
-  "appVersionName": "1.0.1",
-  "appVersionCode": 2,
+  "appVersionName": "1.0.2",
+  "appVersionCode": 3,
   "shortcuts": [],
   "generatorApp": "bubblewrap-cli",
   "webManifestUrl": "https://dronesim.coworkgamestudio.com/manifest.webmanifest",
@@ -50,5 +50,5 @@
     "fullscreen",
     "standalone"
   ],
-  "appVersion": "1.0.1"
+  "appVersion": "1.0.2"
 }
