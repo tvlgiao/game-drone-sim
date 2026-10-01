@@ -16,6 +16,7 @@ interface DroneHook {
   teleport: (x: number, y: number, z: number, yaw?: number) => void;
   renders: number;
   renderedCamera: string;
+  cameraPose: string;
 }
 
 declare global {
@@ -214,5 +215,35 @@ test('3D view freezes behind menus (no blurred full-screen redraws) and pause ke
   expect(await page.evaluate(() => window.__drone.screen)).toBe('pause');
   expect(await perSecond()).toBe(0); // paused
   expect(await page.evaluate(() => window.__drone.renderedCamera)).toBe(cam);
+  expect(errors).toEqual([]);
+});
+
+test('menu backdrop does not shift when moving between menu screens or changing a setting', async ({ page }) => {
+  await boot(page);
+  await page.waitForTimeout(800);
+  const pose0 = await page.evaluate(() => window.__drone.cameraPose);
+  const r0 = await page.evaluate(() => window.__drone.renders);
+  await page.getByRole('button', { name: 'Controls' }).click();
+  await page.waitForTimeout(400);
+  await page.getByRole('button', { name: 'Back' }).first().click();
+  await page.waitForTimeout(400);
+  await page.getByRole('button', { name: 'Settings' }).click();
+  await page.waitForTimeout(400);
+  expect(await page.evaluate(() => window.__drone.screen)).toBe('settings');
+  expect(await page.evaluate(() => window.__drone.renders)).toBe(r0); // menu-to-menu: no redraw
+  expect(await page.evaluate(() => window.__drone.cameraPose)).toBe(pose0);
+  // a setting change redraws behind the menu (so quality/FOV show), but as a still frame
+  await page.keyboard.press('ArrowDown');
+  await page.keyboard.press('ArrowRight');
+  await page.waitForTimeout(400);
+  expect(await page.evaluate(() => window.__drone.renders)).toBeGreaterThan(r0);
+  expect(await page.evaluate(() => window.__drone.cameraPose)).toBe(pose0);
+  // resizing (e.g. rotating a tablet) redraws the same frozen moment at the new size
+  const r1 = await page.evaluate(() => window.__drone.renders);
+  const vp = page.viewportSize()!;
+  await page.setViewportSize({ width: vp.width - 120, height: vp.height });
+  await page.waitForTimeout(400);
+  expect(await page.evaluate(() => window.__drone.renders)).toBeGreaterThan(r1);
+  expect(await page.evaluate(() => window.__drone.cameraPose)).toBe(pose0);
   expect(errors).toEqual([]);
 });
