@@ -105,6 +105,11 @@ function boot(): void {
     xrToastUntil = performance.now() + 2200;
   }
   if (device.native === 'ios') hud.hideExit();
+  // Offline play for the web build, the home-screen PWA and the Quest app (a TWA on this origin): the
+  // worker precaches every built file on first visit. The iOS/Android shells already bundle the files.
+  if (import.meta.env.PROD && !device.native && window.isSecureContext && 'serviceWorker' in navigator) {
+    navigator.serviceWorker.register('./sw.js').catch((err: unknown) => console.warn('Service worker registration failed (no offline play):', err));
+  }
   void vrSupported(navigator).then((ok) => {
     if (ok) hud.enableVr();
   });
