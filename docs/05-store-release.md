@@ -66,7 +66,8 @@ bubblewrap update --skipVersionUpgrade && bubblewrap build --skipPwaValidation
 # → app-release-signed.apk (sideload / Horizon upload), app-release-bundle.aab
 ```
 
-`quest/twa-manifest.json`: `isMetaQuest`, `horizonOSAppMode: "2D"` (the player presses Enter VR),
+`quest/twa-manifest.json`: `isMetaQuest`, `horizonOSAppMode: "immersive"` (a 2D app cannot open a WebXR
+session on Quest; the game enters VR on the browser's `sessiongranted` event, Enter VR stays as a fallback),
 landscape, minSdk 32. Bump `appVersionCode` for every upload. Builds are kept in `quest/dist/`
 (git-ignored).
 

@@ -19,7 +19,19 @@ export async function vrSupported(nav: Navigator): Promise<boolean> {
   }
 }
 
-/** Must be called inside a user gesture (click / controller select). */
+/**
+ * Quest Browser fires `sessiongranted` on navigator.xr when the page was opened from VR (the Horizon
+ * Store app in immersive mode, or a link followed inside a session): requestSession may then be called
+ * without a user gesture. Returns an unsubscribe function.
+ */
+export function onSessionGranted(nav: Navigator, cb: () => void): () => void {
+  const xr = (nav as Navigator & { xr?: XRSystem }).xr;
+  if (!xr || typeof xr.addEventListener !== 'function') return () => undefined;
+  xr.addEventListener('sessiongranted', cb);
+  return () => xr.removeEventListener('sessiongranted', cb);
+}
+
+/** Must be called inside a user gesture (click / controller select), or after `sessiongranted`. */
 export function requestVrSession(nav: Navigator): Promise<XRSession> {
   const xr = (nav as Navigator & { xr?: XRSystem }).xr;
   if (!xr) return Promise.reject(new Error('WebXR is not available'));
