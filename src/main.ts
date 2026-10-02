@@ -158,6 +158,8 @@ function boot(): void {
   const injected: Partial<ButtonEvents> = {};
   let hasInjected = false;
   let motorsMuted = false;
+  /** the flying pad was unplugged during a crash: pause as soon as the respawn ends */
+  let pauseAfterRespawn = false;
 
   function applySettings(s: Settings): void {
     settings = s;
@@ -182,8 +184,12 @@ function boot(): void {
   hud.setSettings(settings);
   input.onConnection = (c) => {
     toast(c.connected ? `Controller connected: ${c.name}` : `Controller disconnected: ${c.name}`);
-    // the pilot just lost their sticks mid-flight
-    if (c.wasActive) pauseFlight();
+    // the pilot just lost their sticks mid-flight; during a crash, pause once the respawn is done
+    if (c.connected) pauseAfterRespawn = false;
+    else if (c.wasActive) {
+      if (race.snapshot().status === 'crashed') pauseAfterRespawn = true;
+      else pauseFlight();
+    }
   };
 
   /** Pauses a flight in progress (not a crash, which respawns on its own) behind the pause menu. */
@@ -599,6 +605,10 @@ function boot(): void {
       tier,
       settings,
     });
+    if (pauseAfterRespawn && snap.status !== 'crashed') {
+      pauseAfterRespawn = false;
+      pauseFlight();
+    }
     if (touchUi) {
       touchUi.setVisible(
         inp.source === 'touch' && FLYING.has(snap.status) && hud.screen === 'none' && !shell?.rotateOpen,

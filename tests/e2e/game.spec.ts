@@ -324,5 +324,31 @@ test('unplugging the gamepad that is flying pauses the flight', async ({ page })
   });
   await page.waitForFunction(() => window.__drone.race.status === 'paused', null, { timeout: 2000 });
   expect(await page.evaluate(() => window.__drone.screen)).toBe('pause');
+
+  // unplugged during a crash: no pause mid-respawn, but the flight pauses as soon as the respawn ends
+  await page.evaluate(() => {
+    const w = window as unknown as PadWin & { __pad: unknown };
+    w.__pads = [w.__pad];
+    window.dispatchEvent(Object.assign(new Event('gamepadconnected'), { gamepad: w.__pad }));
+    window.__drone.action({ type: 'resume' });
+  });
+  await page.waitForFunction(() => window.__drone.race.status === 'freefly');
+  await page.evaluate(() => {
+    (window as unknown as PadWin).__pad.buttons[0] = { pressed: true, touched: true, value: 1 };
+  });
+  await page.waitForFunction(() => window.__drone.armed);
+  await page.evaluate(() => {
+    (window as unknown as PadWin).__pad.buttons[0] = { pressed: false, touched: false, value: 0 };
+    window.__drone.teleport(-9, 4.5, 5.8, 0); // into the duct: crash
+  });
+  await page.waitForFunction(() => window.__drone.race.status === 'crashed', null, { timeout: 3000 });
+  await page.evaluate(() => {
+    const w = window as unknown as PadWin;
+    w.__pads = [];
+    window.dispatchEvent(Object.assign(new Event('gamepaddisconnected'), { gamepad: w.__pad }));
+  });
+  expect(await page.evaluate(() => window.__drone.race.status)).toBe('crashed');
+  await page.waitForFunction(() => window.__drone.race.status === 'paused', null, { timeout: 5000 });
+  expect(await page.evaluate(() => window.__drone.screen)).toBe('pause');
   expect(errors).toEqual([]);
 });
