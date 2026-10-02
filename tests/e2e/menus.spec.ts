@@ -25,7 +25,7 @@ async function boot(page: Page): Promise<void> {
     if (m.type() === 'error') errors.push(m.text());
   });
   page.on('pageerror', (e) => errors.push(e.message));
-  await page.goto('/');
+  await page.goto('/play/');
   await page.waitForFunction(() => !!(window as unknown as { __drone?: Hook }).__drone, null, { timeout: 30_000 });
 }
 
@@ -55,15 +55,15 @@ test.describe('desktop menus', () => {
     await expect(about).toContainText('COWORK Game Studio');
     await expect(about).toContainText('support@coworkgamestudio.com');
     const privacy = about.getByRole('link', { name: /Privacy policy/ });
-    await expect(privacy).toHaveAttribute('href', './privacy/');
+    await expect(privacy).toHaveAttribute('href', '../privacy/');
     await expect(privacy).toHaveAttribute('target', '_blank');
     await expect(about.getByRole('link', { name: /Email support/ })).toHaveAttribute('href', /^mailto:support@coworkgamestudio\.com/);
-    await expect(about.getByRole('link', { name: /Licences/ })).toHaveAttribute('href', './licenses.txt');
-    const licences = await page.request.get('./licenses.txt');
+    await expect(about.getByRole('link', { name: /Licences/ })).toHaveAttribute('href', '../licenses.txt');
+    const licences = await page.request.get(new URL('../licenses.txt', page.url()).href);
     expect(licences.ok()).toBe(true);
     expect(await licences.text()).toContain('IWER (Immersive Web Emulation Runtime)');
     await expect(about).toContainText('IWER (MIT)');
-    expect((await page.request.get('./privacy/')).ok()).toBe(true);
+    expect((await page.request.get(new URL('../privacy/', page.url()).href)).ok()).toBe(true);
     await page.keyboard.press('Escape', { delay: 40 });
     await expect.poll(() => screenOf(page)).toBe('main');
 
