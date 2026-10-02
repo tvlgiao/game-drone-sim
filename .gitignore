@@ -14,3 +14,6 @@ android-dist/
 
 # UI audit screenshots (scripts/ui-audit.mjs)
 audit/
+
+# Claude Code agent worktrees
+.claude/worktrees/
