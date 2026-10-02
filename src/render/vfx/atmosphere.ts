@@ -12,9 +12,11 @@ void main() {
   vFace = aFace;
   vec4 wp = modelMatrix * vec4(position, 1.0);
   vWorld = wp.xyz;
-  vec3 n = normalize(mat3(modelMatrix) * normal);
+  // degenerate curtain triangles get a zero normal: normalize(0) is NaN on most GPUs
+  vec3 n = mat3(modelMatrix) * normal;
+  float nl = length(n);
   vec3 v = normalize(cameraPosition - wp.xyz);
-  vFacing = abs(dot(n, v));
+  vFacing = nl > 1e-5 ? abs(dot(n / nl, v)) : 0.0;
   gl_Position = projectionMatrix * viewMatrix * wp;
 }`;
 
@@ -27,10 +29,12 @@ varying vec3 vWorld;
 varying float vFacing;
 void main() {
   float across = sin(3.14159 * vFace.x);
-  float along = pow(1.0 - vFace.y, 1.2) * smoothstep(0.0, 0.08, vFace.y);
+  // pow() of a negative base is NaN, and interpolation overshoots vFace.y past 1.0 at some pixels;
+  // one NaN pixel, spread by the bloom blur, blacked out whole blocks of the frame at 2560x1440
+  float along = pow(clamp(1.0 - vFace.y, 0.0, 1.0), 1.2) * smoothstep(0.0, 0.08, vFace.y);
   // cheap drifting haze modulation (two crossed sine fields)
   float n = 0.7 + 0.15 * sin(vWorld.x * 2.3 + vWorld.y * 1.7 + uTime * 0.4) + 0.15 * sin(vWorld.z * 1.9 - vWorld.y * 2.9 - uTime * 0.3);
-  float a = across * along * pow(vFacing, 1.4) * n * uIntensity;
+  float a = clamp(across * along * pow(clamp(vFacing, 0.0, 1.0), 1.4) * n * uIntensity, 0.0, 1.0);
   gl_FragColor = vec4(uColor * a, 1.0);
   #include <colorspace_fragment>
 }`;

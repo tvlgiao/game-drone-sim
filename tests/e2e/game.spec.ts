@@ -247,3 +247,21 @@ test('menu backdrop does not shift when moving between menu screens or changing 
   expect(await page.evaluate(() => window.__drone.cameraPose)).toBe(pose0);
   expect(errors).toEqual([]);
 });
+
+for (const quality of ['ultra', 'medium']) {
+  test(`no black blocks in the frame at 2560×1440 (${quality}: light-shaft shader must not emit NaN into bloom)`, async ({ browser }) => {
+    const ctx = await browser.newContext({ viewport: { width: 2560, height: 1440 } });
+    await ctx.addInitScript((q) => localStorage.setItem('drone-sim.settings', JSON.stringify({ quality: q })), quality);
+    const page = await ctx.newPage();
+    await page.goto('/');
+    await page.waitForFunction(() => !!window.__drone, null, { timeout: 20_000 });
+    await page.waitForTimeout(1200);
+    await page.evaluate(() => {
+      (document.getElementById('ui') as HTMLElement).style.display = 'none';
+    });
+    // a blacked-out region compresses to a few KB; the loft (rings, bricks, floor) is hundreds of KB
+    const left = await page.screenshot({ clip: { x: 100, y: 300, width: 1200, height: 800 } });
+    expect(left.length).toBeGreaterThan(100_000);
+    await ctx.close();
+  });
+}
