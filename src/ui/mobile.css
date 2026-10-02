@@ -259,6 +259,13 @@
   box-shadow: 0 0 22px rgba(255, 70, 97, 0.25), 0 4px 14px rgba(0, 0, 0, 0.4);
 }
 
+/* Bye / fatal error end the session: no sticks or ARM over them, even if the frame loop has stopped. */
+.ds-ui.ds-fatal .ds-touch,
+.ds-ui:has(.ds-screen--bye.is-open) .ds-touch,
+.ds-ui:has(.ds-screen--error.is-open) .ds-touch {
+  display: none;
+}
+
 /* ---------- HUD in the touch layout (flight, and dimmed behind pause / finish menus) ---------- */
 /* Stick visualiser, quit, camera and mode chips duplicate the on-screen buttons. */
 .ds-ui.ds-touch-on .ds-hud__br,
@@ -399,11 +406,8 @@
     top: calc(var(--ds-safe-t) + var(--ds-tchip) + 8px + var(--ds-tbtn) + 14px);
     transform: none;
   }
-  /* ...and keep toasts clear of it, just above the telemetry panel. */
-  .ds-ui.ds-touch-on[data-status='crashed'] .ds-toasts {
-    top: auto;
-    bottom: calc(var(--ds-gap) + var(--ds-tpanel-h) + 10px);
-  }
+  /* compact title stack: the toast lane under it must still clear the telemetry panel */
+  .ds-ui.ds-touch-on .ds-center__sub { margin-top: 6px; padding-block: 4px; }
 
   .ds-ui.ds-touch-on .ds-center__big.is-ok,
   .ds-ui.ds-touch-on .ds-center__big.is-dim { font-size: 22px; }
@@ -496,7 +500,8 @@
   .ds-ui.is-touch .ds-screen--pause,
   .ds-ui.is-touch .ds-screen--confirm-quit,
   .ds-ui.is-touch .ds-screen--finish,
-  .ds-ui.is-touch .ds-screen--bye { place-items: center; }
+  .ds-ui.is-touch .ds-screen--bye,
+  .ds-ui.is-touch .ds-screen--error { place-items: center; }
   .ds-ui.is-touch .ds-screen--pause .ds-menu {
     display: grid;
     grid-template-columns: repeat(2, minmax(0, 1fr));

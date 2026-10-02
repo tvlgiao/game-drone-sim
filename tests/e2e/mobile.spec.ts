@@ -325,7 +325,7 @@ test.describe('touch devices', () => {
     const measure = () =>
       page.evaluate((m) => {
         const gap = (a: DOMRect, b: DOMRect) => Math.max(b.left - a.right, a.left - b.right, b.top - a.bottom, a.top - b.bottom);
-        const blockers = [...document.querySelectorAll<HTMLElement>('[data-tbtn], .ds-hud__tl, .ds-hud__tc .ds-gates, .ds-hud__tr')]
+        const blockers = [...document.querySelectorAll<HTMLElement>('[data-tbtn], .ds-hud__tl, .ds-hud__tc .ds-gates, .ds-hud__tr, .ds-hud__bl')]
           .filter((e) => e.getClientRects().length && getComputedStyle(e).display !== 'none')
           .map((e) => e.getBoundingClientRect());
         const small = [...document.querySelectorAll<HTMLElement>('.ds-hud .ds-label, .ds-hud .ds-unit, .ds-tbtn small')]
@@ -381,6 +381,27 @@ test.describe('touch devices', () => {
     }
     expect(errors).toEqual([]);
   });
+
+  for (const end of ['bye', 'error'] as const) {
+    test(`${end} screen: sticks and touch buttons are gone, the card is centred`, async ({ page }) => {
+      await boot(page);
+      await passGate(page);
+      await startFreeFly(page);
+      await expect(page.locator('[data-tbtn="arm"]')).toBeVisible();
+      await page.evaluate((end) => {
+        const d = (window as unknown as { __drone: { showScreen: (s: string) => void; showError: (m: string) => void } }).__drone;
+        if (end === 'error') d.showError('WebGL2 is not available on this device/browser (context lost).');
+        else d.showScreen('bye');
+      }, end);
+      await page.waitForTimeout(500);
+      // also when the frame loop that normally hides the layer has stopped (fatal error)
+      await page.evaluate(() => document.querySelector('.ds-touch')!.classList.add('is-on'));
+      for (const sel of ['.ds-touch', '[data-tbtn="arm"]', '[data-tbtn="pause"]', '.ds-tstick__base']) await expect(page.locator(sel).first(), sel).toBeHidden();
+      const vp = page.viewportSize()!;
+      const card = (await page.locator(`.ds-screen--${end}.is-open .ds-panel, .ds-screen--${end}.is-open .ds-dialog`).first().boundingBox())!;
+      if (card.height < vp.height - 24) expect(Math.abs(card.y + card.height / 2 - vp.height / 2), `${end} card centre`).toBeLessThan(4);
+    });
+  }
 
   test('Add-to-Home-Screen sheet names the device and is a centred modal', async ({ page }, info) => {
     await boot(page);
