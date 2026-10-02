@@ -4,17 +4,15 @@ import { LosMarker } from './los-marker';
 import { MOBILE_MAX_TEXTURE, qualityProfile, type QualityProfile } from '../core/quality';
 import type { FormFactor } from '../core/device';
 import type { CameraMode, DroneState, GameEvent, LevelDef, QualityTier } from '../types';
-import { StaticBatcher } from './batcher';
+import type { LevelRuntime } from '../levels/runtime';
 import { CameraRig } from './camera-rig';
 import { DroneModel } from './drone-model';
-import { Lights } from './lights';
-import { MOON_DIR } from './lights';
+import { IndoorLevelView } from './indoor-level-view';
+import type { LevelView } from './level-view';
 import { Materials } from './materials';
+import { OutdoorLevelView } from './outdoor/outdoor-level-view';
 import { PostFX } from './post';
-import { buildProps, type LiveProps } from './props';
 import { RingsView } from './rings-view';
-import { buildRoom } from './room';
-import { Atmosphere } from './vfx/atmosphere';
 import { ContactShadow } from './vfx/contact-shadow';
 import { ParticlePool } from './vfx/particles';
 import { Shockwaves } from './vfx/shockwave';
@@ -51,6 +49,7 @@ const _size = new THREE.Vector2();
 const WHITE = new THREE.Color(1, 1, 1);
 const SPARK = new THREE.Color(1, 0.55, 0.16);
 const _eye = new THREE.Vector3();
+const _focus = new THREE.Vector3();
 const _yq = new THREE.Quaternion();
 const _ye = new THREE.Euler(0, 0, 0, 'YXZ');
 const Y_AXIS = new THREE.Vector3(0, 1, 0);
@@ -58,11 +57,6 @@ const Y_AXIS = new THREE.Vector3(0, 1, 0);
 const XR_TIER: QualityTier = 'low';
 /** head height used until the headset reports a pose (local-floor space) */
 const XR_DEFAULT_HEAD = new THREE.Vector3(0, 1.6, 0);
-/**
- * VR LOS: the pilot stands on a platform this high in the loft corner (eye ≈ 4 m), looking down on
- * the whole course instead of seeing rings stacked behind each other from floor level.
- */
-export const XR_LOS_PLATFORM = 2.4;
 
 export interface GameViewOptions {
   /** enable WebXR rendering (renderer.xr) */
@@ -74,20 +68,16 @@ export interface GameViewOptions {
 export class GameView {
   readonly renderer: THREE.WebGLRenderer;
   readonly scene = new THREE.Scene();
-  private readonly level: LevelDef;
+  private level: LevelDef;
+  private levelView: LevelView;
   private readonly mats: Materials;
-  private readonly lights: Lights;
-  private readonly rings: RingsView;
+  private rings: RingsView;
   private readonly drone: DroneModel;
   private readonly rig: CameraRig;
   private readonly fx: ParticlePool;
   private readonly soft: ParticlePool;
   private readonly waves: Shockwaves;
-  private readonly atmos: Atmosphere;
   private readonly contact: ContactShadow;
-  private readonly live: LiveProps;
-  private readonly staticMeshes: THREE.Mesh[];
-  private readonly envTexture: THREE.Texture;
   private readonly fill: THREE.PointLight;
   private readonly losMarker: LosMarker;
   private post: PostFX | null = null;
@@ -120,8 +110,7 @@ export class GameView {
   private readonly arrow = new HeadingArrow();
 
   /** `form` = device class: phones/tablets get capped DPR, ≤ 1024 px textures and smaller particle pools. */
-  constructor(canvas: HTMLCanvasElement, level: LevelDef, tier: QualityTier, form: FormFactor = 'desktop', opts: GameViewOptions = {}) {
-    this.level = level;
+  constructor(canvas: HTMLCanvasElement, level: LevelRuntime, tier: QualityTier, form: FormFactor = 'desktop', opts: GameViewOptions = {}) {
     this.form = form;
     const mobile = form !== 'desktop';
     this.profile = qualityProfile(tier, form);
@@ -142,35 +131,12 @@ export class GameView {
     r.xr.enabled = opts.xr === true;
 
     const scene = this.scene;
-    scene.background = new THREE.Color(0x04060b);
-    scene.fog = new THREE.FogExp2(0x0b0f1a, 0.016);
-
     this.mats = new Materials(r.capabilities.getMaxAnisotropy(), mobile ? MOBILE_MAX_TEXTURE : 2048);
-    const batch = new StaticBatcher();
-    const windows = buildRoom(level.room, this.mats, batch);
-    const world = new THREE.Group();
-    world.name = 'world';
-    scene.add(world);
-    this.live = buildProps(level.props, this.mats, batch, world);
-    this.staticMeshes = batch.build(world);
-    for (const m of this.staticMeshes) {
-      // floor/rug/glass/emissive surfaces do not need to cast
-      if (m.material === this.mats.floor || m.material === this.mats.skyline || m.material === this.mats.glass || m.material === this.mats.neon) m.castShadow = false;
-      if (m.material === this.mats.skyline || m.material === this.mats.neon) m.receiveShadow = false;
-      if (m.material === this.mats.glass) m.renderOrder = 6;
-    }
-
-    this.lights = new Lights(scene, level);
-    this.envTexture = this.lights.buildEnvironment(r);
-    scene.environmentIntensity = 0.55;
-
-    this.rings = new RingsView(level.rings);
-    scene.add(this.rings.group);
 
     this.drone = new DroneModel(this.mats);
     scene.add(this.drone.root);
 
-    this.rig = new CameraRig(level.pilot, level.room.size);
+    this.rig = new CameraRig(level.def.pilot, null);
     this.losMarker = new LosMarker();
     scene.add(this.losMarker.sprite);
     this.fill = new THREE.PointLight(0xcfe0ff, 0.5, 3.5, 2);
@@ -181,11 +147,7 @@ export class GameView {
     this.waves = new Shockwaves(8);
     scene.add(this.fx.points, this.soft.points, this.waves.group);
 
-    const warm = level.props.filter((p) => p.kind === 'bulb-hanging' || p.kind === 'lamp-floor').map((p) => new THREE.Vector3(p.position[0], p.position[1] + (p.kind === 'lamp-floor' ? p.size[1] - 0.2 : 0), p.position[2]));
-    this.atmos = new Atmosphere(windows, MOON_DIR, warm, qualityProfile('ultra', form).particles);
-    scene.add(this.atmos.shafts, this.atmos.dust);
-
-    this.contact = new ContactShadow(level, this.mats.radial);
+    this.contact = new ContactShadow(level.surfaces, this.mats.radial);
     scene.add(this.contact.group);
 
     this.xrPlatform = xrPlatform();
@@ -194,8 +156,50 @@ export class GameView {
     scene.add(this.arrow.mesh);
     scene.add(this.xrDolly);
 
+    this.level = level.def;
+    this.levelView = this.buildLevelView(level.def);
+    this.rings = new RingsView(level.def.rings);
+    this.attachLevel(level);
+
     this.applyQuality();
     this.resize(canvas.clientWidth || window.innerWidth, canvas.clientHeight || window.innerHeight);
+  }
+
+  /**
+   * Swap the level: the old scenery and rings are disposed (geometry, textures, render targets,
+   * shadow maps), the new ones built, and the camera rig re-targeted. Shared resources (drone,
+   * materials, FX pools, post FX) stay.
+   */
+  loadLevel(level: LevelRuntime): void {
+    this.levelView.dispose();
+    this.rings.group.removeFromParent();
+    this.rings.dispose();
+    this.level = level.def;
+    this.levelView = this.buildLevelView(level.def);
+    this.rings = new RingsView(level.def.rings);
+    this.attachLevel(level);
+    this.applyQuality();
+  }
+
+  private buildLevelView(def: LevelDef): LevelView {
+    return def.kind === 'indoor'
+      ? new IndoorLevelView(def, this.renderer, this.mats, this.form)
+      : new OutdoorLevelView(def, this.renderer, this.renderer.capabilities.getMaxAnisotropy());
+  }
+
+  private attachLevel(level: LevelRuntime): void {
+    const v = this.levelView;
+    this.scene.add(v.group, this.rings.group);
+    this.scene.background = v.background;
+    this.scene.fog = v.fog;
+    this.scene.environmentIntensity = v.environmentIntensity;
+    this.contact.surfaces = level.surfaces;
+    this.rig.setLevel(level.def);
+    this.xrCam.far = this.rig.camera.far;
+    this.xrCam.updateProjectionMatrix();
+    this.ringFlash = 0;
+    this.recenter = true;
+    this.xrMode = null;
   }
 
   get camera(): THREE.PerspectiveCamera {
@@ -219,11 +223,9 @@ export class GameView {
       this.rig.snap();
     }
 
-    this.lights.update(t);
-    if (this.live.fan) this.live.fan.rotation.y = f.fanAngle;
-    if (this.live.tvScreen) this.live.tvScreen.material.uniforms.uTime.value = t;
-
     const xr = r.xr.isPresenting;
+    // outdoor LOS: the pilot watches the next ring, the course overview between laps
+    this.rig.setFocus(f.nextRing >= 0 && f.nextRing < this.rings.count ? this.rings.ringPosition(f.nextRing, _focus) : null);
     this.rig.shake = !xr;
     this.rig.update({ dt, time: t, drone: f.drone, mode: f.cameraMode, cameraTiltDeg: f.cameraTiltDeg, fovDeg: f.fovDeg, speed: f.speed, instant: f.still });
     let cam: THREE.PerspectiveCamera = this.rig.camera;
@@ -267,7 +269,7 @@ export class GameView {
     // pixels per unit of tan(angle): drawing-buffer height / 2 × projection y-scale (per eye in XR)
     r.getDrawingBufferSize(_size);
     const px = (_size.y / 2) * cam.projectionMatrix.elements[5]!;
-    this.atmos.update(t, px, f.drone.position, wash);
+    this.levelView.update({ time: t, dt, px, drone: f.drone.position, camera: _eye, wash, fanAngle: f.fanAngle });
     this.fx.update(t, px);
     this.soft.update(t, px);
     this.waves.update(dt);
@@ -303,7 +305,7 @@ export class GameView {
     this.xrPlatform.visible = mode === 'los';
     if (mode === 'los') {
       const yaw = this.rig.losFloorAnchor(d.position);
-      d.position.y += XR_LOS_PLATFORM;
+      d.position.y += this.level.pilotPlatform;
       d.quaternion.setFromAxisAngle(Y_AXIS, yaw);
     } else {
       _ye.setFromQuaternion(this.rig.targetQuat, 'YXZ');
@@ -353,7 +355,7 @@ export class GameView {
   }
 
   private updateRingLight(t: number, dt: number, next: number): void {
-    const L = this.lights.ringLight;
+    const L = this.levelView.ringLight;
     this.ringFlash = Math.max(0, this.ringFlash - dt * 2);
     if (next >= 0 && next < this.rings.count) {
       this.rings.ringPosition(next, L.position);
@@ -541,12 +543,12 @@ export class GameView {
     const p = this.profile;
     const r = this.renderer;
     r.shadowMap.enabled = p.shadows;
-    this.lights.setQuality(p);
-    this.lights.refreshShadows();
-    this.scene.environment = p.envMap ? this.envTexture : null;
-    this.atmos.setQuality(p.particles, p.shafts);
+    this.levelView.setQuality(p);
+    this.levelView.refreshShadows();
+    this.scene.environment = p.envMap ? this.levelView.environment : null;
     if (p.post) {
       if (!this.post) this.post = new PostFX(r, this.scene, this.rig.camera);
+      this.post.setBloomThreshold(this.levelView.bloomThreshold);
       this.post.configure(p);
       r.toneMapping = THREE.NoToneMapping;
     } else {
@@ -585,9 +587,14 @@ export class GameView {
     return this.renderScale;
   }
 
-  stats(): { calls: number; triangles: number } {
-    const i = this.renderer.info.render;
-    return { calls: i.calls, triangles: i.triangles };
+  /** last frame's draw calls / triangles and the live GPU geometries / textures (leak checks across level switches) */
+  stats(): { calls: number; triangles: number; geometries: number; textures: number } {
+    const i = this.renderer.info;
+    return { calls: i.render.calls, triangles: i.render.triangles, geometries: i.memory.geometries, textures: i.memory.textures };
+  }
+
+  get levelId(): LevelDef['id'] {
+    return this.level.id;
   }
 
   dispose(): void {
@@ -598,16 +605,13 @@ export class GameView {
     this.arrow.dispose();
     this.xrPlatform.geometry.dispose();
     (this.xrPlatform.material as THREE.Material).dispose();
-    for (const m of this.staticMeshes) m.geometry.dispose();
-    for (const d of this.live.disposables) d.dispose();
+    this.levelView.dispose();
     this.rings.dispose();
     this.drone.dispose();
     this.fx.dispose();
     this.soft.dispose();
     this.waves.dispose();
-    this.atmos.dispose();
     this.contact.dispose();
-    this.lights.dispose();
     this.fill.dispose();
     this.mats.dispose();
     this.scene.clear();

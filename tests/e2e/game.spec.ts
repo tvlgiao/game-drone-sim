@@ -1,4 +1,8 @@
 import { expect, test, type Page } from '@playwright/test';
+import { skipTutorialOffer, useNightLoft } from './seed';
+
+// the first-run tutorial offer is covered by tutorial.spec.ts; here it would cover the menus
+test.beforeEach(({ context }) => skipTutorialOffer(context));
 
 interface DroneHook {
   state: { position: { x: number; y: number; z: number }; velocity: { x: number; y: number; z: number }; motors: number[] };
@@ -35,6 +39,8 @@ async function boot(page: Page): Promise<void> {
   page.on('pageerror', (e) => errors.push(e.message));
   await page.goto('/play/');
   await page.waitForFunction(() => !!window.__drone, null, { timeout: 20_000 });
+  // these flights were written for the Night Loft course (ring 0, walls, ceiling)
+  await useNightLoft(page);
 }
 
 const control = (page: Page, throttle: number, pitch = 0, roll = 0, yaw = 0) =>
@@ -172,6 +178,7 @@ test('HUD quit button asks for confirmation; cancel resumes, confirm returns to 
 test('sound stops when the window is hidden and when quitting the game', async ({ page }) => {
   await boot(page);
   await page.getByRole('button', { name: 'Free Fly' }).click(); // real gesture → audio starts
+  await page.getByRole('button', { name: 'Free Fly · Night Loft' }).click(); // level picker
   await page.waitForFunction(() => window.__drone.audio === 'running');
   await page.evaluate(() => {
     Object.defineProperty(document, 'hidden', { configurable: true, get: () => true });
@@ -251,6 +258,7 @@ test('menu backdrop does not shift when moving between menu screens or changing 
 for (const quality of ['ultra', 'medium']) {
   test(`no black blocks in the frame at 2560×1440 (${quality}: light-shaft shader must not emit NaN into bloom)`, async ({ browser }) => {
     const ctx = await browser.newContext({ viewport: { width: 2560, height: 1440 } });
+    await skipTutorialOffer(ctx);
     await ctx.addInitScript((q) => localStorage.setItem('drone-sim.settings', JSON.stringify({ quality: q })), quality);
     const page = await ctx.newPage();
     await page.goto('/play/');
@@ -276,7 +284,7 @@ test('keyboard throttle does not survive a reset or a disarm (the respawned quad
   await page.waitForTimeout(1200);
   await page.keyboard.up('KeyW');
   await page.waitForTimeout(300);
-  expect(await throttle()).toBeGreaterThan(0.5);
+  expect(await throttle()).toBe(0.5); // sprang back to hover
   await page.keyboard.press('KeyR');
   await page.waitForTimeout(400);
   expect(await throttle()).toBe(0);

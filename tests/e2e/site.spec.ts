@@ -3,7 +3,11 @@
  * app (VR, only for a store owner; everyone else gets the store gate).
  */
 import { expect, test, type BrowserContext, type Page } from '@playwright/test';
+import { skipTutorialOffer } from './seed';
 import { questOwnerStub } from './quest-owner';
+
+// the first-run tutorial offer is covered by tutorial.spec.ts; here it would cover the menus
+test.beforeEach(({ context }) => skipTutorialOffer(context));
 
 type W = {
   __drone?: { xr: { presenting: boolean }; screen: string; action: (a: { type: string }) => void };
@@ -94,6 +98,7 @@ test.describe('landing page', () => {
 
   test('a Quest app installed before the split (start URL "/") is sent to /app/', async ({ browser }) => {
     const ctx = await browser.newContext({ userAgent: QUEST_UA });
+    await skipTutorialOffer(ctx);
     await standalone(ctx);
     await ctx.addInitScript(questOwnerStub);
     const page = await ctx.newPage();
@@ -121,6 +126,7 @@ test.describe('/play/: free web game, never VR', () => {
 
   test('installed on a Quest (standalone), it still does not auto-enter VR', async ({ browser }) => {
     const ctx = await browser.newContext({ userAgent: QUEST_UA });
+    await skipTutorialOffer(ctx);
     await standalone(ctx);
     const page = await ctx.newPage();
     await page.goto('/play/?xremu=1');

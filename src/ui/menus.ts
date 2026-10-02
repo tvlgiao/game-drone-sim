@@ -16,11 +16,13 @@ import {
 } from '../core/settings';
 import { isQuestBrowser } from '../core/xr';
 import { AxisCapture, MODE_TABLE, STICK_SLOTS, type Channel, type StickSlot } from '../input/stick';
-import type { InputFrame, NavEvents } from '../types';
+import type { InputFrame, LevelId, NavEvents } from '../types';
 import { formatTime } from './format';
+import { drawThumbs, levelAct, levelCardsHtml, parseLevelAct, type LevelCard, type LevelMode } from './level-select';
 import { controllerDiagram } from './icons';
+import { actionGlyphs, channelHints, glyphHtml, glyphsHtml, keyGlyph, type HintAction, type HintScheme } from './input-glyphs';
 import { HOVER, RateCharts } from './rate-charts';
-import { CH_NAME, CH_SHORT, effectiveFovDeg, keyboardKeys, padControls, stickLong, stickShort, throttleControl, throttleDownHint, touchControls, xrControls } from './mode-labels';
+import { CH_NAME, CH_SHORT, effectiveFovDeg, stickLong, stickShort, throttleControl } from './mode-labels';
 
 /** package.json version, injected by vite.config.ts `define`. */
 declare const __APP_VERSION__: string;
@@ -32,6 +34,7 @@ const SITE_URL = 'https://dronesim.coworkgamestudio.com/';
 
 export type ScreenName =
   | 'main'
+  | 'levels'
   | 'settings'
   | 'controller'
   | 'rates'
@@ -48,9 +51,15 @@ export type ScreenName =
 export type UiAction =
   | { type: 'race' }
   | { type: 'freefly' }
+  /** level picker: switch to that level (if needed) and start a run */
+  | { type: 'level'; id: LevelId; mode: LevelMode }
   | { type: 'resume' }
   | { type: 'menu' }
   | { type: 'retry' }
+  /** start (or replay) the tutorial on the Training field */
+  | { type: 'tutorial' }
+  /** pause menu while the tutorial runs: end it for good (no first-run prompt again) */
+  | { type: 'skip-tutorial' }
   /** HUD quit button: pause and ask for confirmation */
   | { type: 'request-quit' }
   /** leave the game (close tab when allowed) */
@@ -89,7 +98,7 @@ type Row =
   | (RowBase & { kind: 'range'; range: { min: number; max: number; step: number }; fmt: (v: number) => string; get: (s: Settings) => number; set: (s: Settings, v: number) => void })
   | (RowBase & { kind: 'bool'; on?: string; off?: string; get: (s: Settings) => boolean; set: (s: Settings, v: boolean) => void });
 
-type NumKey = 'cameraTiltDeg' | 'fovDeg' | 'volume' | 'deadzone' | 'throttleExpo' | 'throttleLimit' | 'angleMaxTiltDeg';
+type NumKey = 'cameraTiltDeg' | 'fovDeg' | 'volume' | 'deadzone' | 'throttleExpo' | 'throttleLimit' | 'angleMaxTiltDeg' | 'mouseSensitivity' | 'mouseExpo' | 'mouseDeadzone';
 const rangeRow = (id: NumKey, label: string, hint: string, fmt: (v: number) => string): Row => ({
   id,
   label,
@@ -103,7 +112,17 @@ const rangeRow = (id: NumKey, label: string, hint: string, fmt: (v: number) => s
   },
 });
 
+const ACTION_ROWS: readonly [string, HintAction][] = [
+  ['Arm / disarm', 'arm'],
+  ['Flight mode', 'toggleMode'],
+  ['Camera', 'cycleCamera'],
+  ['Reset to checkpoint', 'reset'],
+  ['Pause', 'pause'],
+  ['Heading arrow', 'headingArrow'],
+];
 const FOV_HINT = 'FPV lens width';
+const pct = (v: number): string => `${Math.round(v * 100)}%`;
+const MOUSE_STICK_LABEL: Record<Settings['mouseStick'], string> = { auto: 'Auto', hold: 'Hold', spring: 'Spring' };
 const FIELD_NAME: Record<RateField, string> = { center: 'Center sensitivity', max: 'Max rate', expo: 'Expo' };
 const rateCell = (axis: RateAxis, field: RateField): Row => ({
   id: `rate.${axis}.${field}`,
@@ -270,6 +289,43 @@ const ROW_DEFS: Row[] = [
   },
   rangeRow('deadzone', 'Stick deadzone', 'Radial deadzone for worn sticks', (v) => v.toFixed(2)),
   {
+    id: 'mouseStick',
+    label: 'Mouse stick',
+    hint: 'Auto: Angle hold / Acro spring · Hold stays put · Spring re-centres',
+    kind: 'enum',
+    options: SETTINGS_OPTIONS.mouseStick.map((m) => ({ value: m, label: MOUSE_STICK_LABEL[m] })),
+    get: (s) => s.mouseStick,
+    set: (s, v) => {
+      s.mouseStick = v as Settings['mouseStick'];
+    },
+  },
+  rangeRow('mouseSensitivity', 'Mouse sensitivity', 'Stick travel per mouse movement', pct),
+  {
+    id: 'mouseInvertY',
+    label: 'Invert mouse Y',
+    hint: 'Off: push the mouse away to pitch forward, like a stick',
+    kind: 'bool',
+    on: 'Inverted',
+    off: 'Normal',
+    get: (s) => s.mouseInvertY,
+    set: (s, v) => {
+      s.mouseInvertY = v;
+    },
+  },
+  {
+    id: 'mouseXAxis',
+    label: 'Mouse X axis',
+    hint: 'What left / right flies (Yaw moves roll onto the yaw keys)',
+    kind: 'enum',
+    options: SETTINGS_OPTIONS.mouseXAxis.map((a) => ({ value: a, label: a === 'roll' ? 'Roll' : 'Yaw' })),
+    get: (s) => s.mouseXAxis,
+    set: (s, v) => {
+      s.mouseXAxis = v as Settings['mouseXAxis'];
+    },
+  },
+  rangeRow('mouseExpo', 'Mouse expo', 'Softens small mouse movements', pct),
+  rangeRow('mouseDeadzone', 'Mouse deadzone', 'Mouse travel around centre that reads as centred', pct),
+  {
     id: 'touchThrottleCentre',
     label: 'Touch throttle',
     hint: 'Auto-centre: stick springs back, centre holds altitude (DJI-style) · Hold: stays where released like an FPV radio',
@@ -296,8 +352,10 @@ const ROW_DEFS: Row[] = [
 ];
 /** Rows only shown on touch devices. */
 const TOUCH_ROWS: ReadonlySet<string> = new Set(['touchThrottleCentre', 'touchSticksFixed']);
+/** Rows hidden on touch devices (pointer-lock mouse flight is a desktop feature). */
+const MOUSE_ROWS: ReadonlySet<string> = new Set(['mouseStick', 'mouseSensitivity', 'mouseInvertY', 'mouseXAxis', 'mouseExpo', 'mouseDeadzone']);
 const ROWS = new Map(ROW_DEFS.map((r) => [r.id, r]));
-const SETTINGS_ROWS = ['stickMode', 'touchThrottleCentre', 'touchSticksFixed', 'throttleSource', 'flightMode', 'ratePreset', 'cameraTiltDeg', 'fovDeg', 'quality', 'volume', 'showFps', 'headingArrow', 'deadzone'];
+const SETTINGS_ROWS = ['stickMode', 'touchThrottleCentre', 'touchSticksFixed', 'throttleSource', 'flightMode', 'ratePreset', 'cameraTiltDeg', 'fovDeg', 'quality', 'volume', 'showFps', 'headingArrow', 'deadzone', ...MOUSE_ROWS];
 const CONTROLLER_ROWS = ['stickMode', 'throttleSource', 'squareGate', 'invert.throttle', 'invert.yaw', 'invert.pitch', 'invert.roll'];
 const CHANNELS: readonly Channel[] = ['throttle', 'yaw', 'pitch', 'roll'];
 const SLOT_NAME: Record<StickSlot, string> = { lx: 'LX', ly: 'LY', rx: 'RX', ry: 'RY' };
@@ -365,6 +423,7 @@ export class Menus {
   private aboutReturn: ScreenName = 'main';
   /** touch device (set by enableTouch) */
   private touch = false;
+  private tutorial = false;
   /** immersive VR available (set by enableVr) */
   private vr = false;
   /** a gamepad is connected (live, from updateLive) */
@@ -373,6 +432,11 @@ export class Menus {
   private controlsMore = false;
   /** best lap last shown on the main menu or finish screen: the "previous best" of the next new record */
   private knownBest: number | null = null;
+  private levelCards: readonly LevelCard[] = [];
+  private currentLevel: LevelId | null = null;
+  private levelsKey = '';
+  private readonly levelsBox: HTMLElement;
+  private menuBestValue: number | null = null;
   private readonly platform: Platform;
   /** installed app (Capacitor shell or home-screen / Quest app) rather than a browser tab */
   private readonly installed: boolean;
@@ -391,6 +455,7 @@ export class Menus {
     this.installed = dev.standalone;
     this.native = dev.native !== null;
     this.screens.set('main', this.buildMain());
+    this.screens.set('levels', this.buildLevels());
     this.screens.set('settings', this.buildSettings());
     const ctl = this.buildController();
     this.screens.set('controller', ctl);
@@ -417,6 +482,7 @@ export class Menus {
     this.errorMsg = q(err, '[data-f="msg"]');
     this.altHoldNote = q(this.screens.get('rates')!, '[data-f="altHold"]');
     this.menuBest = q(this.screens.get('main')!, '[data-f="best"]');
+    this.levelsBox = q(this.screens.get('levels')!, '[data-f="levelCards"]');
     this.controlsBody = q(controls, '[data-f="body"]');
     const well = (side: 'l' | 'r') => ({
       well: q(ctl, `[data-w="${side}"]`),
@@ -454,6 +520,9 @@ export class Menus {
       el.querySelectorAll<HTMLElement>('[data-touch-only]').forEach((x) => {
         x.hidden = false;
       });
+      el.querySelectorAll<HTMLElement>('[data-mouse-only]').forEach((x) => {
+        x.hidden = true;
+      });
       if (fullscreen) {
         el.querySelectorAll<HTMLElement>('[data-fs-only]').forEach((x) => {
           x.hidden = false;
@@ -470,6 +539,21 @@ export class Menus {
     for (const el of this.screens.values()) {
       el.querySelectorAll<HTMLElement>('[data-act="exit"]').forEach((x) => {
         x.hidden = true;
+      });
+    }
+    this.refreshItems();
+  }
+
+  /** While the tutorial runs the pause menu offers Replay / Skip tutorial instead of Restart. */
+  setTutorial(on: boolean): void {
+    if (on === this.tutorial) return;
+    this.tutorial = on;
+    for (const el of this.screens.values()) {
+      el.querySelectorAll<HTMLElement>('[data-tut-only]').forEach((x) => {
+        x.hidden = !on;
+      });
+      el.querySelectorAll<HTMLElement>('[data-no-tut]').forEach((x) => {
+        x.hidden = on;
       });
     }
     this.refreshItems();
@@ -515,8 +599,63 @@ export class Menus {
   setMenuBest(best: number | null): void {
     // a stored best never goes away: null only means "not known here" (e.g. the menu before any race)
     if (best !== null) this.knownBest = best;
-    const text = best === null ? '' : `Best lap ${formatTime(best)}`;
+    this.menuBestValue = best;
+    this.renderMenuBest();
+  }
+
+  /** Main-menu level button under the menu: the selected level and its best lap; it opens the level picker. */
+  private renderMenuBest(): void {
+    const name = this.levelCards.find((c) => c.id === this.currentLevel)?.name ?? '';
+    const best = this.menuBestValue === null ? '' : `Best lap ${formatTime(this.menuBestValue)}`;
+    const text = name ? (best ? `Level: ${name} · ${best}` : `Level: ${name}`) : best;
     if (this.menuBest.textContent !== text) this.menuBest.textContent = text;
+    const btn = this.menuBest.parentElement!;
+    if (btn.hidden !== !name) {
+      btn.hidden = !name;
+      if (this.current === 'main') this.refreshItems();
+    }
+  }
+
+  /** Level picker contents: one card per playable level; `current` is the level loaded now. */
+  setLevels(cards: readonly LevelCard[], current: LevelId): void {
+    if (current !== this.currentLevel) {
+      // the finish screen's "previous best" belongs to one level only
+      this.knownBest = null;
+      this.menuBestValue = null;
+    }
+    this.levelCards = cards;
+    this.currentLevel = current;
+    this.renderMenuBest();
+    const key = JSON.stringify([cards, current]);
+    if (key === this.levelsKey) return;
+    this.levelsKey = key;
+    const focusedAct = this.current === 'levels' ? (this.items[this.focus]?.el.dataset.act ?? null) : null;
+    this.levelsBox.innerHTML = levelCardsHtml(cards, current);
+    drawThumbs(this.levelsBox);
+    if (this.current !== 'levels') return;
+    this.refreshItems();
+    const i = focusedAct ? this.items.findIndex((it) => it.el.dataset.act === focusedAct) : -1;
+    if (i >= 0) this.setFocus(i, false);
+  }
+
+  /** Open the picker focused on the current level's Race or Free Fly button. */
+  private openLevels(mode: LevelMode): void {
+    this.show('levels');
+    const act = this.currentLevel ? levelAct(mode, this.currentLevel) : null;
+    const i = act ? this.items.findIndex((it) => it.el.dataset.act === act) : -1;
+    this.setFocus(Math.max(0, i), false);
+  }
+
+  /** Left / right on a card button: the same button on the neighbouring card. */
+  private moveCard(el: HTMLElement, dir: -1 | 1): void {
+    const parsed = parseLevelAct(el.dataset.act ?? '');
+    if (!parsed) return;
+    const ids = this.levelCards.map((c) => c.id);
+    const k = ids.indexOf(parsed.id as LevelId);
+    if (k < 0 || ids.length < 2) return;
+    const target = levelAct(parsed.mode, ids[(k + dir + ids.length) % ids.length]!);
+    const i = this.items.findIndex((it) => it.el.dataset.act === target);
+    if (i >= 0) this.setFocus(i);
   }
 
   /** Fatal start-up error: friendly, platform-specific advice; `msg` goes under "Technical details". */
@@ -614,6 +753,9 @@ export class Menus {
         break;
       case 'confirm-reset':
         this.show('settings');
+        break;
+      case 'levels':
+        this.show('main');
         break;
       case 'settings':
       case 'controls':
@@ -721,6 +863,7 @@ export class Menus {
         item.activate = screen === this.screens.get('rates') && key.startsWith('rate.') ? () => this.setFine(!this.fine) : () => this.adjust(key, 1);
       } else if (act) {
         item.activate = () => this.act(act);
+        if (parseLevelAct(act)) item.adjust = (dir) => this.moveCard(el, dir);
       } else if (el instanceof HTMLAnchorElement) {
         item.activate = () => el.click();
       }
@@ -730,7 +873,19 @@ export class Menus {
   }
 
   private act(act: string): void {
+    const lvl = parseLevelAct(act);
+    if (lvl) {
+      const card = this.levelCards.find((c) => c.id === lvl.id);
+      if (card) this.onAction({ type: 'level', id: card.id, mode: lvl.mode });
+      return;
+    }
     switch (act) {
+      case 'levels-race':
+        this.openLevels('race');
+        break;
+      case 'levels-freefly':
+        this.openLevels('freefly');
+        break;
       case 'race':
       case 'freefly':
       case 'resume':
@@ -738,6 +893,8 @@ export class Menus {
       case 'retry':
       case 'exit':
       case 'enter-vr':
+      case 'tutorial':
+      case 'skip-tutorial':
         this.onAction({ type: act });
         break;
       case 'settings':
@@ -926,17 +1083,19 @@ export class Menus {
   }
 
   private touchControlsHtml(s: Settings): string {
-    const t = touchControls(s);
+    const arrows = { throttle: '↕', yaw: '↔', pitch: '↕', roll: '↔' } as const;
+    const chan = channelHints('touch', s).map((c) => `${glyphsHtml(c.glyphs)}<small class="ds-table__note">${arrows[c.channel]}</small>`);
+    const btn = (t: string): string => `<kbd class="ds-g ds-g--touch">${t}</kbd>`;
     const rows: [string, string][] = [
-      ['Throttle', t.throttle],
-      ['Yaw', t.yaw],
-      ['Pitch', t.pitch],
-      ['Roll', t.roll],
-      ['Arm / disarm', 'ARM'],
-      ['Flight mode (Angle / Acro)', 'MODE'],
-      ['Camera', 'CAM'],
-      ['Reset to checkpoint', 'RESET ↺'],
-      ['Pause', 'Pause ❚❚ (top left)'],
+      ['Throttle', chan[0]!],
+      ['Yaw', chan[1]!],
+      ['Pitch', chan[2]!],
+      ['Roll', chan[3]!],
+      ['Arm / disarm', btn('ARM')],
+      ['Flight mode (Angle / Acro)', btn('MODE')],
+      ['Camera', btn('CAM')],
+      ['Reset to checkpoint', btn('RESET ↺')],
+      ['Pause', `${btn('❚❚')}<small class="ds-table__note">top left</small>`],
     ];
     const where = s.touchSticksFixed
       ? 'Use the two sticks in the bottom corners.'
@@ -953,31 +1112,34 @@ export class Menus {
   }
 
   private padControlsHtml(s: Settings, xr: boolean, diagram: boolean): string {
-    const pad = padControls(s);
-    const kb = keyboardKeys(s);
     const thr = throttleControl(s);
-    const vr = xr ? xrControls(s) : null;
+    const note = (t: string): string => (t ? `<small class="ds-table__note">${t}</small>` : '');
+    const chans = (scheme: HintScheme): string[] => channelHints(scheme, s).map((c) => `${glyphsHtml(c.glyphs)}${note(c.note)}`);
+    const act = (scheme: HintScheme, a: HintAction): string => {
+      const g = actionGlyphs(scheme, a);
+      if (!g.length) return '<span class="ds-table__none">—</span>';
+      return `${glyphsHtml(g)}${g[0]!.style === 'stick' ? note('click') : ''}`;
+    };
+    const [vT, vY, vP, vR] = chans('quest');
+    const [pT, pY, pP, pR] = chans('xbox');
+    const [kT, kY, kP, kR] = chans('keyboard');
     const map: [string, string, string, string][] = [
-      ['Throttle', vr?.throttle ?? '', pad.throttle, kb.throttle],
-      ['Yaw', vr?.yaw ?? '', pad.yaw, kb.yaw],
-      ['Pitch', vr?.pitch ?? '', pad.pitch, kb.pitch],
-      ['Roll', vr?.roll ?? '', pad.roll, kb.roll],
-      ['Arm / disarm', 'A', 'A', 'Space'],
-      ['Flight mode', 'B', 'Y', 'M'],
-      ['Camera', 'Right stick click', 'RB', 'C'],
-      ['Reset to checkpoint', 'X', 'B', 'R'],
-      ['Pause', 'Y', 'Menu (☰)', 'Esc'],
+      ['Throttle', vT!, pT!, kT!],
+      ['Yaw', vY!, pY!, kY!],
+      ['Pitch', vP!, pP!, kP!],
+      ['Roll', vR!, pR!, kR!],
+      ...ACTION_ROWS.map(([label, a]): [string, string, string, string] => [label, act('quest', a), act('xbox', a), act('keyboard', a)]),
+      [xr ? 'Recentre view' : 'Recentre view (VR)', act('quest', 'recenter'), act('xbox', 'recenter'), act('keyboard', 'recenter')],
+      ['Mouse flight', '<span class="ds-table__none">—</span>', '<span class="ds-table__none">—</span>', `${glyphHtml({ style: 'mouse', label: '', name: 'Mouse' })}${note(`click the view · ${glyphHtml(keyGlyph('Escape'))} frees it`)}`],
     ];
-    if (xr) map.push(['Recentre view', 'Left stick click', '—', '—'], ['Heading arrow', 'Left trigger', '—', '—']);
-    const rows = map
-      .map(([a, v, x, k]) => `<tr><th scope="row">${a}</th>${xr ? `<td>${v}</td>` : ''}<td>${x}</td><td>${k === '—' ? k : `<kbd class="ds-kbd">${k}</kbd>`}</td></tr>`)
-      .join('');
+    const rows = map.map(([a, v, x, k]) => `<tr><th scope="row">${a}</th>${xr ? `<td>${v}</td>` : ''}<td>${x}</td><td>${k}</td></tr>`).join('');
+    const kbTip = 'Keyboard: keys spring back like a stick and centre holds altitude; press Space to arm, then hold W (↑ in modes 1/3) to take off.';
     const padTip =
       thr === 'rt'
-        ? 'Arming needs throttle at zero: release RT, then press A (keyboard: Space).'
-        : `Arming needs throttle at zero: hold the ${thr} stick fully down (keyboard: ${throttleDownHint(s, true).replace(/^Hold/, 'hold')}), then press A (Space). The throttle does not re-centre — like a real radio.`;
+        ? 'Arming needs throttle at zero: release RT, then press A.'
+        : `Arming needs throttle at zero: hold the ${thr} stick fully down, then press A. The throttle does not re-centre — like a real radio.`;
     // next to the VR note the two would contradict (Touch sticks spring back, a gamepad throttle does not)
-    const tip = xr ? `Gamepad / keyboard: ${padTip.charAt(0).toLowerCase()}${padTip.slice(1)}` : padTip;
+    const tip = `${xr ? `Gamepad: ${padTip.charAt(0).toLowerCase()}${padTip.slice(1)}` : padTip} ${kbTip}`;
     const thrXr = throttleSlotSide(s);
     const xrTip = xr
       ? `<p class="ds-tip" data-f="xrTip">VR: the Touch controller sticks spring back — the ${thrXr} stick's centre holds altitude and the other stick's centre holds position. Press A to arm, then push the ${thrXr} stick up to take off.</p>`
@@ -1082,7 +1244,7 @@ export class Menus {
         const r = ROWS.get(id)!;
         const track = r.kind === 'range' ? `<span class="ds-row__track" aria-hidden="true"><span class="ds-row__fill"></span></span>` : '';
         return `
-        <div class="ds-row" data-nav data-key="${r.id}" role="group" aria-label="${r.label}"${TOUCH_ROWS.has(r.id) ? ' data-touch-only hidden' : ''}>
+        <div class="ds-row" data-nav data-key="${r.id}" role="group" aria-label="${r.label}"${TOUCH_ROWS.has(r.id) ? ' data-touch-only hidden' : MOUSE_ROWS.has(r.id) ? ' data-mouse-only' : ''}>
           <div class="ds-row__text"><span class="ds-row__label">${r.label}</span><span class="ds-row__hint">${r.hint}</span></div>
           <div class="ds-row__ctl">
             <button type="button" class="ds-arrow" data-dir="-1" aria-label="Previous ${r.label}" tabindex="-1">‹</button>
@@ -1123,23 +1285,39 @@ export class Menus {
         <header class="ds-logo">
           <div class="ds-logo__ring" aria-hidden="true"><i></i><i></i></div>
           <h1 class="ds-logo__title" data-text="DRONE SIM">DRONE SIM</h1>
-          <p class="ds-logo__sub">FPV Racing · Night Loft</p>
+          <p class="ds-logo__sub">FPV Racing Simulator</p>
         </header>
         <nav class="ds-menu" aria-label="Main menu">
           ${this.btn('enter-vr', 'Enter VR', false, '', ' data-vr-only hidden')}
-          ${this.btn('race', 'Race', true)}
-          ${this.btn('freefly', 'Free Fly')}
+          ${this.btn('levels-race', 'Race', true)}
+          ${this.btn('levels-freefly', 'Free Fly')}
+          ${this.btn('tutorial', 'Tutorial')}
           ${this.btn('settings', 'Settings')}
           ${this.btn('controls', 'Controls')}
           ${this.btn('about', 'About')}
           ${this.btn('exit', 'Quit', false, ' ds-btn--quit', ' style="grid-column:1/-1"')}
         </nav>
-        <p class="ds-main__best" data-f="best"></p>
+        <button type="button" class="ds-main__level" data-nav data-act="levels-race" hidden><span data-f="best"></span><span class="ds-main__chev" aria-hidden="true">›</span></button>
         <footer class="ds-foot" data-pad-only>
           <span><kbd class="ds-kbd ds-kbd--a">A</kbd><kbd class="ds-kbd">Enter</kbd> Select</span>
           <span><kbd class="ds-kbd ds-kbd--b">B</kbd><kbd class="ds-kbd">Esc</kbd> Back</span>
           <span><kbd class="ds-kbd">D-pad</kbd><kbd class="ds-kbd">↑↓</kbd> Move</span>
         </footer>
+      </div>`,
+    );
+  }
+
+  private buildLevels(): HTMLElement {
+    return this.screen(
+      'levels',
+      `
+      <div class="ds-panel ds-glass ds-dialog ds-dialog--xwide ds-levels">
+        <h2 class="ds-dialog__title">Choose a level</h2>
+        <div class="ds-levels__grid" data-f="levelCards"></div>
+        <div class="ds-dialog__actions">
+          <p class="ds-foot ds-levels__foot" data-pad-only><span><kbd class="ds-kbd">←</kbd><kbd class="ds-kbd">→</kbd> Level</span><span><kbd class="ds-kbd">↑</kbd><kbd class="ds-kbd">↓</kbd> Race / Free Fly</span></p>
+          ${this.btn('back', 'Back', true)}
+        </div>
       </div>`,
     );
   }
@@ -1351,7 +1529,9 @@ export class Menus {
         <h2 class="ds-dialog__title">Paused</h2>
         <nav class="ds-menu">
           ${this.btn('resume', 'Resume', true)}
-          ${this.btn('retry', 'Restart')}
+          ${this.btn('retry', 'Restart', false, '', ' data-no-tut')}
+          ${this.btn('tutorial', 'Replay tutorial', false, '', ' data-tut-only hidden')}
+          ${this.btn('skip-tutorial', 'Skip tutorial', false, '', ' data-tut-only hidden')}
           ${this.btn('settings', 'Settings')}
           ${this.btn('controls', 'Controls')}
           ${this.btn('menu', 'Quit to menu', false, ' ds-btn--quit')}

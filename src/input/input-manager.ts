@@ -1,9 +1,10 @@
 /** Merges gamepad + keyboard + touch + WebXR controllers into one normalised InputFrame per render frame. */
 import type { Settings } from '../core/settings';
-import type { InputFrame, InputSource, StickPositions } from '../types';
+import type { FlightMode, InputFrame, InputSource, StickPositions } from '../types';
 import { GP, GamepadInput, prettyPadName } from './gamepad';
 import { KeyboardInput } from './keyboard';
-import { EdgeDetector, RepeatTrigger, VirtualSticks, mapSticks, throttleSlot, type StickMapOptions, type StickSlot } from './stick';
+import { MouseInput, mouseStickKind, type MouseStickKind } from './mouse';
+import { EdgeDetector, RepeatTrigger, STICK_SLOTS, VirtualSticks, mapSticks, slotOf, throttleSlot, type StickMapOptions, type StickSlot } from './stick';
 import { TouchInput, throttleSideOf } from './touch';
 import { XrControllers, shapeXrControl, type XrButtons } from './xr-controllers';
 
@@ -18,10 +19,31 @@ export interface GamepadConnectionEvent {
   wasActive: boolean;
 }
 
-const FLICK = 0.6;
+/** Extra per-frame input state for the HUD hints (kept out of the shared InputFrame type). */
+export interface InputExtras {
+  /** keyboard source with the mouse flying (pointer lock or canvas drag): pitch + roll / yaw */
+  mouse: boolean;
+  /** mouse stick position (−1..1, y +up) and behaviour while `mouse`, else null */
+  mouseStick: { x: number; y: number; kind: MouseStickKind } | null;
+  /** the active source's centring throttle is latched at the bottom (armed: push up to take off) */
+  latched: boolean;
+  /** rising edge of the Controls legend toggle (LEGEND_KEY / LEGEND_PAD_BUTTON) */
+  legend: boolean;
+}
 
-type ButtonName = 'arm' | 'toggleMode' | 'cycleCamera' | 'reset' | 'pause' | 'confirm' | 'back';
-const PAD_BUTTON: Record<ButtonName, number> = {
+export type HintedInputFrame = InputFrame & InputExtras;
+
+const FLICK = 0.6;
+/** An Escape tap this close BEFORE a lost pointer lock caused it: that unlock is the Escape's own pause. */
+const ESC_UNLOCK_MS = 500;
+/**
+ * An Escape keydown delivered this soon AFTER the unlock pause is the same keystroke (browsers fire the
+ * lock change before the key event); anything later is the pilot pressing Esc again on purpose.
+ */
+const ESC_TRAIL_MS = 120;
+
+export type ButtonName = 'arm' | 'toggleMode' | 'cycleCamera' | 'reset' | 'pause' | 'confirm' | 'back' | 'headingArrow' | 'recenter';
+export const PAD_BUTTON: Readonly<Record<ButtonName, number>> = {
   arm: GP.A,
   toggleMode: GP.Y,
   cycleCamera: GP.RB,
@@ -29,8 +51,12 @@ const PAD_BUTTON: Record<ButtonName, number> = {
   pause: GP.START,
   confirm: GP.A,
   back: GP.B,
+  headingArrow: GP.LB,
+  recenter: GP.LS,
 };
-const KEY_BUTTON: Record<ButtonName, readonly string[]> = {
+/** Recentres the view in VR; on a flat screen the same key snaps the mouse stick back to centre. */
+const RECENTER_KEY = 'KeyZ';
+export const KEY_BUTTON: Readonly<Record<ButtonName, readonly string[]>> = {
   arm: ['Space'],
   toggleMode: ['KeyM'],
   cycleCamera: ['KeyC'],
@@ -38,9 +64,11 @@ const KEY_BUTTON: Record<ButtonName, readonly string[]> = {
   pause: ['Escape'],
   confirm: ['Enter', 'NumpadEnter'],
   back: ['Escape', 'Backspace'],
+  headingArrow: ['KeyV'],
+  recenter: [RECENTER_KEY],
 };
-/** Quest Touch layout: A arm/confirm, B mode/back, X reset, Y pause, right stick click = camera. */
-const XR_BUTTON: Record<ButtonName, keyof XrButtons> = {
+/** Quest Touch layout: A arm/confirm, B mode/back, X reset, Y pause, right stick click = camera, left stick click = recentre, left trigger = heading arrow. */
+export const XR_BUTTON: Readonly<Record<ButtonName, keyof XrButtons>> = {
   arm: 'a',
   toggleMode: 'b',
   cycleCamera: 'rStick',
@@ -48,8 +76,29 @@ const XR_BUTTON: Record<ButtonName, keyof XrButtons> = {
   pause: 'y',
   confirm: 'a',
   back: 'b',
+  headingArrow: 'lTrigger',
+  recenter: 'lStick',
 };
+/** Keyboard virtual sticks: [negative, positive] key per stick axis (WASD = left stick, arrows = right). */
+export const KEY_STICKS: Readonly<Record<StickSlot, readonly [string, string]>> = {
+  lx: ['KeyA', 'KeyD'],
+  ly: ['KeyS', 'KeyW'],
+  rx: ['ArrowLeft', 'ArrowRight'],
+  ry: ['ArrowDown', 'ArrowUp'],
+};
+export const LEGEND_KEY = 'KeyH';
+/** Snaps the mouse stick back to centre (the middle mouse button does too). */
+export const MOUSE_CENTRE_KEY = RECENTER_KEY;
+export const LEGEND_PAD_BUTTON = GP.BACK;
 const BUTTON_NAMES = Object.keys(PAD_BUTTON) as ButtonName[];
+
+/**
+ * Sources whose throttle stick springs back to centre, so the FC flies them with altitude hold
+ * (centre = hover): Quest thumbsticks, the keyboard (± mouse) and touch with auto-centre on.
+ */
+export function holdsAltitude(source: InputSource, s: Pick<Settings, 'touchThrottleCentre'>): boolean {
+  return source === 'xr' || source === 'keyboard' || (source === 'touch' && s.touchThrottleCentre);
+}
 type NavDir = 'up' | 'down' | 'left' | 'right';
 const NAV_DIRS: readonly NavDir[] = ['up', 'down', 'left', 'right'];
 const NAV_KEYS: Record<NavDir, string> = { up: 'ArrowUp', down: 'ArrowDown', left: 'ArrowLeft', right: 'ArrowRight' };
@@ -62,6 +111,8 @@ export class InputManager {
   readonly touch = new TouchInput();
   /** WebXR (Quest Touch) controllers; fed the session's input sources by main while presenting. */
   readonly xr = new XrControllers();
+  /** Mouse flight under pointer lock (the HUD requests / releases the lock). */
+  readonly mouse: MouseInput;
 
   private settings: Settings;
   private readonly win: Window | null;
@@ -69,6 +120,13 @@ export class InputManager {
   private readonly kb: KeyboardInput;
   private readonly vsticks = new VirtualSticks();
   private readonly padEdges = new Map<ButtonName, EdgeDetector>(BUTTON_NAMES.map((n) => [n, new EdgeDetector()]));
+  private readonly legendEdge = new EdgeDetector();
+  private readonly kbRaw: Record<StickSlot, number> = { lx: 0, ly: -1, rx: 0, ry: 0 };
+  private escAt = -Infinity;
+  private unlockPauseAt = -Infinity;
+  /** FC flight mode, for the 'auto' mouse stick (settings + the live value fed by altitudeHold()) */
+  private flightMode: FlightMode = 'angle';
+  private readonly mouseOut = { x: 0, y: 0, kind: 'hold' as MouseStickKind };
   private readonly navRepeat = new Map<NavDir, RepeatTrigger>(NAV_DIRS.map((d) => [d, new RepeatTrigger()]));
   private readonly raw: Record<StickSlot, number> = { lx: 0, ly: 0, rx: 0, ry: 0 };
   private readonly padAxes: number[] = [];
@@ -83,15 +141,19 @@ export class InputManager {
   private readonly kbOpts: StickMapOptions;
   /** XR thumbsticks: radial deadzone on the flight stick, throttle raw (altitude hold centres it) */
   private readonly xrOpts: StickMapOptions;
-  private readonly frame: InputFrame = {
+  private readonly frame: HintedInputFrame = {
     control: { throttle: 0, yaw: 0, pitch: 0, roll: 0 },
-    buttons: { arm: false, toggleMode: false, cycleCamera: false, reset: false, pause: false, confirm: false },
+    buttons: { arm: false, toggleMode: false, cycleCamera: false, reset: false, pause: false, confirm: false, headingArrow: false, recenter: false },
     nav: { up: false, down: false, left: false, right: false, back: false },
     source: 'none',
     gamepadId: null,
     sticks: { lx: 0, ly: -1, rx: 0, ry: 0 },
     pad: null,
     xr: null,
+    mouse: false,
+    mouseStick: null,
+    latched: false,
+    legend: false,
   };
 
   private readonly onConnected = (e: Event): void => this.emitConnection(e, true, false);
@@ -111,6 +173,7 @@ export class InputManager {
     this.xrOpts = { ...this.touchOpts };
     this.pad = new GamepadInput(win?.navigator ?? null);
     this.kb = new KeyboardInput(win);
+    this.mouse = new MouseInput(win?.document ?? null);
     if (win) this.touch.listen(win);
     win?.addEventListener('gamepadconnected', this.onConnected);
     win?.addEventListener('gamepaddisconnected', this.onDisconnected);
@@ -119,6 +182,7 @@ export class InputManager {
 
   updateSettings(s: Settings): void {
     this.settings = s;
+    this.flightMode = s.flightMode;
     for (const o of [this.touchOpts, this.kbOpts, this.xrOpts]) {
       o.stickMode = s.stickMode;
       o.invert = s.invert;
@@ -132,18 +196,27 @@ export class InputManager {
 
   /**
    * Throttle back to the bottom for a fresh take-off (respawn, disarm, new flight): re-arms the latch of
-   * the centring throttles (touch auto-centre, XR thumbstick) and drops the keyboard's held throttle,
-   * which would otherwise launch the respawned quad at the old setting.
+   * the centring throttles (touch auto-centre, XR thumbstick, keyboard) so the quad idles on the ground.
    */
   latchTakeoff(): void {
     this.touch.sticks.latchTakeoff();
     this.xr.latchTakeoff();
-    this.vsticks.setThrottle(0);
+    this.vsticks.latchTakeoff();
+  }
+
+  /**
+   * Whether the FC flies the active source with altitude hold (see holdsAltitude). Called every flying
+   * frame with the live settings, whose flight mode also drives the 'auto' mouse stick (Angle hold, Acro spring).
+   */
+  altitudeHold(s: Settings): boolean {
+    this.flightMode = s.flightMode;
+    return holdsAltitude(this.source, s);
   }
 
   /** The active source's throttle is still latched at the bottom (armed but not yet pushed up). */
   get takeoffLatched(): boolean {
     if (this.source === 'xr') return this.xr.latched;
+    if (this.source === 'keyboard') return this.vsticks.latched;
     return this.source === 'touch' && this.touch.sticks.latched;
   }
 
@@ -156,7 +229,7 @@ export class InputManager {
    * Reads devices once per render frame. The returned frame object is reused between calls.
    * Buttons/nav are rising-edge events from either device; sticks come from the last-used device.
    */
-  poll(dt: number): InputFrame {
+  poll(dt: number): HintedInputFrame {
     const now = typeof performance !== 'undefined' ? performance.now() : Date.now();
     const f = this.frame;
     const snap = this.pad.poll(now);
@@ -166,23 +239,30 @@ export class InputManager {
 
     const st = this.settings;
     const hold = throttleSlot(st.stickMode);
+    const ks = KEY_STICKS;
+    // Arm key on the ground: the centring throttle reads zero so the FC accepts the arm, then the latch
+    // holds it there until the throttle-up key. A held throttle-up key keeps the FC's throttle-low refusal.
+    if (KEY_BUTTON.arm.some((k) => kb.wasPressed(k)) && !kb.isDown(ks[hold][1])) this.vsticks.latchTakeoff();
     this.vsticks.update(
       dt,
       {
-        lUp: kb.isDown('KeyW'),
-        lDown: kb.isDown('KeyS'),
-        lLeft: kb.isDown('KeyA'),
-        lRight: kb.isDown('KeyD'),
-        rUp: kb.isDown('ArrowUp'),
-        rDown: kb.isDown('ArrowDown'),
-        rLeft: kb.isDown('ArrowLeft'),
-        rRight: kb.isDown('ArrowRight'),
+        lUp: kb.isDown(ks.ly[1]),
+        lDown: kb.isDown(ks.ly[0]),
+        lLeft: kb.isDown(ks.lx[0]),
+        lRight: kb.isDown(ks.lx[1]),
+        rUp: kb.isDown(ks.ry[1]),
+        rDown: kb.isDown(ks.ry[0]),
+        rLeft: kb.isDown(ks.rx[0]),
+        rRight: kb.isDown(ks.rx[1]),
       },
       hold,
     );
+    const mouse = this.mouse;
+    if (kb.wasPressed(MOUSE_CENTRE_KEY)) mouse.stick.reset();
+    mouse.stick.update(dt, mouseStickKind(st.mouseStick, this.flightMode), st);
 
     const touchT = this.touch.lastActivity;
-    const kbT = kb.lastActivity;
+    const kbT = Math.max(kb.lastActivity, mouse.engaged ? mouse.lastActivity : -Infinity);
     const padT = this.pad.lastActivity;
     if (touchT > -Infinity && touchT >= kbT && touchT >= padT) this.source = 'touch';
     else if (kbT > -Infinity && kbT >= padT) this.source = 'keyboard';
@@ -212,7 +292,7 @@ export class InputManager {
     } else if (this.source === 'touch') {
       mapSticks(this.touch.sticks.pos, 0, this.touchOpts, sticks, f.control, true);
     } else {
-      mapSticks(this.vsticks.pos, 0, this.kbOpts, sticks, f.control, false);
+      mapSticks(this.keyboardSticks(), 0, this.kbOpts, sticks, f.control, false);
     }
 
     if (snap) {
@@ -238,6 +318,15 @@ export class InputManager {
       else b[name] = padEdge || keyEdge || xrEdge;
     }
     this.touch.drainButtons(b);
+    if (KEY_BUTTON.pause.some((k) => kb.wasPressed(k))) this.escAt = now;
+    if (mouse.takeUnlockPause() && now - this.escAt > ESC_UNLOCK_MS) {
+      b.pause = true;
+      this.unlockPauseAt = now;
+    } else if (now - this.unlockPauseAt < ESC_TRAIL_MS && KEY_BUTTON.pause.some((k) => kb.wasPressed(k))) {
+      // the Escape that broke the lock arrived after its pause: it must not resume the flight
+      b.pause = false;
+      back = false;
+    }
 
     const n = f.nav;
     n.back = back;
@@ -257,6 +346,18 @@ export class InputManager {
     }
 
     f.xr = xr.active ? xr.pressed : null;
+    f.legend = this.legendEdge.update(snap ? snap.pressed[LEGEND_PAD_BUTTON]! : false) || kb.wasPressed(LEGEND_KEY);
+    f.mouse = this.source === 'keyboard' && mouse.engaged;
+    if (f.mouse) {
+      const mo = this.mouseOut;
+      mo.x = mouse.stick.out.x;
+      mo.y = mouse.stick.out.y;
+      mo.kind = mouse.stick.kind;
+      f.mouseStick = mo;
+    } else {
+      f.mouseStick = null;
+    }
+    f.latched = this.takeoffLatched;
     f.source = this.source;
     f.gamepadId = snap ? snap.id : null;
     kb.endFrame();
@@ -289,10 +390,32 @@ export class InputManager {
 
   dispose(): void {
     this.kb.dispose();
+    this.mouse.dispose();
     this.touch.dispose();
     this.win?.removeEventListener('gamepadconnected', this.onConnected);
     this.win?.removeEventListener('gamepaddisconnected', this.onDisconnected);
     this.onConnection = null;
+  }
+
+  /** Keyboard virtual sticks plus, under pointer lock, the mouse stick on pitch and roll / yaw. */
+  private keyboardSticks(): Readonly<Record<StickSlot, number>> {
+    const kp = this.vsticks.pos;
+    const m = this.mouse;
+    if (!m.engaged) return kp;
+    const raw = this.kbRaw;
+    for (const s of STICK_SLOTS) raw[s] = kp[s];
+    const mode = this.settings.stickMode;
+    const xSlot = slotOf(mode, this.settings.mouseXAxis);
+    if (this.settings.mouseXAxis === 'yaw') {
+      // mouse X takes yaw, so the yaw keys fly roll (and the roll keys yaw)
+      const rollSlot = slotOf(mode, 'roll');
+      raw[xSlot] = kp[rollSlot];
+      raw[rollSlot] = kp[xSlot];
+    }
+    const ySlot = slotOf(mode, 'pitch');
+    raw[xSlot] = Math.max(-1, Math.min(1, raw[xSlot] + m.stick.out.x));
+    raw[ySlot] = Math.max(-1, Math.min(1, raw[ySlot] + m.stick.out.y));
+    return raw;
   }
 
   private emitConnection(e: Event, connected: boolean, wasActive: boolean): void {

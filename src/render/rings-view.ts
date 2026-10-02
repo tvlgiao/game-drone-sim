@@ -156,7 +156,8 @@ export class RingsView {
       const tex = labelTexture(String(i + 1));
       this.textures.push(tex);
       const label = new THREE.Sprite(new THREE.SpriteMaterial({ map: tex, transparent: true, depthWrite: false, color: base.clone(), fog: true }));
-      label.scale.setScalar(0.34);
+      // big outdoor gates are read from 20–30 m: the number grows with the gate (loft rings: 0.75 m)
+      label.scale.setScalar(0.34 * Math.max(1, def.radius / 0.75));
       label.position.set(def.position[0], def.position[1] + def.radius + def.tube + 0.3, def.position[2]);
       this.group.add(holder, label);
       this.rings.push({ def, rim, membrane, label, base, color: base.clone(), intensity: 1, memIntensity: 0, flash: 0, passT: 0 });

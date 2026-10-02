@@ -4,6 +4,10 @@
  */
 import { readFileSync } from 'node:fs';
 import { expect, test, type Page } from '@playwright/test';
+import { skipTutorialOffer } from './seed';
+
+// the first-run tutorial offer is covered by tutorial.spec.ts; here it would cover the menus
+test.beforeEach(({ context }) => skipTutorialOffer(context));
 
 interface Hook {
   screen: string;
@@ -42,7 +46,7 @@ test.describe('desktop menus', () => {
     await boot(page);
     await page.waitForTimeout(300);
     // one key per frame: the menu polls the keyboard in the game loop
-    for (const next of ['Free Fly', 'Settings', 'Controls', 'About']) {
+    for (const next of ['Free Fly', 'Tutorial', 'Settings', 'Controls', 'About']) {
       await page.waitForTimeout(150); // the key must be up for a frame before the next press counts
       await page.keyboard.press('ArrowDown', { delay: 40 });
       await expect(focused(page, 'main')).toHaveText(next);
@@ -78,7 +82,7 @@ test.describe('desktop menus', () => {
   test('exactly one item is focused after moving between screens', async ({ page }) => {
     await boot(page);
     await page.waitForTimeout(300);
-    for (const next of ['Free Fly', 'Settings']) {
+    for (const next of ['Free Fly', 'Tutorial', 'Settings']) {
       await page.waitForTimeout(150);
       await page.keyboard.press('ArrowDown', { delay: 40 });
       await expect(focused(page, 'main')).toHaveText(next);
@@ -368,6 +372,43 @@ test.describe('desktop menus', () => {
   });
 });
 
+test.describe('menu polish', () => {
+  test.skip(({ isMobile }) => isMobile, 'desktop only');
+
+  test('the main menu level line is a button that opens the level picker', async ({ page }) => {
+    await boot(page);
+    const level = page.locator('.ds-screen--main .ds-main__level');
+    await expect(level).toHaveText(/^Level: Training Field/);
+    await expect(level).toHaveCSS('font-family', /SF Pro|Segoe|system-ui|sans/);
+    await level.click();
+    await expect.poll(() => screenOf(page)).toBe('levels');
+    expect(errors).toEqual([]);
+  });
+
+  test('pause: one focus look; moving it takes the primary button\'s edge away too', async ({ page }) => {
+    await boot(page);
+    await hook(page, (d) => d.action({ type: 'freefly' }));
+    await page.keyboard.press('Escape');
+    await expect.poll(() => screenOf(page)).toBe('pause');
+    await page.keyboard.press('ArrowDown');
+    await expect(focused(page, 'pause')).toHaveCount(1);
+    const primary = page.locator('.ds-screen--pause .ds-btn--primary');
+    await expect(primary).not.toHaveClass(/is-focused/);
+    await expect(primary).toHaveCSS('border-color', 'rgba(120, 220, 255, 0.2)');
+    expect(errors).toEqual([]);
+  });
+
+  test('settings: every stepper value column has one width, so the arrows line up', async ({ page }) => {
+    await boot(page);
+    await page.getByRole('button', { name: 'Settings' }).click();
+    // a long value (a future option, a translation) must not push its arrows out of line
+    await page.locator('.ds-screen--settings [data-key="mouseStick"] .ds-row__value').evaluate((e) => (e.textContent = 'Auto: Angle hold / Acro spring'));
+    const xs = await page.locator('.ds-screen--settings .ds-row:not([hidden]) .ds-arrow').evaluateAll((els) => els.filter((e) => (e as HTMLElement).offsetParent).map((e) => `${(e as HTMLElement).dataset.dir}:${Math.round(e.getBoundingClientRect().left)}`));
+    expect(xs.length).toBeGreaterThan(10);
+    expect(new Set(xs).size, xs.join(' ')).toBe(2);
+  });
+});
+
 test.describe('Quest Browser', () => {
   test.skip(({ isMobile }) => isMobile, 'desktop Chromium with a Quest user agent');
   test.use({ userAgent: QUEST_UA });
@@ -378,17 +419,20 @@ test.describe('Quest Browser', () => {
     const body = page.locator('.ds-screen--controls [data-f="body"]');
     await expect(body.locator('thead')).toContainText('Touch controllers');
     const row = (name: string) => body.locator('[data-f="padTable"] tbody tr', { has: page.locator('th', { hasText: new RegExp(`^${name}$`) }) }).locator('td').first();
-    await expect(row('Arm / disarm')).toHaveText('A');
-    await expect(row('Flight mode')).toHaveText('B');
-    await expect(row('Reset to checkpoint')).toHaveText('X');
-    await expect(row('Pause')).toHaveText('Y');
-    await expect(row('Camera')).toHaveText('Right stick click');
-    await expect(row('Recentre view')).toHaveText('Left stick click');
-    await expect(row('Heading arrow')).toHaveText('Left trigger');
+    // bindings are drawn glyphs (the accessible name says what a stick / trigger glyph is)
+    await expect(row('Arm / disarm').locator('.ds-g--face')).toHaveText('A');
+    await expect(row('Flight mode').locator('.ds-g--face')).toHaveText('B');
+    await expect(row('Reset to checkpoint').locator('.ds-g--face')).toHaveText('X');
+    await expect(row('Pause').locator('.ds-g--face')).toHaveText('Y');
+    await expect(row('Camera').locator('.ds-g')).toHaveAttribute('aria-label', 'Right stick click');
+    await expect(row('Recentre view').locator('.ds-g')).toHaveAttribute('aria-label', 'Left stick click');
+    await expect(row('Heading arrow').locator('.ds-g')).toHaveAttribute('aria-label', 'Left trigger');
+    // keyboard cells are keycaps, the mouse has its own row
+    await expect(body.locator('[data-f="padTable"] tbody tr', { has: page.locator('th', { hasText: /^Mouse flight$/ }) })).toContainText('click the view');
     await expect(body.locator('[data-f="xrTip"]')).toContainText('holds altitude');
     await expect(body.locator('.ds-pad-wrap')).toHaveCount(0); // no Xbox diagram for a headset without a gamepad
     // the gamepad note must not read as contradicting the VR one: each names its input
-    await expect(body.locator('[data-f="padTip"]')).toHaveText(/^Gamepad \/ keyboard: arming needs throttle at zero/);
+    await expect(body.locator('[data-f="padTip"]')).toHaveText(/^Gamepad: arming needs throttle at zero.* Keyboard: keys spring back like a stick and centre holds altitude; press Space to arm/);
     await expect(body.locator('[data-f="xrTip"]')).toHaveText(/^VR: /);
     expect(errors).toEqual([]);
   });
@@ -480,14 +524,19 @@ test.describe('touch devices', () => {
     expect(errors).toEqual([]);
   });
 
-  test('main menu on a landscape phone: Quit fills its own row instead of a lone half cell', async ({ page }) => {
+  test('main menu on a landscape phone: About and Quit share the last row (no lone half cell), all on screen', async ({ page }) => {
     await boot(page);
     await passGate(page);
     const quit = page.locator('.ds-screen--main [data-act="exit"]');
     test.skip(!(await quit.isVisible()), 'Quit hidden on this platform');
-    const race = (await page.locator('.ds-screen--main [data-act="race"]').boundingBox())!;
+    const about = (await page.locator('.ds-screen--main [data-act="about"]').boundingBox())!;
     const q = (await quit.boundingBox())!;
-    expect(Math.abs(q.width - race.width)).toBeLessThan(2);
+    const vh = page.viewportSize()!.height;
+    if (vh <= 500) {
+      expect(Math.abs(q.y - about.y)).toBeLessThan(2);
+      expect(Math.abs(q.width - about.width)).toBeLessThan(2);
+    }
+    expect(q.y + q.height).toBeLessThanOrEqual(vh);
     expect(errors).toEqual([]);
   });
 
@@ -501,4 +550,37 @@ test.describe('touch devices', () => {
     await expect(rates.locator('[data-f="altHold"]')).toContainText("throttle mid, expo and limit don't apply");
     expect(errors).toEqual([]);
   });
+});
+
+test('Settings: mouse flight rows (desktop only) change and persist the mouse settings', async ({ page, isMobile }) => {
+  await boot(page);
+  const gate = page.getByRole('button', { name: /tap to play/i });
+  if (await gate.isVisible().catch(() => false)) await gate.tap();
+  const tip = page.getByRole('button', { name: /got it/i });
+  if (await tip.isVisible({ timeout: 800 }).catch(() => false)) await tip.tap();
+  await hook(page, (d) => d.showScreen('settings'));
+  const rows = ['mouseStick', 'mouseSensitivity', 'mouseInvertY', 'mouseXAxis', 'mouseExpo', 'mouseDeadzone'];
+  const row = (k: string) => page.locator(`.ds-screen--settings [data-key="${k}"]`);
+  if (isMobile) {
+    // pointer-lock mouse flight is a desktop feature
+    for (const k of rows) await expect(row(k)).toBeHidden();
+    return;
+  }
+  const value = (k: string) => row(k).locator('.ds-row__value');
+  await expect(value('mouseStick')).toHaveText('Auto');
+  await expect(value('mouseSensitivity')).toHaveText('100%');
+  await expect(value('mouseInvertY')).toHaveText('Normal');
+  await expect(value('mouseXAxis')).toHaveText('Roll');
+  await expect(value('mouseExpo')).toHaveText('20%');
+  await expect(value('mouseDeadzone')).toHaveText('3%');
+  for (const k of rows) await row(k).locator('[data-dir="1"]').click();
+  await expect(value('mouseStick')).toHaveText('Hold');
+  await expect(value('mouseSensitivity')).toHaveText('110%');
+  await expect(value('mouseXAxis')).toHaveText('Yaw');
+  const s = await stored(page);
+  expect(s).toMatchObject({ mouseStick: 'hold', mouseInvertY: true, mouseXAxis: 'yaw' });
+  expect(s.mouseSensitivity as number).toBeCloseTo(1.1, 5);
+  expect(s.mouseExpo as number).toBeCloseTo(0.25, 5);
+  expect(s.mouseDeadzone as number).toBeCloseTo(0.04, 5);
+  expect(errors).toEqual([]);
 });

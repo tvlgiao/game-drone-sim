@@ -1,6 +1,6 @@
 /** FPV / Chase / LOS cameras with smooth mode transitions and shake. No per-frame allocations. */
 import * as THREE from 'three';
-import type { CameraMode, DroneState } from '../types';
+import type { CameraMode, DroneState, LevelDef } from '../types';
 import { FPV_FOV_V_RANGE } from '../core/camera-limits';
 import { CAMERA_PIVOT, LENS_OFFSET } from './drone-model';
 
@@ -17,6 +17,12 @@ const LOS_MARGIN_PITCH = 0.55;
 const LOS_HEAD_OMEGA = 4.5;
 const LOS_RELAX = 0.35;
 /**
+ * Hard limit (fraction of the half-frame, in NDC) on the drone's offset from the head direction, applied after the
+ * spring: a fast climb or dash next to the pilot outruns the spring, which would otherwise lose the drone.
+ */
+const LOS_HARD_FRAME = 0.62;
+const LOS_MAX_PITCH = 1.45;
+/**
  * FPV under the ceiling: within this clearance (m) the camera's uptilt eases off (to FPV_CEILING_TILT
  * of the setting at contact), otherwise a quad pressed to the unlit ceiling sees nothing but black.
  */
@@ -24,6 +30,11 @@ const FPV_CEILING_RELIEF = 0.6;
 const FPV_CEILING_TILT = 0.3;
 /** lens kept this far below the ceiling plane so the near plane never cuts into it */
 const FPV_CEILING_GAP = 0.04;
+/** far planes: the loft is 24 m across; outdoors the sky dome and backdrop hills sit a few hundred metres out */
+const INDOOR_FAR = 90;
+const OUTDOOR_FAR = 1200;
+/** outdoors the chase camera keeps this far above the ground (the room box inset indoors is 0.12) */
+const OUTDOOR_GROUND_CLEARANCE = 0.15;
 
 const _pos = new THREE.Vector3();
 const _q = new THREE.Quaternion();
@@ -35,6 +46,8 @@ const _m = new THREE.Matrix4();
 const _e = new THREE.Euler();
 const _up = new THREE.Vector3(0, 1, 0);
 const _x = new THREE.Vector3(1, 0, 0);
+const _right = new THREE.Vector3();
+const _camUp = new THREE.Vector3();
 
 export interface RigInput {
   dt: number;
@@ -72,9 +85,18 @@ export class CameraRig {
   private chaseInit = false;
   private trauma = 0;
   private fovV = 70;
-  private readonly pilot: THREE.Vector3;
-  private readonly bounds: THREE.Box3;
-  private readonly ceiling: number;
+  private readonly pilot = new THREE.Vector3();
+  /**
+   * Space the chase camera must stay in: the inset room box indoors; outdoors only the ground plane
+   * bounds it (an unbounded box with its floor just above the ground).
+   */
+  private readonly bounds = new THREE.Box3();
+  /** FPV ceiling (Infinity under open sky) */
+  private ceiling = Infinity;
+  private outdoor = false;
+  /** outdoor LOS: where the pilot's head rests (next ring), null = the static overview */
+  private focus: THREE.Vector3 | null = null;
+  private readonly focusPoint = new THREE.Vector3();
   /** exposed for FX: FPV-ness 0..1 (1 while fully in FPV) */
   fpvWeight = 0;
   /** camera shake / impact trauma; off in a headset, where shaking the view causes nausea */
@@ -83,18 +105,61 @@ export class CameraRig {
   readonly targetPos = new THREE.Vector3();
   readonly targetQuat = new THREE.Quaternion();
 
-  constructor(pilot: readonly [number, number, number], roomSize: readonly [number, number, number]) {
-    this.camera = new THREE.PerspectiveCamera(70, 16 / 9, 0.02, 90);
-    this.pilot = new THREE.Vector3(pilot[0], pilot[1], pilot[2]);
-    const m = 0.18;
-    this.bounds = new THREE.Box3(
-      new THREE.Vector3(-roomSize[0] / 2 + m, 0.12, -roomSize[2] / 2 + m),
-      new THREE.Vector3(roomSize[0] / 2 - m, roomSize[1] - m, roomSize[2] / 2 - m),
-    );
-    this.ceiling = roomSize[1];
+  /** `roomSize` null = outdoor level (open sky over flat ground y = 0). */
+  constructor(pilot: readonly [number, number, number], roomSize: readonly [number, number, number] | null) {
+    this.camera = new THREE.PerspectiveCamera(70, 16 / 9, 0.02, INDOOR_FAR);
+    this.overview = new THREE.Vector3();
+    this.configure(pilot, roomSize, null);
+  }
+
+  /** Re-target the rig to a level (camera object kept: post FX and the XR dolly hold it). */
+  setLevel(def: LevelDef): void {
+    if (def.kind === 'indoor') {
+      this.configure(def.pilot, def.room.size, null);
+      return;
+    }
+    const c = new THREE.Vector3();
+    for (const r of def.rings) c.add(_v.set(r.position[0], r.position[1], r.position[2]));
+    if (def.rings.length > 0) c.divideScalar(def.rings.length);
+    else c.set(def.spawn.position[0], def.pilot[1], def.spawn.position[2] - 20);
+    this.configure(def.pilot, null, c);
+  }
+
+  private configure(pilot: readonly [number, number, number], roomSize: readonly [number, number, number] | null, overview: THREE.Vector3 | null): void {
+    this.pilot.set(pilot[0], pilot[1], pilot[2]);
+    this.outdoor = roomSize === null;
+    this.focus = null;
+    if (roomSize) {
+      const m = 0.18;
+      this.bounds.min.set(-roomSize[0] / 2 + m, 0.12, -roomSize[2] / 2 + m);
+      this.bounds.max.set(roomSize[0] / 2 - m, roomSize[1] - m, roomSize[2] / 2 - m);
+      this.ceiling = roomSize[1];
+      // Resting gaze: centre of the room at chest height, so the whole course is in view.
+      this.overview.set(0, roomSize[1] * 0.28, -roomSize[2] * 0.08);
+      this.camera.far = INDOOR_FAR;
+    } else {
+      this.bounds.min.set(-Infinity, OUTDOOR_GROUND_CLEARANCE, -Infinity);
+      this.bounds.max.set(Infinity, Infinity, Infinity);
+      this.ceiling = Infinity;
+      this.overview.copy(overview ?? _v.set(this.pilot.x, this.pilot.y, this.pilot.z - 20));
+      this.camera.far = OUTDOOR_FAR;
+    }
     this.camera.position.copy(this.pilot);
-    // Resting gaze: centre of the room at chest height, so the whole course is in view.
-    this.overview = new THREE.Vector3(0, roomSize[1] * 0.28, -roomSize[2] * 0.08);
+    this.camera.updateProjectionMatrix();
+    this.headInit = false;
+    this.chaseInit = false;
+  }
+
+  /**
+   * Outdoor LOS: rest the pilot's gaze on this point (the next ring) instead of the course overview;
+   * null returns to the overview. Indoors the room overview always holds.
+   */
+  setFocus(p: THREE.Vector3 | null): void {
+    if (!this.outdoor || !p) {
+      this.focus = null;
+      return;
+    }
+    this.focus = this.focusPoint.copy(p);
   }
 
   get currentMode(): CameraMode {
@@ -206,13 +271,13 @@ export class CameraRig {
   }
 
   /**
-   * Standing pilot's head: rests on the room overview and only turns when the drone nears the
+   * Standing pilot's head: rests on the overview (outdoors: the focus ring) and only turns when the drone nears the
    * edge of the frame (dead-zone), with a critically damped spring like a human head.
    */
   private updateHead(f: RigInput, dt: number): void {
     const halfV = THREE.MathUtils.degToRad(LOS_FOV_V / 2);
     const halfH = Math.atan(Math.tan(halfV) * this.camera.aspect);
-    _v.copy(this.overview).sub(this.pilot);
+    _v.copy(this.focus ?? this.overview).sub(this.pilot);
     const baseYaw = yawOf(_v);
     const basePitch = pitchOf(_v);
     _v.copy(f.drone.position).sub(this.pilot);
@@ -243,6 +308,39 @@ export class CameraRig {
     const ep = this.headTargetPitch - this.headPitch;
     this.headPitchV += (ep * w * w - 2 * w * this.headPitchV) * dt;
     this.headPitch += this.headPitchV * dt;
+
+    this.keepInFrame(f.drone.position, Math.tan(halfH) * LOS_HARD_FRAME, Math.tan(halfV) * LOS_HARD_FRAME, droneYaw, dronePitch);
+    this.headPitch = THREE.MathUtils.clamp(this.headPitch, -LOS_MAX_PITCH, LOS_MAX_PITCH);
+  }
+
+  /**
+   * Turns the head the least needed so `p` projects within ±`tx` / ±`ty` (tangent units of the view frame).
+   * Works in the head's own frame: yaw/pitch differences alone misjudge the projection when looking up steeply.
+   */
+  private keepInFrame(p: THREE.Vector3, tx: number, ty: number, droneYaw: number, dronePitch: number): void {
+    _v.copy(p).sub(this.pilot);
+    for (let i = 0; i < 6; i++) {
+      dirFromAngles(this.headYaw, this.headPitch, _fwd);
+      _right.crossVectors(_fwd, _up).normalize();
+      _camUp.crossVectors(_right, _fwd);
+      const zf = _v.dot(_fwd);
+      if (zf <= 1e-3) {
+        this.headYaw = droneYaw;
+        this.headPitch = dronePitch;
+        this.headYawV = this.headPitchV = 0;
+        continue;
+      }
+      const x = _v.dot(_right) / zf;
+      const y = _v.dot(_camUp) / zf;
+      const ex = Math.abs(x) > tx ? Math.atan(x) - Math.sign(x) * Math.atan(tx) : 0;
+      const ey = Math.abs(y) > ty ? Math.atan(y) - Math.sign(y) * Math.atan(ty) : 0;
+      if (ex === 0 && ey === 0) break;
+      // +x (right) is a negative yaw; a yaw turn moves the view sideways by about cos(pitch) of its angle
+      this.headYaw = wrapAngle(this.headYaw - (ex * 1.05) / Math.max(0.25, Math.cos(this.headPitch)));
+      this.headPitch = THREE.MathUtils.clamp(this.headPitch + ey * 1.05, -LOS_MAX_PITCH, LOS_MAX_PITCH);
+      if (this.headYawV * ex > 0) this.headYawV = 0;
+      if (this.headPitchV * ey < 0) this.headPitchV = 0;
+    }
   }
 
   /** FPV lens position in world space for an uptilt of `tilt` rad → `out`. */
@@ -253,7 +351,7 @@ export class CameraRig {
   }
 
   /**
-   * Keeps the chase camera inside the room. The ceiling only lowers it (horizontal offset kept): pulling
+   * Keeps the chase camera inside the room (outdoors: above the ground). The ceiling only lowers it (horizontal offset kept): pulling
    * it back along drone→camera would park it on the quad, looking up at its belly.
    */
   private pullInside(from: THREE.Vector3, cam: THREE.Vector3): void {

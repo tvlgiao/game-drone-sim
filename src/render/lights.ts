@@ -1,7 +1,7 @@
 /** Lighting rig: moonlight (static shadow), practical spots, cheap point lights, PMREM environment. */
 import * as THREE from 'three';
 import type { QualityProfile } from '../core/quality';
-import type { LevelDef } from '../types';
+import type { IndoorLevel } from '../types';
 
 /** Direction moonlight travels (from outside NE, high) — enters the north and east windows. */
 export const MOON_DIR = new THREE.Vector3(-7, -10, 11).normalize();
@@ -24,7 +24,7 @@ export class Lights {
   private envTarget: THREE.WebGLRenderTarget | null = null;
   private profile: QualityProfile | null = null;
 
-  constructor(private readonly scene: THREE.Scene, level: LevelDef) {
+  constructor(private readonly scene: THREE.Object3D, level: Pick<IndoorLevel, 'room' | 'props'>) {
     const [sx, sy, sz] = level.room.size;
     this.hemi = new THREE.HemisphereLight(0x8fa6d8, 0x3a2a20, 0.55);
     scene.add(this.hemi);

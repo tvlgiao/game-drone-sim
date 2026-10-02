@@ -1,0 +1,277 @@
+import { describe, expect, it } from 'vitest';
+import { DEFAULT_SETTINGS, type Settings } from '../../src/core/settings';
+import { TUTORIAL_STEPS, TutorialMachine, type TutorialStepId } from '../../src/game/tutorial';
+import { buttonLabel, channelDirLabel, channelSide, pressVerb } from '../../src/ui/mode-labels';
+import { TOKEN_CLOSE, TOKEN_OPEN, promptFor, promptRich, skipLabel, tutorialView, type PromptSettings } from '../../src/ui/tutorial-prompts';
+import { richHtml } from '../../src/ui/tutorial-ui';
+import { xrTutorialCard, xrTutorialPrompt } from '../../src/ui/xr-hud';
+import type { InputSource } from '../../src/types';
+
+const NO_INVERT = { throttle: false, yaw: false, pitch: false, roll: false };
+
+function s(over: Partial<Settings> = {}): PromptSettings {
+  return { stickMode: 2, throttleSource: 'stick', invert: NO_INVERT, touchThrottleCentre: true, ...over };
+}
+
+const SOURCES: InputSource[] = ['keyboard', 'gamepad', 'touch', 'xr'];
+const IDS = TUTORIAL_STEPS.map((x) => x.id);
+const text = (id: TutorialStepId, src: InputSource, st: PromptSettings, armed?: boolean): string => promptFor(id, src, st, { armed }).join(' | ');
+
+describe('mode-labels prompt helpers', () => {
+  it('buttonLabel follows the input manager bindings per source', () => {
+    expect(['arm', 'toggleMode', 'cycleCamera', 'confirm'].map((b) => buttonLabel(b as 'arm', 'keyboard'))).toEqual(['Space', 'M', 'C', 'Enter']);
+    expect(['arm', 'toggleMode', 'cycleCamera', 'confirm'].map((b) => buttonLabel(b as 'arm', 'gamepad'))).toEqual(['A', 'Y', 'RB', 'A']);
+    expect(['arm', 'toggleMode', 'cycleCamera', 'confirm'].map((b) => buttonLabel(b as 'arm', 'touch'))).toEqual(['ARM', 'MODE', 'CAM', 'Continue']);
+    expect(['arm', 'toggleMode', 'cycleCamera', 'confirm'].map((b) => buttonLabel(b as 'arm', 'xr'))).toEqual(['A', 'B', 'R-stick', 'A']);
+    expect(buttonLabel('arm', 'none')).toBe('Space');
+    // read from the binding tables: PlayStation pads name their shapes, the pause button its system name
+    expect(buttonLabel('arm', 'gamepad', 'DualSense Wireless Controller (STANDARD GAMEPAD Vendor: 054c)')).toBe('Cross');
+    expect(buttonLabel('pause', 'gamepad', 'Xbox Wireless Controller (STANDARD GAMEPAD Vendor: 045e)')).toBe('Menu');
+    expect(buttonLabel('pause', 'keyboard')).toBe('Esc');
+    expect(buttonLabel('pause', 'xr')).toBe('Y');
+    expect(pressVerb('touch')).toBe('Tap');
+    expect(pressVerb('gamepad')).toBe('Press');
+  });
+
+  it('channelDirLabel: keyboard keys per stick mode (WASD = left stick, arrows = right)', () => {
+    const m2 = s();
+    expect(['throttle', 'yaw', 'pitch', 'roll'].map((c) => channelDirLabel(m2, c as 'yaw', 1, 'keyboard'))).toEqual(['W', 'D', '↑', '→']);
+    expect(['throttle', 'yaw', 'pitch', 'roll'].map((c) => channelDirLabel(m2, c as 'yaw', -1, 'keyboard'))).toEqual(['S', 'A', '↓', '←']);
+    const m1 = s({ stickMode: 1 });
+    expect(['throttle', 'yaw', 'pitch', 'roll'].map((c) => channelDirLabel(m1, c as 'yaw', 1, 'keyboard'))).toEqual(['↑', 'D', 'W', '→']);
+    const m3 = s({ stickMode: 3 });
+    expect(['throttle', 'yaw', 'pitch', 'roll'].map((c) => channelDirLabel(m3, c as 'yaw', 1, 'keyboard'))).toEqual(['↑', '→', 'W', 'D']);
+    const m4 = s({ stickMode: 4 });
+    expect(['throttle', 'yaw', 'pitch', 'roll'].map((c) => channelDirLabel(m4, c as 'yaw', 1, 'keyboard'))).toEqual(['W', '→', '↑', 'D']);
+  });
+
+  it('channelDirLabel: sticks / thumbs / trigger, inverted channels swap direction', () => {
+    expect(channelDirLabel(s(), 'throttle', 1, 'gamepad')).toBe('Left stick ↑');
+    expect(channelDirLabel(s({ stickMode: 1 }), 'throttle', 1, 'gamepad')).toBe('Right stick ↑');
+    expect(channelDirLabel(s({ throttleSource: 'trigger' }), 'throttle', 1, 'gamepad')).toBe('Squeeze RT');
+    expect(channelDirLabel(s({ throttleSource: 'trigger' }), 'throttle', -1, 'gamepad')).toBe('Release RT');
+    // the trigger is a gamepad-only setting: touch / XR / keyboard still fly throttle on a stick
+    expect(channelDirLabel(s({ throttleSource: 'trigger' }), 'throttle', 1, 'touch')).toBe('Left thumb ↑');
+    expect(channelDirLabel(s({ throttleSource: 'trigger' }), 'throttle', 1, 'xr')).toBe('Left stick ↑');
+    expect(channelDirLabel(s({ throttleSource: 'trigger' }), 'throttle', 1, 'keyboard')).toBe('W');
+    expect(channelDirLabel(s(), 'yaw', 1, 'touch')).toBe('Left thumb →');
+    expect(channelDirLabel(s({ invert: { ...NO_INVERT, pitch: true } }), 'pitch', 1, 'keyboard')).toBe('↓');
+    expect(channelDirLabel(s({ invert: { ...NO_INVERT, roll: true } }), 'roll', 1, 'gamepad')).toBe('Right stick ←');
+    expect(channelDirLabel(s({ throttleSource: 'trigger', invert: { ...NO_INVERT, throttle: true } }), 'throttle', 1, 'gamepad')).toBe('Release RT');
+  });
+
+  it('channelSide maps channels to sticks, null for the RT throttle', () => {
+    expect(channelSide(s(), 'throttle', 'gamepad')).toBe('l');
+    expect(channelSide(s({ stickMode: 1 }), 'throttle', 'touch')).toBe('r');
+    expect(channelSide(s({ stickMode: 3 }), 'yaw', 'keyboard')).toBe('r');
+    expect(channelSide(s({ throttleSource: 'trigger' }), 'throttle', 'gamepad')).toBeNull();
+    expect(channelSide(s({ throttleSource: 'trigger' }), 'throttle', 'xr')).toBe('l');
+  });
+});
+
+describe('promptFor', () => {
+  it('every step has one or two non-empty lines for every source, mode and throttle source', () => {
+    for (const src of [...SOURCES, 'none'] as InputSource[]) {
+      for (const stickMode of [1, 2, 3, 4] as const) {
+        for (const throttleSource of ['stick', 'trigger'] as const) {
+          for (const id of IDS) {
+            for (const armed of [undefined, true, false]) {
+              const lines = promptFor(id, src, s({ stickMode, throttleSource }), { armed });
+              expect(lines.length, `${id} ${src}`).toBeGreaterThanOrEqual(1);
+              expect(lines.length).toBeLessThanOrEqual(2);
+              for (const l of lines) {
+                expect(l.trim()).not.toBe('');
+                expect(l).not.toMatch(/undefined|null|NaN/);
+              }
+            }
+          }
+        }
+      }
+    }
+  });
+
+  it('keyboard, mode 2', () => {
+    const st = s();
+    expect(text('welcome', 'keyboard', st)).toBe('Throttle W / S · Yaw A / D · Pitch ↑ / ↓ · Roll ← / → | Press Enter to start.');
+    // keys spring back with altitude hold: the arm key zeroes the throttle itself, letting go holds height
+    expect(text('arm', 'keyboard', st)).toContain('Press Space to arm.');
+    expect(text('arm', 'keyboard', st)).not.toContain('Throttle fully down');
+    expect(text('throttle', 'keyboard', st)).toContain('Hold W to climb past 1.5 m.');
+    expect(text('throttle', 'keyboard', st)).toContain('Let go of W to hold that height.');
+    expect(text('hover', 'keyboard', st)).toContain('No key held = hold height; tap W / S to adjust.');
+    expect(text('yaw', 'keyboard', st)).toContain('Yaw right (D) and left (A)');
+    expect(text('pitch-roll', 'keyboard', st)).toContain('Pitch (↑ / ↓) flies forward and back, roll (← / →) sideways.');
+    expect(text('land', 'keyboard', st)).toContain('Hold S to descend and touch down.');
+    expect(text('disarm', 'keyboard', st)).toContain('Press Space to disarm.');
+    expect(text('modes', 'keyboard', st)).toContain('Press M for ACRO');
+    expect(text('cameras', 'keyboard', st)).toContain('Press C to switch views');
+  });
+
+  it('keyboard, mode 1: throttle on the arrows, pitch on W / S', () => {
+    const st = s({ stickMode: 1 });
+    expect(text('welcome', 'keyboard', st)).toContain('Throttle ↑ / ↓ · Yaw A / D · Pitch W / S · Roll ← / →');
+    expect(text('throttle', 'keyboard', st)).toContain('Hold ↑ to climb');
+    expect(text('land', 'keyboard', st)).toContain('Hold ↓ to descend');
+    expect(text('pitch-roll', 'keyboard', st)).toContain('Pitch (W / S)');
+    expect(text('throttle', 'keyboard', st)).not.toContain('(W)');
+  });
+
+  it('gamepad, modes 1 and 2, and RT throttle', () => {
+    expect(text('welcome', 'gamepad', s())).toBe('Left stick: ↕ Throttle · ↔ Yaw · Right stick: ↕ Pitch · ↔ Roll | Press A to start.');
+    expect(text('welcome', 'gamepad', s({ stickMode: 1 }))).toContain('Left stick: ↕ Pitch · ↔ Yaw · Right stick: ↕ Throttle · ↔ Roll');
+    expect(text('arm', 'gamepad', s())).toContain('Throttle fully down (Left stick ↓), then press A.');
+    expect(text('arm', 'gamepad', s({ stickMode: 1 }))).toContain('(Right stick ↓)');
+    expect(text('throttle', 'gamepad', s({ stickMode: 1 }))).toContain('Throttle up (Right stick ↑)');
+    expect(text('yaw', 'gamepad', s({ stickMode: 1 }))).toContain('Yaw right (Left stick →)');
+    expect(text('pitch-roll', 'gamepad', s({ stickMode: 1 }))).toContain('Pitch (Left stick ↑ / ↓) flies forward and back, roll (Right stick ← / →) sideways.');
+    expect(text('pitch-roll', 'gamepad', s({ stickMode: 2, throttleSource: 'trigger' }))).toContain('Pitch (Right stick ↑ / ↓)');
+    expect(text('hover', 'gamepad', s({ throttleSource: 'trigger' }))).toContain('(Squeeze RT / Release RT)');
+    expect(text('throttle', 'gamepad', s({ throttleSource: 'trigger' }))).toContain('Throttle up (Squeeze RT)');
+    expect(text('arm', 'gamepad', s({ throttleSource: 'trigger' }))).toContain('(Release RT)');
+    expect(text('welcome', 'gamepad', s({ throttleSource: 'trigger' }))).toContain('RT is throttle');
+    expect(text('modes', 'gamepad', s())).toContain('Press Y for ACRO');
+    expect(text('cameras', 'gamepad', s())).toContain('Press RB');
+  });
+
+  it('touch points at the on-screen ARM / MODE / CAM buttons and thumbs; centring throttle holds height', () => {
+    expect(text('welcome', 'touch', s())).toContain('Tap Continue to start.');
+    expect(text('welcome', 'touch', s())).toContain('Left thumb: ↕ Throttle');
+    // RT throttle is a gamepad setting: the touch summary still names the throttle thumb
+    expect(text('welcome', 'touch', s({ throttleSource: 'trigger' }))).toContain('Left thumb: ↕ Throttle');
+    expect(text('welcome', 'xr', s({ throttleSource: 'trigger' }))).not.toContain('RT');
+    // auto-centre touch throttle is latched at zero for take-off: arming is just the button
+    expect(text('arm', 'touch', s())).toContain('Tap ARM to arm.');
+    expect(text('arm', 'touch', s({ touchThrottleCentre: false }))).toContain('Throttle fully down (Left thumb ↓), then tap ARM.');
+    expect(text('arm', 'touch', s({ stickMode: 1, touchThrottleCentre: false }))).toContain('(Right thumb ↓)');
+    expect(text('throttle', 'touch', s())).toContain('Let go of the stick to hold that height.');
+    expect(text('throttle', 'touch', s({ touchThrottleCentre: false }))).toContain('Ease off');
+    expect(text('modes', 'touch', s())).toContain('Tap MODE');
+    expect(text('cameras', 'touch', s())).toContain('Tap CAM');
+  });
+
+  it('Quest Touch: A / B / R-stick, thumbsticks, centring throttle', () => {
+    expect(text('welcome', 'xr', s())).toContain('Press A to start.');
+    expect(text('arm', 'xr', s())).toContain('Let go of the left stick, then press A.');
+    expect(text('arm', 'xr', s({ stickMode: 1 }))).toContain('Let go of the right stick');
+    expect(text('throttle', 'xr', s())).toContain('Throttle up (Left stick ↑)');
+    expect(text('hover', 'xr', s())).toContain('centred throttle stick holds');
+    expect(text('modes', 'xr', s())).toContain('Press B for ACRO');
+    expect(text('cameras', 'xr', s())).toContain('Press R-stick');
+  });
+
+  it('flying steps tell a disarmed pilot how to re-arm', () => {
+    for (const id of ['throttle', 'hover', 'yaw', 'pitch-roll', 'land'] as const) {
+      expect(promptFor(id, 'keyboard', s(), { armed: false })[1]).toBe('Disarmed: press Space to arm again.');
+      expect(promptFor(id, 'keyboard', s(), { armed: true })[1]).not.toContain('Disarmed');
+    }
+    expect(promptFor('hover', 'xr', s(), { armed: false })[1]).toBe('Disarmed: let go of the left stick, then press A.');
+    expect(promptFor('hover', 'touch', s(), { armed: false })[1]).toBe('Disarmed: tap ARM to arm again.');
+    expect(promptFor('hover', 'touch', s({ touchThrottleCentre: false }), { armed: false })[1]).toBe('Disarmed: throttle fully down (Left thumb ↓), then tap ARM.');
+  });
+
+  it('skip labels per source', () => {
+    // no hold-to-skip: pad and Quest skip from the pause menu
+    expect(SOURCES.map((src) => skipLabel(src))).toEqual(['Esc to skip', 'Start › Skip tutorial', 'Skip', 'Y › Skip tutorial']);
+    expect(skipLabel('gamepad', 'Xbox Wireless Controller (045e)')).toBe('Menu › Skip tutorial');
+    expect(SOURCES.map((src) => skipLabel(src)).join(' ')).not.toMatch(/hold/i);
+  });
+});
+
+describe('tutorialView', () => {
+  it('maps the step focus to stick sides for the stick mode, RT as trigger', () => {
+    const m = new TutorialMachine();
+    m.start('angle', 4); // hover: throttle
+    expect(tutorialView(m, 'gamepad', s(), true).focus).toEqual({ sides: ['l'], button: null, trigger: false });
+    expect(tutorialView(m, 'gamepad', s({ stickMode: 1 }), true).focus).toEqual({ sides: ['r'], button: null, trigger: false });
+    expect(tutorialView(m, 'gamepad', s({ throttleSource: 'trigger' }), true).focus).toEqual({ sides: [], button: null, trigger: true });
+    m.start('angle', 6); // pitch & roll: right stick in mode 2, left in mode 3, split in mode 1
+    expect(tutorialView(m, 'touch', s(), true).focus.sides).toEqual(['r']);
+    expect(tutorialView(m, 'touch', s({ stickMode: 3 }), true).focus.sides).toEqual(['l']);
+    expect(tutorialView(m, 'touch', s({ stickMode: 1 }), true).focus.sides.sort()).toEqual(['l', 'r']);
+    m.start('angle', 2);
+    expect(tutorialView(m, 'touch', s(), false).focus).toEqual({ sides: ['l'], button: 'arm', trigger: false });
+  });
+
+  it('carries number, title, labelled parts, re-arm line and skip label', () => {
+    const m = new TutorialMachine();
+    m.start('angle', 5);
+    const v = tutorialView(m, 'keyboard', { ...DEFAULT_SETTINGS }, false);
+    expect(v).toMatchObject({ id: 'yaw', number: 5, total: 12, title: 'Yaw: turn on the spot', phase: 'running', skipLabel: 'Esc to skip', source: 'keyboard' });
+    expect(v.parts.map((p) => p.label)).toEqual(['Right', 'Left']);
+    expect(v.lines[1]).toContain('Disarmed');
+    expect(v.rearm).toBe(true);
+    expect(tutorialView(m, 'keyboard', s(), true).rearm).toBe(false);
+    m.start('angle', 9);
+    expect(tutorialView(m, 'keyboard', s(), false).lines[1]).not.toContain('Disarmed');
+    expect(tutorialView(m, 'keyboard', s(), false).rearm).toBe(false);
+    m.start('angle', 11);
+    expect(tutorialView(m, 'keyboard', s(), false).rearm).toBe(false);
+  });
+});
+
+describe('xrTutorialCard', () => {
+  it('one card layout facing the pilot: step label, title, instruction, drawn progress, the skip line', () => {
+    const m = new TutorialMachine();
+    m.start('angle');
+    const w = xrTutorialCard(tutorialView(m, 'xr', s(), false));
+    expect(w).toMatchObject({ layout: 'card', kicker: 'STEP 1 / 12', title: 'Welcome, pilot', hint: 'A Start · Y › Skip tutorial', progress: undefined });
+    m.start('angle', 3);
+    m.update({ dt: 0.1, drone: { velocity: { x: 0, y: 0, z: 0 }, orientation: { x: 0, y: 0, z: 0, w: 1 } }, agl: 0.75, armed: true, flightMode: 'angle', cameraMode: 'los', source: 'xr', ringsPassed: 0, confirm: false });
+    const f = xrTutorialCard(tutorialView(m, 'xr', s(), true));
+    expect(f).toMatchObject({ layout: 'card', kicker: 'STEP 3 / 12', title: 'Take off', sub: 'Throttle up (Left stick ↑) to climb past 1.5 m.', hint: 'Y › Skip tutorial' });
+    expect(f.progress).toBeCloseTo(0.5, 6);
+    // the instruction text carries no text-drawn bar any more
+    expect(`${f.sub}${f.hint}`).not.toMatch(/[●○%]/);
+  });
+
+  it('a hint adds the second line, tags the step and turns amber', () => {
+    const v = { ...tutorialView(new TutorialMachine(), 'xr', s(), true), id: 'hover' as const, hint: true, lines: ['a', 'b'] };
+    const c = xrTutorialCard(v);
+    expect(c.sub).toBe('a b');
+    expect(c.kicker).toContain('HINT');
+    expect(c.accent).toBe('#ffc861');
+    expect(c.hint).not.toMatch(/skipping|hold/i);
+  });
+
+  it('first-run offer card: A Start · X Skip at eye level', () => {
+    expect(xrTutorialPrompt()).toMatchObject({ layout: 'menu', title: 'NEW TO FPV?', hint: 'A Start · X Skip' });
+  });
+
+  it('done card: A Start Training · X Menu', () => {
+    const m = new TutorialMachine();
+    m.start('angle', 11);
+    const base = { dt: 0.1, drone: { velocity: { x: 0, y: 0, z: 0 }, orientation: { x: 0, y: 0, z: 0, w: 1 } }, agl: 1, armed: true, flightMode: 'angle' as const, cameraMode: 'fpv' as const, source: 'xr' as const, confirm: false };
+    m.update({ ...base, ringsPassed: 0 });
+    m.update({ ...base, ringsPassed: 1 });
+    const c = xrTutorialCard(tutorialView(m, 'xr', s(), true));
+    expect(c).toMatchObject({ layout: 'card', title: 'Tutorial complete', hint: 'A Start Training · X Menu', sub: 'You flew your first ring.' });
+  });
+});
+
+describe('prompt tokens (glyph chips on the DOM card)', () => {
+  const tk = (t: string): string => `${TOKEN_OPEN}${t}${TOKEN_CLOSE}`;
+  it('every key / button / stick in the copy is a token; promptFor is the same text without them', () => {
+    expect(promptRich('arm', 'keyboard', s())[0]).toBe(`Press ${tk('Space')} to arm.`);
+    expect(promptRich('throttle', 'gamepad', s(), { armed: true })[0]).toBe(`Throttle up (${tk('Left stick ↑')}) to climb past 1.5 m.`);
+    expect(promptRich('hover', 'touch', s({ touchThrottleCentre: false }), { armed: true })[1]).toBe(`Small throttle corrections (${tk('Left thumb ↑')} / ${tk('↓')}).`);
+    for (const src of ['keyboard', 'gamepad', 'touch', 'xr'] as const) {
+      for (const id of ['welcome', 'arm', 'throttle', 'hover', 'yaw', 'pitch-roll', 'land', 'disarm', 'modes', 'cameras', 'ring'] as const) {
+        const rich = promptRich(id, src, s(), { armed: false });
+        expect(rich.map((l) => l.replace(/[\uE000\uE001]/g, ''))).toEqual(promptFor(id, src, s(), { armed: false }));
+        for (const l of rich) expect(l.split(TOKEN_OPEN).length, `${id} ${src}: ${l}`).toBe(l.split(TOKEN_CLOSE).length);
+      }
+    }
+  });
+
+  it('the DOM card draws tokens as glyphs: keycaps, coloured pad faces, stick + arrow, touch buttons', () => {
+    expect(richHtml(`Press ${tk('Space')} to arm.`, 'keyboard', null)).toMatch(/^Press <kbd class="ds-g ds-g--key is-wide"[^>]*>Space<\/kbd> to arm\.$/);
+    expect(richHtml(`Press ${tk('A')} to arm.`, 'gamepad', 'Xbox Wireless Controller (045e)')).toContain('ds-g--face is-green');
+    expect(richHtml(`Press ${tk('Cross')} to arm.`, 'gamepad', 'DualSense Wireless Controller (054c)')).toContain('is-cross');
+    const stick = richHtml(`Throttle up (${tk('Left stick ↑')})`, 'gamepad', null);
+    expect(stick).toContain('ds-g--stick');
+    expect(stick).toContain('aria-label="Left stick up"');
+    expect(richHtml(`Tap ${tk('ARM')}`, 'touch', null)).toContain('ds-g--touch');
+    // copy around the tokens is escaped
+    expect(richHtml('a < b', 'keyboard', null)).toBe('a &lt; b');
+  });
+});

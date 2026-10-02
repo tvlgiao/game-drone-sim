@@ -1,15 +1,15 @@
 /** Flight controller + physics world wired together at the fixed physics rate. */
 import type { Vector3 } from 'three';
-import type { Contact, ControlInput, LevelDef } from '../types';
+import type { Contact, ControlInput } from '../types';
 import { FlightController } from '../control/flight-controller';
 import { DEFAULT_DRONE, type DroneParams } from './drone-params';
-import { PhysicsWorld } from './physics-world';
+import { PhysicsWorld, type PhysicsLevel } from './physics-world';
 
 export class Simulation {
   readonly world: PhysicsWorld;
   readonly fc: FlightController;
 
-  constructor(level: LevelDef, params: DroneParams = DEFAULT_DRONE, seed = 1) {
+  constructor(level: PhysicsLevel, params: DroneParams = DEFAULT_DRONE, seed = 1) {
     this.world = new PhysicsWorld(level, params);
     this.fc = new FlightController(params, seed);
   }

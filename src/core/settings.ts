@@ -6,6 +6,14 @@ import type { AxisRates, FlightMode, QualityTier, RateProfile } from '../types';
 export type StickMode = 1 | 2 | 3 | 4;
 /** 'stick' = the throttle stick of the selected mode; 'trigger' = right trigger (RT). */
 export type ThrottleSource = 'stick' | 'trigger';
+/** What mouse X flies (mouse Y is always pitch); 'yaw' moves roll onto the yaw keys. */
+export type MouseXAxis = 'roll' | 'yaw';
+/**
+ * Mouse stick under pointer lock. 'hold' = absolute: the stick stays where the mouse left it (tilt held);
+ * 'spring' = relative: motion deflects it and it re-centres as soon as the mouse stops (rates, attitude kept);
+ * 'auto' = hold in Angle mode, spring in Acro.
+ */
+export type MouseStickMode = 'auto' | 'hold' | 'spring';
 export type RatePreset = 'beginner' | 'freestyle' | 'race' | 'custom';
 export type RateAxis = keyof AxisRates;
 export type RateField = keyof RateProfile;
@@ -56,6 +64,16 @@ export interface Settings {
   touchThrottleCentre: boolean;
   /** touch sticks stay at fixed positions instead of spawning under the thumb */
   touchSticksFixed: boolean;
+  /** mouse flight: multiplier on the stick deflection per pixel of motion (1 = 100 %) */
+  mouseSensitivity: number;
+  /** false: pushing the mouse away tilts the nose down, like pushing a stick forward */
+  mouseInvertY: boolean;
+  mouseXAxis: MouseXAxis;
+  mouseStick: MouseStickMode;
+  /** cubic expo on the mouse stick (0 = linear) */
+  mouseExpo: number;
+  /** radius around centre that reads as centred */
+  mouseDeadzone: number;
 }
 
 export const SETTINGS_KEY = 'drone-sim.settings';
@@ -88,6 +106,12 @@ export const DEFAULT_SETTINGS: Readonly<Settings> = Object.freeze({
   deadzone: 0.05,
   touchThrottleCentre: true,
   touchSticksFixed: false,
+  mouseSensitivity: 1,
+  mouseInvertY: false,
+  mouseXAxis: 'roll',
+  mouseStick: 'auto',
+  mouseExpo: 0.2,
+  mouseDeadzone: 0.03,
 });
 
 /** Allowed values / numeric ranges, shared with the settings screens. */
@@ -109,6 +133,11 @@ export const SETTINGS_OPTIONS = {
   fovDeg: { min: 80, max: 130, step: 5 },
   volume: { min: 0, max: 1, step: 0.1 },
   deadzone: { min: 0, max: 0.25, step: 0.01 },
+  mouseSensitivity: { min: 0.5, max: 3, step: 0.1 },
+  mouseXAxis: ['roll', 'yaw'] as const,
+  mouseStick: ['auto', 'hold', 'spring'] as const,
+  mouseExpo: { min: 0, max: 1, step: 0.05 },
+  mouseDeadzone: { min: 0, max: 0.2, step: 0.01 },
 };
 
 /** Old stored values → current ones. */
@@ -263,6 +292,12 @@ export function validateSettings(raw: unknown): Settings {
     deadzone: num(r.deadzone, o.deadzone, d.deadzone),
     touchThrottleCentre: bool(r.touchThrottleCentre, d.touchThrottleCentre),
     touchSticksFixed: bool(r.touchSticksFixed, d.touchSticksFixed),
+    mouseSensitivity: num(r.mouseSensitivity, o.mouseSensitivity, d.mouseSensitivity),
+    mouseInvertY: bool(r.mouseInvertY, d.mouseInvertY),
+    mouseXAxis: pick(r.mouseXAxis, o.mouseXAxis, d.mouseXAxis),
+    mouseStick: pick(r.mouseStick, o.mouseStick, d.mouseStick),
+    mouseExpo: num(r.mouseExpo, o.mouseExpo, d.mouseExpo),
+    mouseDeadzone: num(r.mouseDeadzone, o.mouseDeadzone, d.mouseDeadzone),
   };
 }
 

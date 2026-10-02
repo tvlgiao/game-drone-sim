@@ -134,27 +134,48 @@ describe('channel inversion', () => {
 
 describe('VirtualSticks (keyboard)', () => {
   const K: VirtualKeys = { lUp: false, lDown: false, lLeft: false, lRight: false, rUp: false, rDown: false, rLeft: false, rRight: false };
-  it('mode 2: W/S throttle ramps at 0.6/s and holds; A/D and arrows self-centre', () => {
+  it('mode 2: every axis, throttle included, springs back to centre within 0.15 s of release', () => {
     const v = new VirtualSticks();
     for (let i = 0; i < 50; i++) v.update(0.01, { ...K, lUp: true, lRight: true, rUp: true }, 'ly');
-    expect(v.throttle).toBeCloseTo(0.3, 5);
+    expect(v.throttle).toBe(1);
     expect(v.pos.lx).toBe(1);
     expect(v.pos.ry).toBe(1);
-    for (let i = 0; i < 30; i++) v.update(0.01, K, 'ly');
-    expect(v.throttle).toBeCloseTo(0.3, 5);
+    for (let i = 0; i < 6; i++) v.update(0.01, K, 'ly');
+    expect(v.throttle).toBeGreaterThan(0.6); // smooth, not a snap
+    for (let i = 0; i < 9; i++) v.update(0.01, K, 'ly');
+    expect(v.throttle).toBe(0.5); // centre = hover under altitude hold
     expect(v.pos.lx).toBe(0);
     expect(v.pos.ry).toBe(0);
+    for (let i = 0; i < 50; i++) v.update(0.01, { ...K, lDown: true }, 'ly');
+    expect(v.throttle).toBe(0);
+    for (let i = 0; i < 15; i++) v.update(0.01, K, 'ly');
+    expect(v.throttle).toBe(0.5);
   });
-  it('mode 1: arrow ↑/↓ is the held throttle, W/S self-centres (pitch)', () => {
+  it('take-off latch: throttle reads zero until the throttle-up key, the down key keeps it latched', () => {
+    const v = new VirtualSticks();
+    expect(v.latched).toBe(true);
+    for (let i = 0; i < 30; i++) v.update(0.01, i < 10 ? { ...K, lDown: true } : K, 'ly');
+    expect(v.throttle).toBe(0);
+    expect(v.latched).toBe(true);
+    v.update(0.01, { ...K, lUp: true }, 'ly');
+    expect(v.latched).toBe(false);
+    for (let i = 0; i < 30; i++) v.update(0.01, K, 'ly');
+    expect(v.throttle).toBe(0.5);
+    v.latchTakeoff();
+    expect(v.throttle).toBe(0);
+    v.update(0.01, K, 'ly');
+    expect(v.throttle).toBe(0);
+  });
+  it('mode 1: arrow ↑/↓ is the throttle, W/S self-centres (pitch)', () => {
     const v = new VirtualSticks();
     v.update(0.01, K, 'ry');
     expect(v.pos.ry).toBe(-1);
     expect(v.pos.ly).toBe(0);
     for (let i = 0; i < 100; i++) v.update(0.01, { ...K, rUp: true, lUp: true }, 'ry');
-    expect(v.throttle).toBeCloseTo(0.6, 5);
+    expect(v.throttle).toBe(1);
     expect(v.pos.ly).toBe(1);
     for (let i = 0; i < 30; i++) v.update(0.01, K, 'ry');
-    expect(v.throttle).toBeCloseTo(0.6, 5);
+    expect(v.throttle).toBe(0.5);
     expect(v.pos.ly).toBe(0);
   });
   it('axis rise is smoothed over ~0.12 s', () => {
@@ -218,7 +239,7 @@ describe('InputManager stick modes + remap', () => {
     expect(im.poll(1 / 60).pad!.axes).toBe(axesRef); // reused, no per-frame allocation
   });
 
-  it('keyboard is mode-aware: mode 1 ↑ ramps throttle, W is pitch', () => {
+  it('keyboard is mode-aware: mode 1 ↑ is throttle, W is pitch', () => {
     const win = fakeWindow([]);
     const im = new InputManager(win, settings({ stickMode: 1 }));
     const key = (type: string, code: string) => win.dispatchEvent(Object.assign(new Event(type), { code }));
@@ -227,12 +248,12 @@ describe('InputManager stick modes + remap', () => {
     let f = im.poll(0.01);
     for (let i = 0; i < 49; i++) f = im.poll(0.01);
     expect(f.source).toBe('keyboard');
-    expect(f.control.throttle).toBeCloseTo(0.3, 2);
+    expect(f.control.throttle).toBe(1);
     expect(f.control.pitch).toBe(1);
     key('keyup', 'ArrowUp');
     key('keyup', 'KeyW');
     for (let i = 0; i < 30; i++) f = im.poll(0.01);
-    expect(f.control.throttle).toBeCloseTo(0.3, 2);
+    expect(f.control.throttle).toBe(0.5);
     expect(f.control.pitch).toBe(0);
     im.dispose();
   });

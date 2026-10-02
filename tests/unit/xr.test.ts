@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { DEFAULT_SETTINGS } from '../../src/core/settings';
 import * as THREE from 'three';
 import { XR_TARGET_FPS, isQuestBrowser, tuneXrSession, xrSessionObscured } from '../../src/core/xr';
-import { XR_CAP_RATIO, XR_CARD_H, XR_CARD_PX, XR_CARD_TEXT_W, XR_CARD_W, XR_HUD_DOWN, XR_MENU_HINT_PX, layoutCard, wrapHint, xrPanelPose } from '../../src/render/xr-panel';
+import { XR_CAP_RATIO, XR_CARD_H, XR_CARD_PX, XR_CARD_TEXT_W, XR_CARD_W, XR_HUD_DOWN, XR_MENU_HINT_PX, XR_TUT_DIST, layoutCard, measureRuns, wrapHint, xrPanelPose, xrTextRuns } from '../../src/render/xr-panel';
 import { InputManager } from '../../src/input/input-manager';
 import { XR_BTN, XR_YAW_SCALE, XrControllers, shapeXrControl, xrExpo, type XrSourceLike } from '../../src/input/xr-controllers';
 import { actualRate, RATE_PRESETS } from '../../src/control/rates';
@@ -394,5 +394,60 @@ describe('XR source while a controller loses tracking', () => {
     }
     srcs = [touch('left'), touch('right')];
     expect(im.poll(1 / 72).source).toBe('xr');
+  });
+});
+
+describe('VR tutorial card and button glyphs', () => {
+  it('the tutorial card sits ~1.2 m out just under eye level, facing the eye', () => {
+    const head = new THREE.Vector3(0, 1.6, 0);
+    const pos = new THREE.Vector3();
+    const rot = new THREE.Euler();
+    xrPanelPose('card', head, pos, rot);
+    expect(XR_TUT_DIST).toBeCloseTo(1.2, 5);
+    expect(head.z - pos.z).toBeCloseTo(1.2, 5);
+    expect(head.y - pos.y).toBeGreaterThan(0);
+    expect(head.y - pos.y).toBeLessThan(0.2);
+    const n = new THREE.Vector3(0, 0, 1).applyEuler(rot);
+    expect(n.dot(head.clone().sub(pos).normalize())).toBeGreaterThan(0.999);
+  });
+
+  it('A / B / X / Y leading a hint part become drawn glyphs; other text stays text', () => {
+    expect(xrTextRuns('A Race · X Free fly · B Exit VR')).toEqual([
+      { glyph: 'A', text: 'Race' },
+      { glyph: null, text: ' · ' },
+      { glyph: 'X', text: 'Free fly' },
+      { glyph: null, text: ' · ' },
+      { glyph: 'B', text: 'Exit VR' },
+    ]);
+    expect(xrTextRuns('Y › Skip tutorial')).toEqual([{ glyph: 'Y', text: '› Skip tutorial' }]);
+    expect(xrTextRuns('Arm the motors')).toEqual([{ glyph: null, text: 'Arm the motors' }]);
+    // a glyph is wider than its letter: the measure the layout fits with must count it
+    expect(measureRuns('A Race', 50, (t) => t.length * 25)).toBeGreaterThan(6 * 25);
+  });
+
+  it('wrapping never splits a parenthesised control or puts an arrow at a line start', () => {
+    const lines = wrapHint('Throttle up (Left stick ↑) to climb past 1.5 m.', (t) => t.length * 10, 260);
+    expect(lines).toHaveLength(2);
+    for (const l of lines) {
+      expect(l.split('(').length).toBe(l.split(')').length);
+      expect(l).not.toMatch(/^[↑↓←→]/);
+    }
+  });
+
+  it('a progress value is drawn as a bar line between the instruction and the skip line', () => {
+    const measure = (t: string, _w: number, px: number): number => t.length * px * 0.5;
+    const lines = layoutCard({ layout: 'card', kicker: 'STEP 3 / 12', title: 'Take off', sub: 'Throttle up', hint: 'Y › Skip tutorial', progress: 0.4 }, measure);
+    const bar = lines.findIndex((l) => l.bar !== undefined);
+    expect(lines[bar]!.bar).toBe(0.4);
+    expect(lines[bar - 1]!.text).toBe('Throttle up');
+    expect(lines[bar + 1]!.text).toBe('Y › Skip tutorial');
+    expect(lines[0]!.text).toBe('STEP 3 / 12');
+  });
+
+  it('a toast never covers a menu card\'s button line (it takes the sub line); the main card offers the tutorial', () => {
+    const paused = xrHudContent(state({ race: race({ status: 'paused' }), toast: 'Controller connected' }));
+    expect(paused.hint).toContain('A Resume');
+    expect(paused.sub).toBe('Controller connected');
+    expect(xrHudContent(state({ race: race({ status: 'menu' }) })).hint).toContain('R-stick click Tutorial');
   });
 });

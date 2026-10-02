@@ -1,5 +1,9 @@
 /** Offline play: after one online visit the service worker serves the whole game with no network. */
 import { expect, test } from '@playwright/test';
+import { skipTutorialOffer } from './seed';
+
+// the first-run tutorial offer is covered by tutorial.spec.ts; here it would cover the menus
+test.beforeEach(({ context }) => skipTutorialOffer(context));
 
 type W = { __drone?: { race: { status: string }; renders: number; action: (a: { type: string }) => void } };
 

@@ -130,7 +130,7 @@ const fakeAxes = [0, 0, 0, 0, -1, -1];
 const fakeButtons = new Array<number>(17).fill(0);
 const fakeInput: InputFrame = {
   control: { throttle: 0, yaw: 0, pitch: 0, roll: 0 },
-  buttons: { arm: false, toggleMode: false, cycleCamera: false, reset: false, pause: false, confirm: false },
+  buttons: { arm: false, toggleMode: false, cycleCamera: false, reset: false, pause: false, confirm: false, headingArrow: false, recenter: false },
   nav: { up: false, down: false, left: false, right: false, back: false },
   source: 'gamepad',
   gamepadId: 'Xbox Wireless Controller (STANDARD GAMEPAD Vendor: 045e Product: 0b13)',

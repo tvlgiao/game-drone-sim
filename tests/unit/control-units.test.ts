@@ -108,6 +108,41 @@ describe('quad-X mixer with airmode', () => {
     expect(o[1] - o[0]).toBeCloseTo(0.3, 12); // rear − front = 2·pitch
   });
 
+  it('a boost cap limits how far airmode lifts the collective; the differential shrinks to fit instead', () => {
+    const m = new Mixer();
+    const o = [...m.mix(0, 0, 0.5, 0, floor, 0.06)];
+    expect(m.saturated).toBe(true);
+    expect(Math.min(...o)).toBeCloseTo(floor, 12);
+    expect(o.reduce((a, b) => a + b, 0) / 4).toBeCloseTo(floor + 0.06, 12);
+    expect(o[1] - o[0]).toBeGreaterThan(0.1); // rear − front: still pitching
+    // uncapped (Infinity, the default) the same command lifts the mean to half thrust
+    const u = [...m.mix(0, 0, 0.5, 0, floor)];
+    expect(u.reduce((a, b) => a + b, 0) / 4).toBeCloseTo((1 + floor) / 2, 12);
+    // a cap that is not reached changes nothing
+    expect([...m.mix(0, 0.02, 0, 0, floor, 0.06)]).toEqual([...m.mix(0, 0.02, 0, 0, floor)]);
+  });
+
+  it('the boost cap only ever shrinks the differential (scale in [0, 1]), never amplifies or flips it', () => {
+    const m = new Mixer();
+    let seed = 7;
+    const rnd = (): number => ((seed = (seed * 1103515245 + 12345) % 2147483648) / 2147483648);
+    for (let i = 0; i < 20000; i++) {
+      const thr = rnd() < 0.3 ? 0 : rnd();
+      const r = (rnd() - 0.5) * 2;
+      const p = (rnd() - 0.5) * 2;
+      const y = (rnd() - 0.5) * 2;
+      const boost = [0, 1e-9, 0.06, 0.3][i % 4]!;
+      const capped = [...m.mix(thr, r, p, y, floor, boost)];
+      const free = [...m.mix(thr, r, p, y, floor)];
+      const spread = (o: number[]): number => Math.max(...o) - Math.min(...o);
+      expect(spread(capped)).toBeLessThanOrEqual(spread(free) + 1e-9);
+      // same ordering of motors: the differential keeps its sign
+      const ord = (o: number[]): number[] => o.map((v, k) => [v, k] as const).sort((a, b) => a[0] - b[0]).map((x) => x[1]);
+      if (spread(capped) > 1e-6) expect(ord(capped)).toEqual(ord(free));
+      for (const v of capped) expect(v).toBeGreaterThanOrEqual(floor - 1e-12);
+    }
+  });
+
   it('oversized commands are scaled keeping the roll:pitch ratio; yaw is sacrificed first', () => {
     const m = new Mixer();
     const o = [...m.mix(0.5, 0.6, 0.3, 0.4, floor)];

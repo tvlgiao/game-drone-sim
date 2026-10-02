@@ -1,19 +1,26 @@
 /** In-flight HUD + menu screens as a DOM overlay. update() is cheap enough to call every frame. */
 import './styles.css';
-import { DEFAULT_SETTINGS, type Settings } from '../core/settings';
-import type { CameraMode, DroneState, FlightMode, GameEvent, InputFrame, InputSource, NavEvents, QualityTier, RaceSnapshot, RaceStatus } from '../types';
+import { DEFAULT_SETTINGS, defaultStorage, type Settings } from '../core/settings';
+import type { CameraMode, DroneState, FlightMode, GameEvent, InputFrame, InputSource, LevelId, NavEvents, QualityTier, RaceSnapshot, RaceStatus } from '../types';
 import { formatDelta, formatTime } from './format';
 import { ICON_GAMEPAD, ICON_KEYBOARD, ICON_NONE, ICON_TOUCH } from './icons';
+import type { LevelCard } from './level-select';
 import { Menus, type FinishData, type ScreenName, type UiAction } from './menus';
 import { throttleSlot } from '../input/stick';
 import { stickShort, throttleControl, throttleDownHint } from './mode-labels';
+import { KEY_STICKS, type InputExtras } from '../input/input-manager';
+import { isCanvas, pointerLockSupported, releasePointerLock, requestPointerLock } from '../input/mouse';
+import { ACTION_LABEL, actionGlyphs, channelHints, glyphHtml, glyphsHtml, hintScheme, keyCluster, keyGlyph, padGlyph, type HintAction, type HintScheme } from './input-glyphs';
+import { CH_NAME } from './mode-labels';
+import { GP } from '../input/gamepad';
 
 export type { UiAction, ScreenName, FinishData } from './menus';
 
 export interface HudFrame {
   race: RaceSnapshot;
   drone: DroneState;
-  input: InputFrame;
+  /** the input manager's frame carries the hint extras; previews / tests may leave them out */
+  input: InputFrame & Partial<InputExtras>;
   fps: number;
   mode: FlightMode;
   camera: CameraMode;
@@ -26,8 +33,21 @@ export interface HudFrame {
 /** Numeric text refresh interval (ms) — ~20 Hz is plenty for humans and avoids DOM churn at 120 fps. */
 const TEXT_INTERVAL = 50;
 const STICK_TRAVEL = 0.36; // fraction of the stick-well diameter the dot can travel from centre
+/** mouse stick dot travel in % of the dot (dot = 1/6 of the circle, edge at 0.42 of the diameter) */
+const MOUSE_TRAVEL = 0.42 * 600;
 const CAMERA_LABEL: Record<CameraMode, string> = { fpv: 'FPV', chase: 'CHASE', los: 'LOS' };
 const CELLS = 4;
+/** localStorage: 'open' / 'closed' once the pilot has seen (or toggled) the Controls legend */
+export const LEGEND_STORE_KEY = 'drone-sim.controls-legend';
+const FLIGHT_STATES: ReadonlySet<RaceStatus> = new Set(['countdown', 'racing', 'freefly', 'crashed']);
+const SCHEME_NAME: Record<HintScheme, string> = {
+  keyboard: 'Keyboard',
+  xbox: 'Xbox',
+  playstation: 'PlayStation',
+  generic: 'Gamepad',
+  quest: 'Quest Touch',
+  touch: 'Touch',
+};
 
 type Ref =
   | 'time'
@@ -40,6 +60,7 @@ type Ref =
   | 'pips'
   | 'split'
   | 'mode'
+  | 'modeText'
   | 'cam'
   | 'armed'
   | 'armedText'
@@ -63,7 +84,18 @@ type Ref =
   | 'lblL'
   | 'lblR'
   | 'flash'
-  | 'toasts';
+  | 'toasts'
+  | 'gArm'
+  | 'gMode'
+  | 'gCam'
+  | 'gThr'
+  | 'binds'
+  | 'keysL'
+  | 'keysR'
+  | 'cmap'
+  | 'mstick'
+  | 'mdot'
+  | 'mlbl';
 
 const HUD_HTML = `
 <div class="ds-hud" aria-hidden="false">
@@ -82,12 +114,14 @@ const HUD_HTML = `
     <div class="ds-split" data-r="split"></div>
   </div>
   <div class="ds-hud__tr">
-    <span class="ds-chip ds-armed" data-r="armed"><i class="ds-dot"></i><span data-r="armedText">DISARMED</span></span>
-    <span class="ds-chip ds-chip--mode" data-r="mode">ANGLE</span>
-    <span class="ds-chip ds-chip--cam" data-r="cam">FPV</span>
+    <span class="ds-chip ds-armed" data-r="armed"><span class="ds-chip__g" data-r="gArm"></span><i class="ds-dot"></i><span data-r="armedText">DISARMED</span></span>
+    <span class="ds-chip ds-chip--mode" data-r="mode"><span class="ds-chip__g" data-r="gMode"></span><span data-r="modeText">ANGLE</span></span>
+    <span class="ds-chip ds-chip--cam"><span class="ds-chip__g" data-r="gCam"></span><span data-r="cam">FPV</span></span>
     <span class="ds-chip ds-chip--fps" data-r="fps">— fps</span>
     <button type="button" class="ds-chip ds-chip--quit" data-r="quit" aria-label="Quit flight">✕ Quit</button>
+    <div class="ds-binds" data-r="binds"></div>
   </div>
+  <section class="ds-cmap ds-panel" data-r="cmap" aria-label="Controls" hidden></section>
   <div class="ds-center">
     <div class="ds-center__big" data-r="center"></div>
     <div class="ds-center__sub" data-r="centerSub"></div>
@@ -96,7 +130,7 @@ const HUD_HTML = `
   <div class="ds-hud__bl ds-panel">
     <div class="ds-thr" aria-label="Throttle">
       <div class="ds-thr__bar"><div class="ds-thr__fill" data-r="thrFill"></div></div>
-      <span class="ds-label">Thr</span>
+      <span class="ds-label">Thr</span><span class="ds-thr__g" data-r="gThr"></span>
       <span class="ds-num ds-thr__val" data-r="thrVal">0</span>
     </div>
     <div class="ds-tele">
@@ -106,17 +140,18 @@ const HUD_HTML = `
     </div>
   </div>
   <div class="ds-hud__br ds-panel">
+    <div class="ds-mstick" data-r="mstick" hidden><div class="ds-mstick__well"><i class="ds-mstick__ring"></i><i class="ds-mstick__dot" data-r="mdot"></i></div><span class="ds-mstick__lbl" data-r="mlbl"></span></div>
     <div class="ds-src"><span class="ds-src__icon" data-r="srcIcon"></span><span class="ds-src__name" data-r="srcName">No input</span></div>
     <div class="ds-sticks">
-      <div class="ds-stick"><div class="ds-well" data-r="wellL"><i class="ds-well__cross"></i><i class="ds-well__rail"></i><i class="ds-well__dot" data-r="stickL"></i></div><span class="ds-stick__lbl" data-r="lblL">THR·YAW</span></div>
-      <div class="ds-stick"><div class="ds-well" data-r="wellR"><i class="ds-well__cross"></i><i class="ds-well__rail"></i><i class="ds-well__dot" data-r="stickR"></i></div><span class="ds-stick__lbl" data-r="lblR">PIT·ROL</span></div>
+      <div class="ds-stick"><div class="ds-well" data-r="wellL"><i class="ds-well__cross"></i><i class="ds-well__rail"></i><i class="ds-well__dot" data-r="stickL"></i></div><span class="ds-stick__lbl" data-r="lblL">THR·YAW</span><span class="ds-stick__keys" data-r="keysL"></span></div>
+      <div class="ds-stick"><div class="ds-well" data-r="wellR"><i class="ds-well__cross"></i><i class="ds-well__rail"></i><i class="ds-well__dot" data-r="stickR"></i></div><span class="ds-stick__lbl" data-r="lblR">PIT·ROL</span><span class="ds-stick__keys" data-r="keysR"></span></div>
     </div>
   </div>
   <div class="ds-toasts" data-r="toasts" role="status" aria-live="polite"></div>
 </div>`;
 
 /** state classes `setCenter` toggles on the centre title and its wrapper */
-const CENTER_KINDS = ['is-crash', 'is-count', 'is-go', 'is-ok', 'is-dim'] as const;
+const CENTER_KINDS = ['is-crash', 'is-count', 'is-go', 'is-ok', 'is-dim', 'is-warn'] as const;
 
 export class Hud {
   private readonly root: HTMLElement;
@@ -126,6 +161,8 @@ export class Hud {
   private readonly styleCache = new Map<HTMLElement, string>();
   private lastText = -Infinity;
   private status: RaceStatus | null = null;
+  /** the centre shows the out-of-bounds countdown (cleared on return or respawn) */
+  private outOfBounds = false;
   private nextRing = -1;
   private totalRings = -1;
   private pipEls: HTMLElement[] = [];
@@ -141,9 +178,34 @@ export class Hud {
   private free: boolean | null = null;
   /** Free-fly session clock (s): the race clock stays at 0 outside a race. */
   private flightTime = 0;
+  private hintKey = '';
+  private hintSettings: Settings | null = null;
+  private hintHtml = '';
+  private mouseLbl = '';
+  private legendOpen = false;
+  private legendStored: 'open' | 'closed' | null = null;
+  private wasFlying = false;
+  /** flight view without a menu over it: pointer lock may be taken, the legend toggles */
+  private flightView = false;
+  /** the tutorial runs: on a keyboard Esc skips it instead of pausing */
+  private tutorial = false;
+  private readonly storage: Storage | null;
 
-  constructor(root: HTMLElement, onAction: (a: UiAction) => void) {
+  private readonly onPointerDown = (e: PointerEvent): void => {
+    if (!this.flightView || e.pointerType !== 'mouse' || e.button !== 0) return;
+    if (!isCanvas(e.target) || this.root.classList.contains('is-touch')) return;
+    requestPointerLock(e.target);
+  };
+
+  constructor(root: HTMLElement, onAction: (a: UiAction) => void, storage: Storage | null = defaultStorage()) {
     this.root = root;
+    this.storage = storage;
+    try {
+      const v = storage?.getItem(LEGEND_STORE_KEY);
+      this.legendStored = v === 'open' || v === 'closed' ? v : null;
+    } catch {
+      this.legendStored = null;
+    }
     root.classList.add('ds-ui');
     const hud = document.createElement('div');
     hud.innerHTML = HUD_HTML;
@@ -156,8 +218,12 @@ export class Hud {
     this.refs = refs;
     this.menus = new Menus(root, onAction, { ...DEFAULT_SETTINGS });
     refs.quit.addEventListener('click', () => onAction({ type: 'request-quit' }));
+    refs.binds.addEventListener('click', (e) => {
+      if ((e.target as Element | null)?.closest?.('[data-legend]')) this.toggleLegend();
+    });
+    root.ownerDocument.addEventListener('pointerdown', this.onPointerDown);
     this.setStatus('menu');
-    this.setSource('none', null);
+    this.setSource('none');
   }
 
   /** Per-frame HUD refresh. Only changed values touch the DOM; numeric text is throttled to ~20 Hz. */
@@ -207,27 +273,52 @@ export class Hud {
       this.text(r.thrVal, `${Math.round(f.input.control.throttle * 100)}%`);
     }
 
-    this.text(r.mode, f.mode === 'acro' ? 'ACRO' : 'ANGLE');
+    this.text(r.modeText, f.mode === 'acro' ? 'ACRO' : 'ANGLE');
     this.cls(r.mode, f.mode === 'acro' ? 'is-acro' : '');
     this.text(r.cam, CAMERA_LABEL[f.camera]);
     const armed = f.drone.armed;
     this.text(r.armedText, armed ? 'ARMED' : 'DISARMED');
     this.cls(r.armed, armed ? 'is-on' : '');
 
-    if (f.input.source !== this.source) this.setSource(f.input.source, f.input.gamepadId);
+    if (f.input.source !== this.source) this.setSource(f.input.source);
+    const flying = FLIGHT_STATES.has(race.status);
+    if (flying !== this.wasFlying) {
+      this.wasFlying = flying;
+      if (flying) this.legendOpen = !this.tutorial && this.legendStored !== 'closed';
+    }
+    // the first flight shows the legend; back at the main menu it collapses for good (until toggled)
+    if (race.status === 'menu' && this.legendStored === null && this.legendOpen) {
+      this.legendOpen = false;
+      this.storeLegend('closed');
+    }
+    this.flightView = flying && this.menus.current === 'none';
+    if (!this.flightView) releasePointerLock(this.root.ownerDocument);
+    else if (f.input.legend) this.toggleLegend();
+    this.updateBindings(f);
     this.updateHint(f);
     this.updateSticks(f.input);
+    this.updateMouseStick(f.input);
   }
 
-  showScreen(s: 'main' | 'pause' | 'finish' | 'none' | 'settings' | 'controls' | 'controller' | 'rates' | 'confirm-quit' | 'confirm-reset' | 'about' | 'bye', data?: FinishData & { best?: number | null }): void {
+  showScreen(s: 'main' | 'levels' | 'pause' | 'finish' | 'none' | 'settings' | 'controls' | 'controller' | 'rates' | 'confirm-quit' | 'confirm-reset' | 'about' | 'bye', data?: FinishData & { best?: number | null }): void {
     if (s === 'main' && data && 'best' in data) this.menus.setMenuBest(data.best ?? null);
     if (s === 'bye') this.clearToasts();
     this.menus.show(s as ScreenName, data);
   }
 
+  /** Level picker cards and the level loaded now (main-menu level line). */
+  setLevels(cards: readonly LevelCard[], current: LevelId): void {
+    this.menus.setLevels(cards, current);
+  }
+
   /** Currently open menu screen ('none' while flying). */
   get screen(): ScreenName {
     return this.menus.current;
+  }
+
+  /** Removes the document-level listener (a HUD re-created by HMR or a test must not stack them). */
+  dispose(): void {
+    this.root.ownerDocument.removeEventListener('pointerdown', this.onPointerDown);
   }
 
   /** iOS app: hide the main-menu Quit button. */
@@ -250,6 +341,23 @@ export class Hud {
     this.menus.navigate(nav, confirm);
   }
 
+  /**
+   * The tutorial is running: the pause menu offers Replay / Skip tutorial, and its card is the only instruction
+   * surface (no amber hint, no ARMED pulse; the Controls legend folds to its chip until toggled).
+   */
+  setTutorial(on: boolean): void {
+    if (on === this.tutorial) return;
+    this.tutorial = on;
+    this.menus.setTutorial(on);
+    if (on) this.legendOpen = false;
+    else if (this.wasFlying) this.legendOpen = this.legendStored !== 'closed';
+  }
+
+  /** The amber hint above the telemetry is showing (arm / take-off guidance). */
+  get hintOn(): boolean {
+    return this.hintHtml !== '';
+  }
+
   /** Keeps the settings screen in sync when settings change outside it (e.g. Y toggles flight mode). */
   setSettings(s: Settings): void {
     this.menus.setSettings(s);
@@ -266,8 +374,17 @@ export class Hud {
         break;
       case 'armed':
         // The armed chip already shows it; a centre pulse would replace the countdown digit or CRASHED.
-        if (this.status !== 'racing' && this.status !== 'freefly') break;
+        if ((this.status !== 'racing' && this.status !== 'freefly') || this.tutorial) break;
         this.centerPulse(e.armed ? 'ARMED' : 'DISARMED', e.armed ? 'is-ok' : 'is-dim', 700);
+        break;
+      case 'out-of-bounds':
+        this.outOfBounds = true;
+        this.setCenter('OUT OF BOUNDS', 'is-warn', `Turn back · respawn in ${e.seconds} s`);
+        break;
+      case 'in-bounds':
+      case 'respawn':
+        if (this.outOfBounds && this.status !== 'crashed') this.setCenter('', '', '');
+        this.outOfBounds = false;
         break;
       default:
         break;
@@ -366,28 +483,135 @@ export class Hud {
 
   private updateHint(f: HudFrame): void {
     const st = f.race.status;
-    const show = !f.drone.armed && f.altitude < 0.5 && (st === 'racing' || st === 'freefly' || st === 'countdown');
-    let msg = '';
-    if (show) {
-      const src = f.input.source;
-      if (src === 'touch') {
+    const inFlight = f.altitude < 0.5 && (st === 'racing' || st === 'freefly' || st === 'countdown');
+    const scheme = hintScheme(f.input.source, f.input.gamepadId);
+    const thr = f.input.control.throttle;
+    let html = '';
+    if (this.tutorial) {
+      // the tutorial card says it
+    } else if (inFlight && !f.drone.armed) {
+      if (scheme === 'touch') {
         const side = throttleSlot(f.settings.stickMode) === 'ly' ? 'left' : 'right';
-        msg = f.input.control.throttle > 0.05 ? `Pull the ${side} stick fully down, then tap ARM` : 'DISARMED — tap ARM to arm';
+        html = thr > 0.05 ? `Pull the ${side} stick fully down, then tap ARM` : 'DISARMED — tap ARM to arm';
       } else {
-        const pad = src === 'gamepad';
-        const arm = pad ? 'A' : 'Space';
-        if (f.input.control.throttle > 0.05) {
-          const low = throttleDownHint(f.settings, !pad);
-          msg = `Throttle to zero — ${low}, then press ${arm} to arm`;
+        const arm = glyphsHtml(actionGlyphs(scheme, 'arm'));
+        if (scheme === 'keyboard') {
+          // the arm key zeroes the centring keyboard throttle itself; only a held throttle-up key blocks it
+          html = thr > 0.55 ? `Release ${this.throttleUpKey(f.settings)}, then press ${arm} to arm` : `DISARMED — press ${arm} to arm`;
+        } else if (thr > 0.05 && scheme !== 'quest') {
+          const low = f.settings.throttleSource === 'trigger' ? `release ${glyphHtml(padGlyph(scheme, GP.RT))}` : throttleDownHint(f.settings, false).toLowerCase();
+          html = `Throttle to zero — ${low}, then press ${arm} to arm`;
         } else {
-          msg = `DISARMED — press ${arm} to arm`;
+          html = `DISARMED — press ${arm} to arm`;
         }
       }
+    } else if (inFlight && f.drone.armed && f.input.latched) {
+      if (scheme === 'keyboard') html = `Hold ${this.throttleUpKey(f.settings)} to take off`;
+      else if (scheme === 'touch') html = `Push the ${throttleSlot(f.settings.stickMode) === 'ly' ? 'left' : 'right'} stick up to take off`;
+      else html = 'Push the throttle stick up to take off';
     }
-    if (this.refs.hint.textContent === msg) return;
-    this.text(this.refs.hint, msg);
-    this.cls(this.refs.hint, msg ? 'is-on' : '');
+    if (this.hintHtml === html) return;
+    this.hintHtml = html;
+    this.refs.hint.innerHTML = html;
+    this.cls(this.refs.hint, html ? 'is-on' : '');
     this.placeToasts();
+  }
+
+  private throttleUpKey(s: Settings): string {
+    return glyphHtml(keyGlyph(KEY_STICKS[throttleSlot(s.stickMode)][1]));
+  }
+
+  /** Glyph chips, bind strip, stick key clusters and the Controls legend for the active input scheme. */
+  private updateBindings(f: HudFrame): void {
+    const r = this.refs;
+    const inp = f.input;
+    const doc = this.root.ownerDocument;
+    const scheme = hintScheme(inp.source, inp.gamepadId);
+    const mouse = !!inp.mouse;
+    const locked = !!doc.pointerLockElement;
+    const lockable = scheme === 'keyboard' && !this.root.classList.contains('is-touch') && pointerLockSupported(doc);
+    const key = [scheme, inp.source, inp.gamepadId, mouse, locked, lockable, this.legendOpen, this.tutorial].join('|');
+    if (key === this.hintKey && f.settings === this.hintSettings) return;
+    this.hintKey = key;
+    this.hintSettings = f.settings;
+    const s = f.settings;
+    this.root.dataset.scheme = scheme;
+    this.text(r.srcName, mouse ? 'Keyboard + mouse' : sourceName(inp.source, inp.gamepadId));
+
+    r.gArm.innerHTML = glyphsHtml(actionGlyphs(scheme, 'arm'));
+    r.gMode.innerHTML = glyphsHtml(actionGlyphs(scheme, 'toggleMode'));
+    r.gCam.innerHTML = glyphsHtml(actionGlyphs(scheme, 'cycleCamera'));
+
+    const bind = (action: HintAction, label: string = ACTION_LABEL[action], tag: string = action): string => {
+      const g = actionGlyphs(scheme, action);
+      return g.length ? `<span class="ds-bind" data-bind="${tag}">${glyphsHtml(g)}<span>${label}</span></span>` : '';
+    };
+    // under pointer lock Esc both releases the mouse and pauses: one chip says so
+    // the tutorial card's Skip carries the Esc glyph: no second, differently worded Esc chip while it runs
+    const pauseChip = this.tutorial && scheme === 'keyboard' ? (lockable && locked ? bind('pause', 'Free mouse', 'mouse') : '') : lockable && locked ? bind('pause', `${ACTION_LABEL.pause} · free mouse`, 'mouse') : bind('pause');
+    let strip = bind('reset') + pauseChip + (scheme === 'quest' ? bind('recenter') : '') + bind('headingArrow', 'Arrow');
+    if (lockable && !locked) strip += `<span class="ds-bind" data-bind="mouse">${glyphHtml({ style: 'mouse', label: '', name: 'Mouse' })}<span>Click view: fly with mouse</span></span>`;
+    if (mouse && s.mouseStick === 'hold') strip += bind('mouseCentre');
+    // an open legend lists every binding: the chip row folds down to the legend toggle
+    if (this.legendOpen && scheme !== 'touch') strip = '';
+    const legendG = actionGlyphs(scheme, 'legend');
+    if (legendG.length) {
+      strip += `<button type="button" class="ds-bind ds-bind--btn" data-legend aria-expanded="${this.legendOpen}">${glyphsHtml(legendG)}<span>${this.legendOpen ? 'Hide controls' : 'Controls'}</span></button>`;
+    }
+    r.binds.innerHTML = strip;
+
+    r.keysL.innerHTML = this.stickKeysHtml(scheme, s, mouse, 'l');
+    r.keysR.innerHTML = this.stickKeysHtml(scheme, s, mouse, 'r');
+    const padScheme = scheme === 'xbox' || scheme === 'playstation' || scheme === 'generic' ? scheme : null;
+    r.gThr.innerHTML = padScheme && s.throttleSource === 'trigger' ? glyphHtml(padGlyph(padScheme, GP.RT)) : '';
+
+    const showMap = this.legendOpen && scheme !== 'touch';
+    r.cmap.hidden = !showMap;
+    if (!showMap) return;
+    const row = (dt: string, dd: string): string => `<div class="ds-cmap__row"><dt>${dt}</dt><dd>${dd}</dd></div>`;
+    const rows = channelHints(scheme, s, mouse)
+      .map((c) => row(CH_NAME[c.channel], `${glyphsHtml(c.glyphs)}${c.note ? `<small>${c.note}</small>` : ''}`))
+      .join('');
+    // recentring only does something in a headset (the quest scheme = an XR session is running)
+    const actions = (['arm', 'toggleMode', 'cycleCamera', 'reset', 'pause', 'recenter', 'headingArrow'] as const)
+      .filter((a) => a !== 'recenter' || scheme === 'quest')
+      .map((a) => {
+        const g = actionGlyphs(scheme, a);
+        return g.length ? row(ACTION_LABEL[a], glyphsHtml(g)) : '';
+      })
+      .join('');
+    let extra = '';
+    if (lockable) {
+      extra += row('Mouse flight', locked ? `${glyphHtml(keyGlyph('Escape'))}<small>frees the mouse</small>` : '<small>click the view</small>');
+      if (s.mouseStick === 'hold') extra += row(ACTION_LABEL.mouseCentre, glyphsHtml(actionGlyphs(scheme, 'mouseCentre')));
+    }
+    const close = glyphsHtml(legendG);
+    const foot = scheme === 'keyboard' ? '<p class="ds-cmap__foot">Keys spring back like a stick · centre holds altitude</p>' : '';
+    r.cmap.innerHTML =
+      `<header class="ds-cmap__head"><span class="ds-label">Controls</span><span class="ds-cmap__src">${mouse ? 'Keys + mouse' : SCHEME_NAME[scheme]}</span>${close ? `<span class="ds-cmap__close">${close}<span>hide</span></span>` : ''}</header>` +
+      `<dl class="ds-cmap__list">${rows}</dl><dl class="ds-cmap__list ds-cmap__list--act">${actions}${extra}</dl>${foot}`;
+  }
+
+  private stickKeysHtml(scheme: HintScheme, s: Settings, mouse: boolean, side: 'l' | 'r'): string {
+    if (scheme === 'touch') return '';
+    if (scheme !== 'keyboard') return glyphHtml({ style: 'stick', label: side === 'l' ? 'L' : 'R', name: side === 'l' ? 'Left stick' : 'Right stick' });
+    const c = keyCluster(s, side, mouse);
+    const m = c.mouseV || c.mouseH ? glyphHtml({ style: 'mouse', label: c.mouseV && c.mouseH ? '✥' : c.mouseV ? '↕' : '↔', name: 'Mouse' }) : '';
+    return `<span class="ds-kc"><span class="ds-kc__u">${glyphHtml(c.up)}</span>${glyphHtml(c.left)}${glyphHtml(c.down)}${glyphHtml(c.right)}</span>${m}`;
+  }
+
+  private toggleLegend(): void {
+    this.legendOpen = !this.legendOpen;
+    this.storeLegend(this.legendOpen ? 'open' : 'closed');
+  }
+
+  private storeLegend(v: 'open' | 'closed'): void {
+    this.legendStored = v;
+    try {
+      this.storage?.setItem(LEGEND_STORE_KEY, v);
+    } catch {
+      /* storage unavailable: the choice lasts for this session */
+    }
   }
 
   private updateSticks(input: InputFrame): void {
@@ -414,17 +638,32 @@ export class Hud {
     }
   }
 
+  /** Mouse stick circle: where the mouse holds the stick ('hold') or how far it is deflecting ('spring'). */
+  private updateMouseStick(input: HudFrame['input']): void {
+    const m = input.mouseStick ?? null;
+    const r = this.refs;
+    if (r.mstick.hidden !== !m) r.mstick.hidden = !m;
+    if (!m) return;
+    const z = glyphsHtml(actionGlyphs('keyboard', 'mouseCentre'));
+    const lbl = `<span>Mouse · ${m.kind === 'hold' ? 'hold' : 'spring'}</span>${z}<span>centre</span>`;
+    if (this.mouseLbl !== lbl) {
+      this.mouseLbl = lbl;
+      r.mlbl.innerHTML = lbl;
+    }
+    this.cls(r.mstick, m.kind === 'hold' ? 'is-on' : '');
+    this.style(r.mdot, `translate(-50%, -50%) translate(${(m.x * MOUSE_TRAVEL).toFixed(1)}%, ${(-m.y * MOUSE_TRAVEL).toFixed(1)}%)`);
+  }
+
   private moveDot(el: HTMLElement, x: number, y: number): void {
     // Percent translate is relative to the dot; the dot is 1/5 of the well, so 5 × travel.
     const k = STICK_TRAVEL * 500;
     this.style(el, `translate(-50%, -50%) translate(${(x * k).toFixed(1)}%, ${(y * k).toFixed(1)}%)`);
   }
 
-  private setSource(src: InputSource, id: string | null): void {
+  private setSource(src: InputSource): void {
     this.source = src;
     const r = this.refs;
     r.srcIcon.innerHTML = src === 'gamepad' || src === 'xr' ? ICON_GAMEPAD : src === 'keyboard' ? ICON_KEYBOARD : src === 'touch' ? ICON_TOUCH : ICON_NONE;
-    this.text(r.srcName, src === 'gamepad' ? shortPad(id) : src === 'xr' ? 'Quest Touch' : src === 'keyboard' ? 'Keyboard' : src === 'touch' ? 'Touch' : 'No input');
     this.root.dataset.source = src;
   }
 
@@ -554,6 +793,10 @@ export class Hud {
     for (const c of ['is-on', 'is-warn', 'is-crit', 'is-acro']) el.classList.remove(c);
     if (state) el.classList.add(state);
   }
+}
+
+function sourceName(src: InputSource, id: string | null): string {
+  return src === 'gamepad' ? shortPad(id) : src === 'xr' ? 'Quest Touch' : src === 'keyboard' ? 'Keyboard' : src === 'touch' ? 'Touch' : 'No input';
 }
 
 function shortPad(id: string | null): string {

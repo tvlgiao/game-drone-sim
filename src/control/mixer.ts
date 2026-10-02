@@ -33,9 +33,10 @@ export class Mixer {
   /**
    * Collective thrust fraction + axis commands → per-motor thrust fractions in [floor, 1].
    * Airmode: the differential part is preserved by shifting the collective (and scaled only when
-   * its span exceeds the available range, yaw sacrificed first).
+   * its span exceeds the available range, yaw sacrificed first). `boost` caps how far that shift may
+   * raise the collective above the commanded one; past it the differential is scaled down instead.
    */
-  mix(throttle: number, roll: number, pitch: number, yaw: number, floor: number): readonly number[] {
+  mix(throttle: number, roll: number, pitch: number, yaw: number, floor: number, boost = Infinity): readonly number[] {
     const t = this.table;
     const out = this.output;
     const n = t.length;
@@ -76,8 +77,17 @@ export class Mixer {
     }
     const thr = throttle < 0 ? 0 : throttle > 1 ? 1 : throttle;
     let shift = thr;
-    if (thr + lo < floor) shift = floor - lo;
-    else if (thr + hi > 1) shift = 1 - hi;
+    if (thr + lo < floor) {
+      shift = floor - lo;
+      const cap = Math.max(thr, floor) + boost;
+      if (shift > cap) {
+        // lo < 0 here: shrink the differential until the lowest motor sits on the floor at the capped shift
+        const k = (floor - cap) / lo;
+        for (let i = 0; i < n; i++) out[i] *= k;
+        shift = cap;
+        this.saturated = true;
+      }
+    } else if (thr + hi > 1) shift = 1 - hi;
     for (let i = 0; i < n; i++) {
       const v = out[i] + shift;
       out[i] = v < floor ? floor : v > 1 ? 1 : v;

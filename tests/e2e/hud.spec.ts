@@ -1,4 +1,8 @@
 import { devices, expect, test, type Page } from '@playwright/test';
+import { skipTutorialOffer } from './seed';
+
+// the first-run tutorial offer is covered by tutorial.spec.ts; here it would cover the menus
+test.beforeEach(({ context }) => skipTutorialOffer(context));
 
 // window.__drone is typed by the global declaration in game.spec.ts.
 
