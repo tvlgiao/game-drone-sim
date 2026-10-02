@@ -53,6 +53,25 @@ export function padControls(s: ModeSettings): Record<Channel, string> {
   return out;
 }
 
+/** Touch thumb per channel for the selected mode (left / right half of the screen). */
+export function touchControls(s: Pick<Settings, 'stickMode'>): Record<Channel, string> {
+  const t = MODE_TABLE[s.stickMode];
+  const names: Record<string, string> = { lx: 'Left thumb ↔', ly: 'Left thumb ↕', rx: 'Right thumb ↔', ry: 'Right thumb ↕' };
+  const out = {} as Record<Channel, string>;
+  for (const slot of ['lx', 'ly', 'rx', 'ry'] as const) out[t[slot]] = names[slot]!;
+  return out;
+}
+
+/** Quest Touch thumbstick per channel: both spring back, so the throttle stick holds altitude and the other holds position. */
+export function xrControls(s: Pick<Settings, 'stickMode'>): Record<Channel, string> {
+  const t = MODE_TABLE[s.stickMode];
+  const names: Record<string, string> = { lx: 'Left stick ↔', ly: 'Left stick ↕', rx: 'Right stick ↔', ry: 'Right stick ↕' };
+  const out = {} as Record<Channel, string>;
+  for (const slot of ['lx', 'ly', 'rx', 'ry'] as const) out[t[slot]] = names[slot]!;
+  out.throttle += ' (centre holds altitude)';
+  return out;
+}
+
 /** Disarmed hint: how to bring throttle to zero. */
 export function throttleDownHint(s: ModeSettings, keyboard: boolean): string {
   const slot = throttleSlot(s.stickMode);

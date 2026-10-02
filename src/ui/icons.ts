@@ -11,7 +11,8 @@ export const ICON_NONE = `<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx
 export interface DiagramLabels {
   left: string;
   right: string;
-  rt: string;
+  /** RT callout text, or null to leave the trigger unlabelled (no action bound) */
+  rt: string | null;
   /** stick holding throttle, highlighted magenta ('rt' when the trigger is the throttle) */
   thr: 'left' | 'right' | 'rt';
 }
@@ -52,7 +53,7 @@ export const controllerDiagram = (l: DiagramLabels): string => `
     <polyline points="270,160 190,160 170,140"/>
     <polyline points="329,204 190,250 170,250"/>
     <polyline points="407,146 407,40"/>
-    <polyline points="515,70 580,50 600,50"/>
+    ${l.rt === null ? '' : '<polyline points="515,70 580,50 600,50"/>'}
     <polyline points="518,104 580,94 600,94"/>
     <polyline points="491,134 580,128 600,128"/>
     <polyline points="513,160 600,164"/>
@@ -65,7 +66,7 @@ export const controllerDiagram = (l: DiagramLabels): string => `
     <text x="20" y="246"><tspan class="k">D-PAD</tspan></text>
     <text x="20" y="266">Menu navigation</text>
     <text x="407" y="32" text-anchor="middle"><tspan class="k">MENU</tspan> Pause</text>
-    <text x="606" y="55"><tspan class="k">RT</tspan> ${l.rt}</text>
+    ${l.rt === null ? '' : `<text x="606" y="55"><tspan class="k">RT</tspan> ${l.rt}</text>`}
     <text x="606" y="99"><tspan class="k">RB</tspan> Camera</text>
     <text x="606" y="133"><tspan class="k">Y</tspan> Flight mode</text>
     <text x="606" y="169"><tspan class="k">B</tspan> Reset · Back</text>
