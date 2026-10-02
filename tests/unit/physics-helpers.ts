@@ -1,8 +1,8 @@
-import type { ControlInput, DroneState, LevelDef } from '../../src/types';
+import type { ControlInput, DroneState, RoomLevelData } from '../../src/types';
 import { GRAVITY, type DroneParams } from '../../src/physics/drone-params';
 
 /** Huge empty room: no props, no rings — for free-flight physics truths. */
-export const EMPTY_LEVEL: LevelDef = {
+export const EMPTY_LEVEL: RoomLevelData = {
   name: 'empty',
   room: { size: [2000, 1000, 2000], windows: [] },
   props: [],

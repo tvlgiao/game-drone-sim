@@ -7,7 +7,7 @@ import {
   ringCrossing,
   yawTowards,
 } from '../../src/game/race';
-import type { Contact, DroneState, GameEvent, LevelDef } from '../../src/types';
+import type { Contact, DroneState, GameEvent, RoomLevelData } from '../../src/types';
 import { LOFT_LEVEL } from '../../src/game/level-data';
 import { Simulation } from '../../src/physics/simulation';
 
@@ -43,7 +43,7 @@ class ThrowingStorage extends MemStorage {
 }
 
 /** Two rings along −Z, 5 m apart, radius 0.75. */
-const LEVEL: LevelDef = {
+const LEVEL: RoomLevelData = {
   name: 'Test',
   room: { size: [20, 6, 20], windows: [] },
   props: [],
@@ -309,7 +309,7 @@ describe('RaceController respawn point', () => {
   });
 
   it('lands on a prop top below the checkpoint instead of the floor', () => {
-    const lvl: LevelDef = {
+    const lvl: RoomLevelData = {
       ...LEVEL,
       props: [{ id: 'crate', kind: 'crate', position: [0, 0, -3.2], size: [1, 0.8, 1], colliders: [{ id: 'crate', shape: { kind: 'box', center: [0, 0.4, -3.2], half: [0.5, 0.4, 0.5] } }] }],
     };
@@ -343,7 +343,7 @@ describe('RaceController respawn point', () => {
   });
 
   it('keeps the checkpoint on the floor for low rings on the real level', () => {
-    const lvl: LevelDef = { ...LOFT_LEVEL, rings: [{ ...LOFT_LEVEL.rings[0]!, position: [0, 0.2, 0], direction: [0, -1, 0] }, LOFT_LEVEL.rings[1]!] };
+    const lvl: RoomLevelData = { ...LOFT_LEVEL, rings: [{ ...LOFT_LEVEL.rings[0]!, position: [0, 0.2, 0], direction: [0, -1, 0] }, LOFT_LEVEL.rings[1]!] };
     const rc = new RaceController(lvl, null);
     rc.startRace();
     idle(rc, 3.01);

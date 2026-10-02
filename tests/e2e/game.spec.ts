@@ -172,6 +172,7 @@ test('HUD quit button asks for confirmation; cancel resumes, confirm returns to 
 test('sound stops when the window is hidden and when quitting the game', async ({ page }) => {
   await boot(page);
   await page.getByRole('button', { name: 'Free Fly' }).click(); // real gesture → audio starts
+  await page.getByRole('button', { name: 'Free Fly · Night Loft' }).click(); // level picker
   await page.waitForFunction(() => window.__drone.audio === 'running');
   await page.evaluate(() => {
     Object.defineProperty(document, 'hidden', { configurable: true, get: () => true });

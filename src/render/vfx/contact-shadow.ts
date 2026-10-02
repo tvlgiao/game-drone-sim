@@ -1,18 +1,18 @@
 /** Drone contact shadow blob + LED ground glow, projected on the floor or the prop top below. */
 import * as THREE from 'three';
-import { buildSurfaces, surfaceBelow, type TopSurface } from '../../game/surfaces';
-import type { LevelDef } from '../../types';
+import type { SurfaceProvider } from '../../game/surfaces';
 
 export class ContactShadow {
   readonly group = new THREE.Group();
   private readonly shadow: THREE.Mesh<THREE.PlaneGeometry, THREE.MeshBasicMaterial>;
   private readonly glow: THREE.Mesh<THREE.PlaneGeometry, THREE.MeshBasicMaterial>;
-  private readonly surfaces: TopSurface[];
+  /** walkable surfaces of the current level (GameView swaps them with the level) */
+  surfaces: SurfaceProvider;
   /** height of the drone above the surface under it (m), updated each frame */
   height = 10;
   surfaceY = 0;
 
-  constructor(level: LevelDef, radial: THREE.Texture) {
+  constructor(surfaces: SurfaceProvider, radial: THREE.Texture) {
     const geo = new THREE.PlaneGeometry(1, 1);
     geo.rotateX(-Math.PI / 2);
     this.shadow = new THREE.Mesh(
@@ -26,11 +26,11 @@ export class ContactShadow {
     this.shadow.renderOrder = 1;
     this.glow.renderOrder = 1;
     this.group.add(this.shadow, this.glow);
-    this.surfaces = buildSurfaces(level);
+    this.surfaces = surfaces;
   }
 
   update(pos: THREE.Vector3, ledColor: THREE.Color, ledOn: number): void {
-    const y = surfaceBelow(this.surfaces, pos.x, pos.y, pos.z);
+    const y = this.surfaces.topBelow(pos.x, pos.y, pos.z);
     this.surfaceY = y;
     const h = Math.max(0, pos.y - y);
     this.height = h;

@@ -3,8 +3,9 @@
  * Semi-implicit Euler at a fixed dt; step() performs no allocations.
  */
 import { Quaternion, Vector3 } from 'three';
-import type { Collider, ColliderShape, Contact, DroneState, LevelDef } from '../types';
+import type { Collider, ColliderShape, Contact, DroneState, RoomLevelData } from '../types';
 import { levelColliders } from '../game/level-data';
+import { isRuntime, type LevelRuntime } from '../levels/runtime';
 import { AIR_DENSITY, CENTER_COLLIDER_OFFSET, DEFAULT_DRONE, GRAVITY, MOTOR_LAYOUT, type DroneParams } from './drone-params';
 import { createSphereHit, shapeBoundingRadius, sphereVsPlane, sphereVsShape } from './collision';
 
@@ -28,6 +29,9 @@ const GROUND_EFFECT_MAX = 1.4;
 /** prop + bell inertia (kg·m²) and top rotor speed (rad/s): spin-up reaction torque about yaw */
 export const ROTOR_INERTIA = 1.2e-6;
 export const MOTOR_MAX_RAD_S = 3500;
+
+/** A level as physics sees it: a LevelRuntime, or raw room data (tests). */
+export type PhysicsLevel = LevelRuntime | RoomLevelData;
 
 /** Allocate a fresh DroneState (level, at origin, disarmed, full battery). */
 export function createDroneState(params: DroneParams = DEFAULT_DRONE): DroneState {
@@ -97,9 +101,8 @@ export class PhysicsWorld {
   /** per-motor thrust (N) of the last step */
   readonly thrust: [number, number, number, number] = [0, 0, 0, 0];
 
-  private readonly roomHalfX: number;
-  private readonly roomHalfZ: number;
-  private readonly roomHeight: number;
+  /** room shell (indoor: six hard planes); null = open sky over the ground plane y = 0 */
+  private room: { halfX: number; halfZ: number; height: number } | null = null;
   private readonly colliders: WorldCollider[] = [];
   private readonly fanBlades: FanBlade[] = [];
   private readonly groundBoxes: { center: [number, number, number]; half: [number, number, number]; yaw: number }[] = [];
@@ -138,14 +141,11 @@ export class PhysicsWorld {
   private alphaDown = 0;
   private readonly invI: [number, number, number];
 
-  constructor(level: LevelDef, params: DroneParams = DEFAULT_DRONE) {
+  constructor(level: PhysicsLevel, params: DroneParams = DEFAULT_DRONE) {
     this.params = params;
     this.state = createDroneState(params);
     this.prevState = createDroneState(params);
     this.invI = [1 / params.inertia[0], 1 / params.inertia[1], 1 / params.inertia[2]];
-    this.roomHalfX = level.room.size[0] / 2;
-    this.roomHeight = level.room.size[1];
-    this.roomHalfZ = level.room.size[2] / 2;
 
     this.sphereLocal.push(new Vector3().fromArray(CENTER_COLLIDER_OFFSET));
     this.sphereRadius.push(params.colliderRadius);
@@ -156,15 +156,35 @@ export class PhysicsWorld {
     }
     for (let i = 0; i < this.sphereLocal.length; i++) this.sphereWorld.push(new Vector3());
 
-    for (const c of levelColliders(level)) this.addCollider(c);
-
     for (let i = 0; i < MAX_CONTACTS; i++) {
       this.contactPool.push({ normal: new Vector3(), depth: 0, point: new Vector3(), impactSpeed: 0, colliderId: '' });
       this.extras.push({ restitution: 0, friction: 0, obstacleVelocity: new Vector3(), normalImpulse: 0, approach: 0, r: new Vector3() });
     }
     for (let n = 0; n <= MAX_CONTACTS; n++) this.views.push(this.contactPool.slice(0, n));
-    const s = level.spawn.position;
-    this.reset(this.tmp.set(s[0], s[1], s[2]), level.spawn.yaw);
+    this.setLevel(level);
+  }
+
+  /** Replace the level geometry (room shell or open ground, colliders) and put the drone on its spawn. */
+  setLevel(level: PhysicsLevel): void {
+    this.colliders.length = 0;
+    this.fanBlades.length = 0;
+    this.groundBoxes.length = 0;
+    this.fanAngle = 0;
+    let colliders: readonly Collider[];
+    let spawn: RoomLevelData['spawn'];
+    if (isRuntime(level)) {
+      const d = level.def;
+      this.room = d.kind === 'indoor' ? { halfX: d.room.size[0] / 2, halfZ: d.room.size[2] / 2, height: d.room.size[1] } : null;
+      colliders = level.colliders;
+      spawn = d.spawn;
+    } else {
+      this.room = { halfX: level.room.size[0] / 2, halfZ: level.room.size[2] / 2, height: level.room.size[1] };
+      colliders = levelColliders(level);
+      spawn = level.spawn;
+    }
+    for (const c of colliders) this.addCollider(c);
+    const s = spawn.position;
+    this.reset(this.tmp.set(s[0], s[1], s[2]), spawn.yaw);
   }
 
   private addCollider(c: Collider): void {
@@ -376,12 +396,18 @@ export class PhysicsWorld {
       const c = this.sphereWorld[i].copy(this.sphereLocal[i]).applyQuaternion(q).add(s.position);
       const r = this.sphereRadius[i];
       const hit = this.hit;
-      if (sphereVsPlane(c, r, 0, 1, 0, 0, hit)) this.addContact('floor', DEFAULT_RESTITUTION, DEFAULT_FRICTION, null);
-      if (sphereVsPlane(c, r, 0, -1, 0, -this.roomHeight, hit)) this.addContact('ceiling', DEFAULT_RESTITUTION, DEFAULT_FRICTION, null);
-      if (sphereVsPlane(c, r, 1, 0, 0, -this.roomHalfX, hit)) this.addContact('wall-west', DEFAULT_RESTITUTION, DEFAULT_FRICTION, null);
-      if (sphereVsPlane(c, r, -1, 0, 0, -this.roomHalfX, hit)) this.addContact('wall-east', DEFAULT_RESTITUTION, DEFAULT_FRICTION, null);
-      if (sphereVsPlane(c, r, 0, 0, 1, -this.roomHalfZ, hit)) this.addContact('wall-north', DEFAULT_RESTITUTION, DEFAULT_FRICTION, null);
-      if (sphereVsPlane(c, r, 0, 0, -1, -this.roomHalfZ, hit)) this.addContact('wall-south', DEFAULT_RESTITUTION, DEFAULT_FRICTION, null);
+      const room = this.room;
+      if (room) {
+        if (sphereVsPlane(c, r, 0, 1, 0, 0, hit)) this.addContact('floor', DEFAULT_RESTITUTION, DEFAULT_FRICTION, null);
+        if (sphereVsPlane(c, r, 0, -1, 0, -room.height, hit)) this.addContact('ceiling', DEFAULT_RESTITUTION, DEFAULT_FRICTION, null);
+        if (sphereVsPlane(c, r, 1, 0, 0, -room.halfX, hit)) this.addContact('wall-west', DEFAULT_RESTITUTION, DEFAULT_FRICTION, null);
+        if (sphereVsPlane(c, r, -1, 0, 0, -room.halfX, hit)) this.addContact('wall-east', DEFAULT_RESTITUTION, DEFAULT_FRICTION, null);
+        if (sphereVsPlane(c, r, 0, 0, 1, -room.halfZ, hit)) this.addContact('wall-north', DEFAULT_RESTITUTION, DEFAULT_FRICTION, null);
+        if (sphereVsPlane(c, r, 0, 0, -1, -room.halfZ, hit)) this.addContact('wall-south', DEFAULT_RESTITUTION, DEFAULT_FRICTION, null);
+      } else if (sphereVsPlane(c, r, 0, 1, 0, 0, hit)) {
+        // open sky: only the ground stops the drone; leaving the level is the race's soft bounds
+        this.addContact('ground', DEFAULT_RESTITUTION, DEFAULT_FRICTION, null);
+      }
       for (let j = 0; j < this.colliders.length; j++) {
         const col = this.colliders[j];
         const sc = col.shape.center;

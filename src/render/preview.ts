@@ -1,22 +1,23 @@
 /**
  * Standalone render preview (render-preview.html): GameView with a scripted drone flying a smooth
  * loop through the rings, so rendering/VFX can be judged without physics, input or UI.
- * Query params: ?tier=ultra|high|medium|low  &cam=fpv|chase|los  &t=<start seconds>  &pause
+ * Query params: ?tier=ultra|high|medium|low  &cam=fpv|chase|los  &t=<start seconds>  &pause  &level=training|night-loft
  */
 import * as THREE from 'three';
 import { DynamicResolution, pickTier, probeGpu } from '../core/quality';
-import { LOFT_LEVEL } from '../game/level-data';
+import { buildLevel } from '../levels/registry';
 import type { CameraMode, DroneState, GameEvent, QualityTier } from '../types';
 import { GameView } from './game-view';
 
 const params = new URLSearchParams(location.search);
 const canvas = document.getElementById('c') as HTMLCanvasElement;
 const statsEl = document.getElementById('stats') as HTMLDivElement;
-const level = LOFT_LEVEL;
+const runtime = buildLevel(params.get('level') === 'training' ? 'training' : 'night-loft');
+const level = runtime.def;
 
 const gpu = probeGpu();
 let tier: QualityTier = (params.get('tier') as QualityTier | null) ?? pickTier(gpu);
-const view = new GameView(canvas, level, tier);
+const view = new GameView(canvas, runtime, tier);
 
 // ---- scripted path through the rings ------------------------------------------------------
 const pts: THREE.Vector3[] = [];
@@ -28,7 +29,7 @@ level.rings.forEach((r, i) => {
   ringIdx.push(pts.length);
   pts.push(p.clone());
   pts.push(p.clone().addScaledVector(d, 1.1));
-  if (i === 5) pts.push(new THREE.Vector3(7.8, 0.32, 3.0)); // low pass for prop-wash
+  if (i === 5 && level.id === 'night-loft') pts.push(new THREE.Vector3(7.8, 0.32, 3.0)); // low pass for prop-wash
 });
 const curve = new THREE.CatmullRomCurve3(pts, true, 'centripetal', 0.5);
 const length = curve.getLength();

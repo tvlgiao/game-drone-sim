@@ -485,7 +485,7 @@ test.describe('touch devices', () => {
     await passGate(page);
     const quit = page.locator('.ds-screen--main [data-act="exit"]');
     test.skip(!(await quit.isVisible()), 'Quit hidden on this platform');
-    const race = (await page.locator('.ds-screen--main [data-act="race"]').boundingBox())!;
+    const race = (await page.locator('.ds-screen--main [data-act="levels-race"]').boundingBox())!;
     const q = (await quit.boundingBox())!;
     expect(Math.abs(q.width - race.width)).toBeLessThan(2);
     expect(errors).toEqual([]);

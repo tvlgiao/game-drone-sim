@@ -1,9 +1,10 @@
 /** In-flight HUD + menu screens as a DOM overlay. update() is cheap enough to call every frame. */
 import './styles.css';
 import { DEFAULT_SETTINGS, type Settings } from '../core/settings';
-import type { CameraMode, DroneState, FlightMode, GameEvent, InputFrame, InputSource, NavEvents, QualityTier, RaceSnapshot, RaceStatus } from '../types';
+import type { CameraMode, DroneState, FlightMode, GameEvent, InputFrame, InputSource, LevelId, NavEvents, QualityTier, RaceSnapshot, RaceStatus } from '../types';
 import { formatDelta, formatTime } from './format';
 import { ICON_GAMEPAD, ICON_KEYBOARD, ICON_NONE, ICON_TOUCH } from './icons';
+import type { LevelCard } from './level-select';
 import { Menus, type FinishData, type ScreenName, type UiAction } from './menus';
 import { throttleSlot } from '../input/stick';
 import { stickShort, throttleControl, throttleDownHint } from './mode-labels';
@@ -116,7 +117,7 @@ const HUD_HTML = `
 </div>`;
 
 /** state classes `setCenter` toggles on the centre title and its wrapper */
-const CENTER_KINDS = ['is-crash', 'is-count', 'is-go', 'is-ok', 'is-dim'] as const;
+const CENTER_KINDS = ['is-crash', 'is-count', 'is-go', 'is-ok', 'is-dim', 'is-warn'] as const;
 
 export class Hud {
   private readonly root: HTMLElement;
@@ -126,6 +127,8 @@ export class Hud {
   private readonly styleCache = new Map<HTMLElement, string>();
   private lastText = -Infinity;
   private status: RaceStatus | null = null;
+  /** the centre shows the out-of-bounds countdown (cleared on return or respawn) */
+  private outOfBounds = false;
   private nextRing = -1;
   private totalRings = -1;
   private pipEls: HTMLElement[] = [];
@@ -219,10 +222,15 @@ export class Hud {
     this.updateSticks(f.input);
   }
 
-  showScreen(s: 'main' | 'pause' | 'finish' | 'none' | 'settings' | 'controls' | 'controller' | 'rates' | 'confirm-quit' | 'confirm-reset' | 'about' | 'bye', data?: FinishData & { best?: number | null }): void {
+  showScreen(s: 'main' | 'levels' | 'pause' | 'finish' | 'none' | 'settings' | 'controls' | 'controller' | 'rates' | 'confirm-quit' | 'confirm-reset' | 'about' | 'bye', data?: FinishData & { best?: number | null }): void {
     if (s === 'main' && data && 'best' in data) this.menus.setMenuBest(data.best ?? null);
     if (s === 'bye') this.clearToasts();
     this.menus.show(s as ScreenName, data);
+  }
+
+  /** Level picker cards and the level loaded now (main-menu level line). */
+  setLevels(cards: readonly LevelCard[], current: LevelId): void {
+    this.menus.setLevels(cards, current);
   }
 
   /** Currently open menu screen ('none' while flying). */
@@ -268,6 +276,15 @@ export class Hud {
         // The armed chip already shows it; a centre pulse would replace the countdown digit or CRASHED.
         if (this.status !== 'racing' && this.status !== 'freefly') break;
         this.centerPulse(e.armed ? 'ARMED' : 'DISARMED', e.armed ? 'is-ok' : 'is-dim', 700);
+        break;
+      case 'out-of-bounds':
+        this.outOfBounds = true;
+        this.setCenter('OUT OF BOUNDS', 'is-warn', `Turn back · respawn in ${e.seconds} s`);
+        break;
+      case 'in-bounds':
+      case 'respawn':
+        if (this.outOfBounds && this.status !== 'crashed') this.setCenter('', '', '');
+        this.outOfBounds = false;
         break;
       default:
         break;

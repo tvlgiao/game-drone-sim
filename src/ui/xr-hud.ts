@@ -22,6 +22,8 @@ export interface XrHudState {
    * VR, lands on its 2D menu (settings) instead and says so.
    */
   exitHint?: string;
+  /** selected level name on the menu card; with it, Y cycles levels */
+  level?: string;
 }
 
 export const XR_EXIT_HINT = 'B Exit VR';
@@ -35,6 +37,11 @@ const GREEN = '#7dffb0';
 const RED = '#ff7a6b';
 const AMBER = '#ffc861';
 
+function menuSub(level: string | undefined, best: number | null): string {
+  const b = best !== null ? `Best ${formatTime(best)}` : '';
+  return level ? (b ? `${level} · ${b}` : level) : b || 'Night Loft';
+}
+
 export function xrHudContent(s: XrHudState): XrPanelContent {
   const r = s.race;
   const flightLine = `${s.armed ? 'ARMED' : 'DISARMED'} · ${s.mode.toUpperCase()} · ${CAM[s.camera]} · ${s.altitude.toFixed(1)} m`;
@@ -44,7 +51,7 @@ export function xrHudContent(s: XrHudState): XrPanelContent {
   const hint = (h: string): string => s.toast || h;
   switch (r.status) {
     case 'menu':
-      return { layout: 'menu', title: 'DRONE SIM VR', sub: r.bestTime !== null ? `Best ${formatTime(r.bestTime)}` : 'Night Loft', hint: hint(`A Race · X Free fly · ${exit}`), accent: CYAN };
+      return { layout: 'menu', title: 'DRONE SIM VR', sub: menuSub(s.level, r.bestTime), hint: hint(`A Race · X Free fly · ${s.level ? 'Y Level · ' : ''}${exit}`), accent: CYAN };
     case 'paused':
       return { layout: 'menu', title: 'PAUSED', sub: 'L-stick click recentre · L-trigger heading arrow', hint: hint(`A Resume · X Menu · ${exit}`), accent: AMBER };
     case 'finished':
