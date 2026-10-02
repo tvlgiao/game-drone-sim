@@ -130,6 +130,7 @@ function boot(): void {
     shell = new MobileShell(uiRoot, {
       storage,
       standalone: device.standalone,
+      form: device.form,
       onGateTap: () => {
         // Runs inside the tap: the gesture both unlocks WebAudio and allows the fullscreen request.
         void audio.resume();
