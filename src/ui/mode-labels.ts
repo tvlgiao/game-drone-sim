@@ -80,8 +80,9 @@ export function throttleDownHint(s: ModeSettings, keyboard: boolean): string {
   return c === 'rt' ? 'Release RT' : `${c === 'left' ? 'Left' : 'Right'} stick fully down`;
 }
 
-/** Vertical-FOV clamp of the FPV camera, mirrored from CameraRig (tests/unit/mode-labels.test.ts pins it to the rig). */
-export const FPV_FOV_V_RANGE = { min: 35, max: 110 } as const;
+/** Vertical-FOV clamp of the FPV camera, owned by CameraRig. */
+export { FPV_FOV_V_RANGE } from '../render/camera-rig';
+import { FPV_FOV_V_RANGE } from '../render/camera-rig';
 
 const RAD = Math.PI / 180;
 

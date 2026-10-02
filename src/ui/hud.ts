@@ -220,15 +220,6 @@ export class Hud {
     if (s === 'main' && data && 'best' in data) this.menus.setMenuBest(data.best ?? null);
     if (s === 'bye') this.clearToasts();
     this.menus.show(s as ScreenName, data);
-    if (s === 'finish') this.markFinishDelta();
-  }
-
-  /** Colours the finish delta by its sign: "−1.20 s" faster (green), "+0.40 s" slower (amber). */
-  private markFinishDelta(): void {
-    const el = this.root.querySelector<HTMLElement>('.ds-screen--finish [data-f="delta"]');
-    if (!el) return;
-    const t = el.textContent ?? '';
-    el.dataset.sign = t.startsWith('−') || t.startsWith('-') ? 'faster' : t.startsWith('+') ? 'slower' : '';
   }
 
   /** Currently open menu screen ('none' while flying). */
