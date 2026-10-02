@@ -316,6 +316,11 @@ export class Hud {
     return this.menus.current;
   }
 
+  /** Removes the document-level listener (a HUD re-created by HMR or a test must not stack them). */
+  dispose(): void {
+    this.root.ownerDocument.removeEventListener('pointerdown', this.onPointerDown);
+  }
+
   /** iOS app: hide the main-menu Quit button. */
   hideExit(): void {
     this.menus.hideExit();
