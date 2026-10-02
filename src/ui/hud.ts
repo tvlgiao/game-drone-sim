@@ -381,8 +381,10 @@ export class Hud {
         }
       }
     }
+    if (this.refs.hint.textContent === msg) return;
     this.text(this.refs.hint, msg);
     this.cls(this.refs.hint, msg ? 'is-on' : '');
+    this.placeToasts();
   }
 
   private updateSticks(input: InputFrame): void {
@@ -451,26 +453,45 @@ export class Hud {
   }
 
   /**
-   * Toasts get their own lane: while a centre title (countdown digit, CRASHED, GO!) is up they sit just
-   * under the title stack instead of on top of it; otherwise the stylesheet's top-of-screen lane applies.
+   * Toasts get their own lane. While a centre title (countdown digit, CRASHED, GO!) is up they sit just
+   * above the bottom telemetry card / arm hint, clear of the title and of the respawning drone under it;
+   * when that gap is too short they fall back to just under the title stack. Otherwise the stylesheet's
+   * top-of-screen lane applies.
    */
   private placeToasts(): void {
     const box = this.refs.toasts;
     const center = this.refs.center.parentElement!;
     const up = !!(this.refs.center.textContent || this.refs.centerSub.textContent);
-    if (!up || !box.childElementCount) {
-      box.style.top = '';
-      return;
-    }
+    box.style.top = '';
+    box.style.bottom = '';
+    if (!up || !box.childElementCount) return;
     const hud = box.offsetParent as HTMLElement | null;
     if (!hud) return;
     const host = hud.getBoundingClientRect();
     // Big digits overflow their line-height:1 box (and pop in scaled up): measure the glyphs too.
     const glyphs = document.createRange();
     glyphs.selectNodeContents(this.refs.center);
-    const bottom = Math.max(center.getBoundingClientRect().bottom, glyphs.getBoundingClientRect().bottom);
+    const titleBottom = Math.max(center.getBoundingClientRect().bottom, glyphs.getBoundingClientRect().bottom);
     const gap = 12;
-    box.style.top = `${Math.round(bottom - host.top + gap)}px`;
+    const lane = box.getBoundingClientRect();
+    const floorAbove = (els: (HTMLElement | null)[]): number => {
+      let floor = host.bottom - gap;
+      for (const el of els) {
+        const r = el?.getBoundingClientRect();
+        if (r && r.height > 0 && r.left < lane.right && lane.left < r.right) floor = Math.min(floor, r.top - gap);
+      }
+      return floor;
+    };
+    const tele = hud.querySelector<HTMLElement>('.ds-hud__bl');
+    const hint = this.refs.hint.classList.contains('is-on') ? this.refs.hint : null;
+    // Short screens: no room above the arm hint, so the toast sits over it (opaque, it hides the hint for its 3 s).
+    const floor = [floorAbove([tele, hint]), floorAbove([tele])].find((f) => f - lane.height >= titleBottom + gap);
+    if (floor !== undefined) {
+      box.style.top = 'auto';
+      box.style.bottom = `${Math.round(host.bottom - floor)}px`;
+    } else {
+      box.style.top = `${Math.round(titleBottom - host.top + gap)}px`;
+    }
   }
 
   /** Entrance only: the text stays fully visible until the next setCenter (countdown digit, CRASHED). */

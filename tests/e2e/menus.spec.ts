@@ -195,6 +195,7 @@ test.describe('desktop menus', () => {
     const body = page.locator('.ds-screen--controls [data-f="body"]');
     await expect(body.locator('.ds-pad__labels')).not.toContainText('RT');
     await expect(body.locator('[data-f="padTip"]')).toContainText('does not re-centre');
+    await expect(body.locator('[data-f="padTip"]')).not.toContainText('Gamepad / keyboard');
     await expect(body.locator('[data-f="touchTable"]')).toHaveCount(0);
     await expect(body.locator('thead')).not.toContainText('Touch controllers');
     expect(errors).toEqual([]);
@@ -211,6 +212,64 @@ test.describe('desktop menus', () => {
     expect(boxes.map((b) => b[0] - boxes[0]![0])).toEqual(boxes.map(() => 0)); // one row
     expect(new Set(boxes.map((b) => b[1])).size).toBe(1); // one height
     await expect(footer.locator('.ds-btn--sm')).toHaveCount(0);
+    expect(errors).toEqual([]);
+  });
+
+  test('Settings: About and Reset are link rows (label + chevron, no stepper value); Reset in the danger colour', async ({ page }) => {
+    await boot(page);
+    await page.getByRole('button', { name: 'Settings' }).click();
+    const settings = page.locator('.ds-screen--settings');
+    const about = settings.locator('.ds-row[data-act="about"]');
+    const reset = settings.locator('.ds-row[data-act="confirm-reset"]');
+    for (const row of [about, reset]) {
+      await expect(row.locator('.ds-row__value, .ds-arrow, .ds-row__ctl')).toHaveCount(0);
+      await expect(row.locator('.ds-row__chev')).toHaveText('›');
+    }
+    await expect(about.locator('.ds-row__hint')).toContainText(`Version ${VERSION}`);
+    const colour = (l: typeof about) => l.locator('.ds-row__label').evaluate((e) => getComputedStyle(e).color);
+    const dangerBtn = await page.locator('.ds-screen--confirm-reset [data-act="reset-all"] span').evaluate((e) => getComputedStyle(e).color);
+    expect(await colour(reset)).toBe(dangerBtn);
+    expect(await colour(about)).not.toBe(dangerBtn);
+    expect(errors).toEqual([]);
+  });
+
+  for (const vp of [
+    { width: 1920, height: 1080 },
+    { width: 1280, height: 720 },
+  ]) {
+    test(`dialog footers stay in view without scrolling at ${vp.width}x${vp.height}`, async ({ page }) => {
+      await page.setViewportSize(vp);
+      await boot(page);
+      await page.getByRole('button', { name: 'Settings' }).click();
+      const inView = async (screen: string) => {
+        const back = page.locator(`.ds-screen--${screen} .ds-dialog > .ds-dialog__actions:last-of-type [data-act="back"]`);
+        await expect(back).toBeVisible();
+        await page.waitForTimeout(450); // past the screen's rise-in animation
+        const b = (await back.boundingBox())!;
+        expect(b.y + b.height, screen).toBeLessThanOrEqual(vp.height);
+        // the footer is the topmost element at the Back button's centre (not covered, not scrolled off)
+        const hit = await page.evaluate(([x, y]) => document.elementFromPoint(x!, y!)?.closest('[data-act]')?.getAttribute('data-act'), [b.x + b.width / 2, b.y + b.height / 2]);
+        expect(hit, screen).toBe('back');
+      };
+      await inView('settings');
+      await page.locator('.ds-screen--settings').getByRole('button', { name: 'Controller ›', exact: true }).click();
+      await inView('controller');
+      await page.locator('.ds-screen--controller').getByRole('button', { name: 'Rates ›', exact: true }).click();
+      await inView('rates');
+      expect(errors).toEqual([]);
+    });
+  }
+
+  test('About: the three link buttons share one row at equal width; error title uses a curly apostrophe', async ({ page }) => {
+    await boot(page);
+    await page.getByRole('button', { name: 'About' }).click();
+    const links = page.locator('.ds-screen--about .ds-about__links .ds-btn');
+    await expect(links).toHaveCount(3);
+    const boxes = await links.evaluateAll((els) => els.map((e) => e.getBoundingClientRect()).map((r) => [Math.round(r.top), Math.round(r.width)]));
+    expect(new Set(boxes.map((b) => b[0])).size).toBe(1);
+    expect(Math.max(...boxes.map((b) => b[1])) - Math.min(...boxes.map((b) => b[1]))).toBeLessThanOrEqual(1);
+    await page.evaluate(() => (window as unknown as { __drone: Hook }).__drone.showError('test'));
+    await expect(page.locator('.ds-screen--error .ds-dialog__title')).toHaveText('Can’t start the simulator');
     expect(errors).toEqual([]);
   });
 
@@ -328,6 +387,34 @@ test.describe('Quest Browser', () => {
     await expect(row('Heading arrow')).toHaveText('Left trigger');
     await expect(body.locator('[data-f="xrTip"]')).toContainText('holds altitude');
     await expect(body.locator('.ds-pad-wrap')).toHaveCount(0); // no Xbox diagram for a headset without a gamepad
+    // the gamepad note must not read as contradicting the VR one: each names its input
+    await expect(body.locator('[data-f="padTip"]')).toHaveText(/^Gamepad \/ keyboard: arming needs throttle at zero/);
+    await expect(body.locator('[data-f="xrTip"]')).toHaveText(/^VR: /);
+    expect(errors).toEqual([]);
+  });
+
+  test('Controller setup without a gamepad explains Touch controllers; no keyboard help', async ({ page }) => {
+    await boot(page);
+    await page.getByRole('button', { name: 'Settings' }).click();
+    await page.getByRole('button', { name: 'Controller ›', exact: true }).click();
+    const dev = page.locator('.ds-screen--controller .ds-dev');
+    await expect(dev.locator('[data-f="devEmpty"]')).toHaveText('No gamepad connected');
+    await expect(dev).toContainText('Touch controllers');
+    await expect(dev).toContainText('no gamepad needed');
+    await expect(dev).not.toContainText('Keyboard');
+    await expect(dev).not.toContainText('USB');
+    expect(errors).toEqual([]);
+  });
+
+  test('1280×720 panel: descriptions ≥ 13 px, micro labels ≥ 11 px', async ({ page }) => {
+    await page.setViewportSize({ width: 1280, height: 720 });
+    await boot(page);
+    await expect(page.locator('body')).toHaveClass(/\bis-quest\b/);
+    await page.getByRole('button', { name: 'Settings' }).click();
+    await page.getByRole('button', { name: 'Controller ›', exact: true }).click();
+    const px = (sel: string) => page.locator(sel).first().evaluate((e) => parseFloat(getComputedStyle(e).fontSize));
+    for (const sel of ['.ds-screen--controller .ds-row__hint', '.ds-screen--controller .ds-help']) expect(await px(sel), sel).toBeGreaterThanOrEqual(13);
+    for (const sel of ['.ds-screen--controller .ds-h3', '.ds-screen--controller figcaption', '.ds-hud .ds-label', '.ds-hud .ds-unit', '.ds-stick__lbl']) expect(await px(sel), sel).toBeGreaterThanOrEqual(11);
     expect(errors).toEqual([]);
   });
 });
@@ -372,6 +459,24 @@ test.describe('touch devices', () => {
     await page.getByRole('button', { name: 'Controls' }).tap();
     await expect(tip).toContainText('holds where you let go');
     await expect(tip).toContainText('Pull it fully down, then tap ARM');
+    expect(errors).toEqual([]);
+  });
+
+  test('Settings footer stays in view; on a landscape phone its buttons share the row equally', async ({ page }) => {
+    await boot(page);
+    await passGate(page);
+    await page.getByRole('button', { name: 'Settings' }).tap();
+    await page.waitForTimeout(450); // past the screen's rise-in animation
+    const footer = page.locator('.ds-screen--settings .ds-dialog__actions');
+    const vh = page.viewportSize()!.height;
+    const back = (await footer.locator('[data-act="back"]').boundingBox())!;
+    expect(back.y + back.height).toBeLessThanOrEqual(vh);
+    const hit = await page.evaluate(([x, y]) => document.elementFromPoint(x!, y!)?.closest('[data-act]')?.getAttribute('data-act'), [back.x + back.width / 2, back.y + back.height / 2]);
+    expect(hit).toBe('back');
+    if (vh <= 500) {
+      const widths = await footer.locator('.ds-btn:visible').evaluateAll((els) => els.map((e) => e.getBoundingClientRect().width));
+      expect(Math.max(...widths) - Math.min(...widths)).toBeLessThanOrEqual(1);
+    }
     expect(errors).toEqual([]);
   });
 

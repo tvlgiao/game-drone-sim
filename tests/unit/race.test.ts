@@ -354,6 +354,63 @@ describe('RaceController respawn point', () => {
   });
 });
 
+describe('RaceController lap clock vs arming', () => {
+  it('holds at zero while disarmed after GO and starts at the first arm', () => {
+    const rc = new RaceController(LEVEL, null);
+    rc.startRace();
+    const s = drone();
+    s.armed = false;
+    idle(rc, 3.001, s);
+    expect(rc.snapshot().status).toBe('racing');
+    idle(rc, 2, s);
+    expect(rc.snapshot().time).toBe(0);
+    s.armed = true;
+    idle(rc, 0.5, s);
+    expect(rc.snapshot().time).toBeCloseTo(0.5, 6);
+  });
+
+  it('starts at GO when already armed', () => {
+    const rc = new RaceController(LEVEL, null);
+    rc.startRace();
+    idle(rc, 3.5, drone());
+    expect(rc.snapshot().time).toBeCloseTo(0.5, 2);
+  });
+
+  it('keeps running once started, through a disarmed crash respawn', () => {
+    const rc = startedRace();
+    idle(rc, 1);
+    const s = drone();
+    s.armed = false;
+    idle(rc, 0.001, s, [contact(10)]);
+    expect(rc.snapshot().status).toBe('crashed');
+    idle(rc, 2, s);
+    expect(rc.snapshot().status).toBe('racing');
+    expect(rc.snapshot().time).toBeCloseTo(3.001, 6);
+  });
+
+  it('a crash before the first arm does not start the clock', () => {
+    const rc = new RaceController(LEVEL, null);
+    rc.startRace();
+    const s = drone();
+    s.armed = false;
+    idle(rc, 3.001, s);
+    idle(rc, 0.001, s, [contact(10)]);
+    expect(rc.snapshot().status).toBe('crashed');
+    idle(rc, 1, s);
+    expect(rc.snapshot().time).toBe(0);
+  });
+
+  it('a new race re-arms the gate', () => {
+    const rc = startedRace();
+    idle(rc, 1);
+    rc.startRace();
+    const s = drone();
+    s.armed = false;
+    idle(rc, 4, s);
+    expect(rc.snapshot().time).toBe(0);
+  });
+});
+
 describe('RaceController pause', () => {
   it('pause freezes the timer and resume continues', () => {
     const rc = startedRace();
