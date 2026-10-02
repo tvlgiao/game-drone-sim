@@ -1,0 +1,76 @@
+/* Store badges (badge.ts): a dark pill like the platforms' own badges; "Coming soon" ones are dimmed labels. */
+.st-badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.st-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 48px;
+  min-width: 164px;
+  padding: 7px 16px 7px 12px;
+  border: 1px solid rgba(234, 246, 255, 0.28);
+  border-radius: 10px;
+  background: #000;
+  color: var(--ds-text);
+  text-decoration: none;
+  line-height: 1.1;
+  transition: border-color 0.15s ease, background-color 0.15s ease;
+}
+
+.st-badge__icon {
+  flex: none;
+  width: 24px;
+  height: 24px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.6;
+  stroke-linejoin: round;
+  stroke-linecap: round;
+}
+
+.st-badge__text {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+}
+
+.st-badge__kicker {
+  font-size: 0.68rem;
+  letter-spacing: 0.04em;
+  color: var(--ds-muted);
+}
+
+.st-badge__name {
+  font-size: 1.05rem;
+  font-weight: 650;
+  letter-spacing: 0.01em;
+}
+
+a.st-badge:hover {
+  border-color: var(--ds-edge-hot);
+  background: #07101c;
+}
+
+a.st-badge:focus-visible {
+  outline: 2px solid var(--ds-cyan);
+  outline-offset: 3px;
+}
+
+.st-badge.is-soon {
+  border-style: dashed;
+  border-color: rgba(234, 246, 255, 0.22);
+  background: rgba(0, 0, 0, 0.45);
+  color: rgba(234, 246, 255, 0.78);
+}
+
+.st-badge.is-soon .st-badge__kicker {
+  color: var(--ds-amber);
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  font-size: 0.6rem;
+}

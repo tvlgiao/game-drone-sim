@@ -1,0 +1,19 @@
+/* Colour and type tokens shared by the game UI (.ds-ui), the landing page and the Quest store gate (.ds-site). */
+.ds-ui,
+.ds-site {
+  --ds-cyan: #28e7ff;
+  --ds-cyan-dim: rgba(40, 231, 255, 0.55);
+  --ds-magenta: #ff3de8;
+  --ds-green: #3dffa0;
+  --ds-amber: #ffc53d;
+  --ds-red: #ff4661;
+  --ds-danger-text: #ff9fb1;
+  --ds-text: #eaf6ff;
+  --ds-muted: rgba(200, 225, 245, 0.62);
+  --ds-panel: linear-gradient(160deg, rgba(14, 24, 40, 0.72), rgba(6, 10, 20, 0.62));
+  --ds-panel-solid: rgba(8, 14, 26, 0.86);
+  --ds-edge: rgba(120, 220, 255, 0.2);
+  --ds-edge-hot: rgba(40, 231, 255, 0.75);
+  --ds-font: 'SF Pro Display', 'Segoe UI Variable Display', 'Segoe UI', system-ui, -apple-system, 'Helvetica Neue', Arial, sans-serif;
+  --ds-mono: ui-monospace, 'SF Mono', 'Cascadia Mono', 'JetBrains Mono', Menlo, Consolas, monospace;
+}

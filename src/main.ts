@@ -20,6 +20,9 @@ import { throttleDownHint } from './ui/mode-labels';
 import { throttleSlot } from './input/stick';
 import { MobileShell, hardenGestures } from './ui/mobile-shell';
 import { isQuestBrowser, onSessionGranted, requestVrSession, tuneXrSession, vrSupported, xrSessionObscured } from './core/xr';
+import { Capacitor } from '@capacitor/core';
+import { detectEdition, editionCaps, type EditionCaps } from './core/edition';
+import { checkThisDevice } from './core/ownership';
 import { XR_APP_EXIT_HINT, XR_EXIT_HINT, xrHudContent } from './ui/xr-hud';
 import { TouchControls } from './ui/touch-controls';
 import type { ButtonEvents, CameraMode, ControlInput, DroneState, GameEvent, InputFrame, QualityTier } from './types';
@@ -56,7 +59,7 @@ function cloneState(s: DroneState): DroneState {
   };
 }
 
-function boot(): void {
+function boot(caps: EditionCaps): void {
   const canvas = document.getElementById('game') as HTMLCanvasElement;
   const uiRoot = document.getElementById('ui') as HTMLElement;
   const storage = safeStorage();
@@ -73,7 +76,7 @@ function boot(): void {
 
   let view: GameView;
   try {
-    const xrCapable = 'xr' in navigator;
+    const xrCapable = caps.vr && 'xr' in navigator;
     view = new GameView(canvas, LOFT_LEVEL, tier, device.form, { xr: xrCapable, antialias: isQuestBrowser(navigator.userAgent) });
   } catch (err) {
     hud.setError(`WebGL2 is not available on this device/browser (${(err as Error).message}). Enable hardware acceleration or try a recent Chrome, Edge, Firefox or Safari.`);
@@ -108,19 +111,22 @@ function boot(): void {
   if (device.native === 'ios') hud.hideExit();
   // Offline play for the web build, the home-screen PWA and the Quest app (a TWA on this origin): the
   // worker precaches every built file on first visit. The iOS/Android shells already bundle the files.
+  // The worker sits at the site root (pages live in /play/ and /app/) so its scope covers both.
   if (import.meta.env.PROD && !device.native && window.isSecureContext && 'serviceWorker' in navigator) {
-    navigator.serviceWorker.register('./sw.js').catch((err: unknown) => console.warn('Service worker registration failed (no offline play):', err));
+    navigator.serviceWorker.register('../sw.js').catch((err: unknown) => console.warn('Service worker registration failed (no offline play):', err));
   }
   // The installed Quest app (immersive Horizon OS app, display-mode standalone) goes straight into VR:
   // its launch carries user activation, so requestSession needs no click. A plain browser tab does not.
-  const questApp = isQuestBrowser(navigator.userAgent) && device.standalone;
-  void vrSupported(navigator).then((ok) => {
-    if (!ok) return;
-    hud.enableVr();
-    if (questApp && !selftest) void enterVr();
-  });
-  // The Quest app launches in immersive mode: go straight into VR when the browser grants a session.
-  onSessionGranted(navigator, () => void enterVr());
+  const questApp = caps.vr && isQuestBrowser(navigator.userAgent) && device.standalone;
+  if (caps.vr) {
+    void vrSupported(navigator).then((ok) => {
+      if (!ok) return;
+      hud.enableVr();
+      if (questApp && !selftest) void enterVr();
+    });
+    // The Quest app launches in immersive mode: go straight into VR when the browser grants a session.
+    onSessionGranted(navigator, () => void enterVr());
+  }
 
   let touchUi: TouchControls | null = null;
   let shell: MobileShell | null = null;
@@ -264,7 +270,7 @@ function boot(): void {
   /** Start an immersive-vr session (runs inside the menu click, which WebXR requires). */
   async function enterVr(): Promise<void> {
     // a second click while the first request is pending must not start (or tear down) anything
-    if (xrSession || xrStarting) return;
+    if (!caps.vr || xrSession || xrStarting) return;
     xrStarting = true;
     let session: XRSession | null = null;
     try {
@@ -732,21 +738,36 @@ function boot(): void {
 }
 
 /** A boot that throws must not leave the splash covering the page. */
-function safeBoot(): void {
+function safeBoot(caps: EditionCaps): void {
   try {
-    boot();
+    boot(caps);
   } catch (err) {
     document.body.classList.add('is-ready');
     throw err;
   }
 }
 
-// `?xremu=1` emulates a Quest 2 (IWER) before boot so navigator.xr is the emulated runtime.
-if (new URLSearchParams(location.search).get('xremu') === '1') {
-  void import('./core/xr-emulator').then((m) => {
-    m.installXrEmulator();
-    safeBoot();
-  });
-} else {
-  safeBoot();
+/** /app/ boots only for a Meta Horizon Store owner; `?owned=1` skips the check in `npm run dev`. */
+async function owned(params: URLSearchParams): Promise<boolean> {
+  if (import.meta.env.DEV && params.get('owned') === '1') return true;
+  return (await checkThisDevice(safeStorage())).owned;
 }
+
+async function start(): Promise<void> {
+  const params = new URLSearchParams(location.search);
+  const caps = editionCaps(detectEdition(location.pathname, Capacitor.isNativePlatform(), import.meta.env.DEV));
+  // `?xremu=1` emulates a Quest 2 (IWER) before boot so navigator.xr is the emulated runtime.
+  if (params.get('xremu') === '1') (await import('./core/xr-emulator')).installXrEmulator();
+  if (caps.ownershipCheck && !(await owned(params))) {
+    (await import('./ui/store-gate')).showStoreGate(document);
+    document.body.classList.add('is-ready');
+    return;
+  }
+  safeBoot(caps);
+}
+
+// a failed lazy import (offline, no cache) must not leave the splash up either
+void start().catch((err: unknown) => {
+  document.body.classList.add('is-ready');
+  throw err;
+});

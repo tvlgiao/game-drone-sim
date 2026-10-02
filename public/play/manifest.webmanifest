@@ -1,7 +1,7 @@
 {
-  "name": "Drone Sim — FPV Loft",
+  "name": "Drone Sim (Web)",
   "short_name": "Drone Sim",
-  "description": "FPV drone simulator for Meta Quest: fly in VR or on the 2D panel, realistic quad physics, ring race in a night loft.",
+  "description": "Free browser FPV drone simulator: realistic quad physics, touch, gamepad or keyboard, ring race in a night loft.",
   "id": "./",
   "start_url": "./",
   "scope": "./",

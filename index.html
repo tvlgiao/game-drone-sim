@@ -2,129 +2,155 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <meta name="color-scheme" content="dark" />
     <meta name="theme-color" content="#05070d" />
-    <meta name="apple-mobile-web-app-capable" content="yes" />
-    <meta name="mobile-web-app-capable" content="yes" />
-    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
-    <meta name="apple-mobile-web-app-title" content="Drone Sim" />
-    <meta name="format-detection" content="telephone=no" />
-    <title>Drone Sim — FPV Loft</title>
-    <link rel="manifest" href="./manifest.webmanifest" />
-    <link rel="apple-touch-icon" href="./icons/icon-180.png" />
-    <link rel="icon" type="image/png" sizes="192x192" href="./icons/icon-192.png" />
+    <title>Drone Sim — FPV drone simulator for web, mobile and Meta Quest</title>
+    <meta name="description" content="Fly an FPV racing quad through a neon night loft. Realistic physics, FPV, line-of-sight and chase cameras, Betaflight-style rates, gamepad, touch or keyboard, and Meta Quest VR. Play free in your browser." />
+    <link rel="canonical" href="https://dronesim.coworkgamestudio.com/" />
+    <meta property="og:type" content="website" />
+    <meta property="og:site_name" content="Drone Sim" />
+    <meta property="og:title" content="Drone Sim — FPV drone simulator" />
+    <meta property="og:description" content="Realistic quad physics, three cameras, Betaflight-style rates and Meta Quest VR. Play free in your browser." />
+    <meta property="og:url" content="https://dronesim.coworkgamestudio.com/" />
+    <meta property="og:image" content="https://dronesim.coworkgamestudio.com/screenshots/og.jpg" />
+    <meta property="og:image:width" content="1200" />
+    <meta property="og:image:height" content="630" />
+    <meta property="og:image:alt" content="A racing quad flying through glowing rings in a brick night loft" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content="Drone Sim — FPV drone simulator" />
+    <meta name="twitter:description" content="Realistic quad physics, three cameras, Betaflight-style rates and Meta Quest VR. Play free in your browser." />
+    <meta name="twitter:image" content="https://dronesim.coworkgamestudio.com/screenshots/og.jpg" />
+    <link rel="apple-touch-icon" href="/icons/icon-180.png" />
+    <link rel="icon" type="image/png" sizes="192x192" href="/icons/icon-192.png" />
     <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 32 32%22%3E%3Ccircle cx=%2216%22 cy=%2216%22 r=%2212%22 fill=%22none%22 stroke=%22%2322e5ff%22 stroke-width=%224%22/%3E%3C/svg%3E" />
-    <style>
-      html, body {
-        margin: 0;
-        height: 100%;
-        background: #05070d;
-        overflow: hidden;
-        overscroll-behavior: none;
-        -webkit-user-select: none;
-        user-select: none;
-        -webkit-touch-callout: none;
-        -webkit-tap-highlight-color: transparent;
-        -webkit-text-size-adjust: 100%;
-      }
-      #app { position: fixed; inset: 0; overflow: hidden; }
-      #game { display: block; width: 100%; height: 100%; outline: none; touch-action: none; }
-      #ui { position: absolute; inset: 0; pointer-events: none; }
-      /* Boot splash: painted with the first HTML byte, faded once the first 3D frame is up (see script below). */
-      #splash {
-        position: fixed;
-        inset: 0;
-        z-index: 100;
-        display: grid;
-        place-content: center;
-        justify-items: center;
-        gap: clamp(14px, 2.4vh, 30px);
-        background:
-          radial-gradient(ellipse at 20% 10%, rgba(255, 61, 232, 0.14), transparent 50%),
-          radial-gradient(ellipse at 85% 90%, rgba(40, 231, 255, 0.14), transparent 55%),
-          #05070d;
-        color: #f4fbff;
-        font-family: 'SF Pro Display', 'Segoe UI Variable Display', 'Segoe UI', system-ui, -apple-system, 'Helvetica Neue', Arial, sans-serif;
-        transition: opacity 0.45s ease, visibility 0s linear 0.45s;
-      }
-      #splash .sp-title {
-        margin: 0;
-        font-size: clamp(36px, min(7vw, 9vh), 120px);
-        font-weight: 900;
-        font-style: italic;
-        letter-spacing: 0.06em;
-        line-height: 1;
-        white-space: nowrap;
-        text-shadow: 0 0 10px rgba(40, 231, 255, 0.9), 0 0 40px rgba(40, 231, 255, 0.5), 0 0 90px rgba(255, 61, 232, 0.3);
-      }
-      #splash .sp-sub {
-        margin: 0;
-        padding-left: 0.5em;
-        font-size: clamp(11px, min(1vw, 1.6vh), 18px);
-        font-weight: 700;
-        letter-spacing: 0.5em;
-        text-transform: uppercase;
-        color: rgba(200, 225, 245, 0.62);
-      }
-      #splash .sp-bar {
-        position: relative;
-        width: clamp(140px, 16vw, 280px);
-        height: 3px;
-        border-radius: 3px;
-        overflow: hidden;
-        background: rgba(255, 255, 255, 0.1);
-      }
-      #splash .sp-bar::after {
-        content: '';
-        position: absolute;
-        inset: 0;
-        width: 40%;
-        border-radius: inherit;
-        background: linear-gradient(90deg, transparent, #28e7ff, #ff3de8, transparent);
-        animation: sp-slide 1.3s ease-in-out infinite;
-      }
-      @keyframes sp-slide {
-        from { transform: translateX(-100%); }
-        to { transform: translateX(250%); }
-      }
-      @media (prefers-reduced-motion: reduce) {
-        #splash .sp-bar::after { animation: none; width: 100%; opacity: 0.6; }
-      }
-      body.is-ready #splash { opacity: 0; visibility: hidden; pointer-events: none; }
-      .sp-sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
-    </style>
+    <style>html, body { background: #05070d; }</style>
+    <script type="module" src="/src/landing/main.ts"></script>
   </head>
-  <body>
-    <div id="app">
-      <canvas id="game" tabindex="0" aria-label="Drone simulator 3D view"></canvas>
-      <div id="ui"></div>
-    </div>
-    <div id="splash" role="status" aria-live="polite">
-      <p class="sp-title" aria-hidden="true">DRONE SIM</p>
-      <p class="sp-sub" aria-hidden="true">FPV Racing · Night Loft</p>
-      <div class="sp-bar" aria-hidden="true"></div>
-      <span class="sp-sr">Loading Drone Sim…</span>
-    </div>
-    <script>
-      // Fades the splash once main.ts adds body.is-ready (first rendered frame, or a boot that threw), on a
-      // fatal-error screen, or after 20 s as a last resort.
-      (function () {
-        var b = document.body;
-        var t0 = Date.now();
-        function done() {
-          b.classList.add('is-ready');
-          setTimeout(function () {
-            var el = document.getElementById('splash');
-            if (el) el.remove();
-          }, 600);
-        }
-        (function poll() {
-          if (b.classList.contains('is-ready')) return done();
-          if (document.querySelector('#ui.ds-fatal') || Date.now() - t0 > 20000) return done();
-          setTimeout(poll, 50);
-        })();
-      })();
-    </script>
-    <script type="module" src="/src/main.ts"></script>
+  <body class="ds-site ld">
+    <a class="ld-skip" href="#main">Skip to content</a>
+    <header class="ld-header">
+      <div class="ld-wrap ld-header__row">
+        <a class="ld-brand" href="./" aria-label="Drone Sim home">
+          <svg class="ld-brand__mark" viewBox="0 0 32 32" width="28" height="28" aria-hidden="true" focusable="false"><circle cx="16" cy="16" r="11" /></svg>
+          <span class="ld-brand__name">DRONE SIM</span>
+        </a>
+        <nav class="ld-nav" aria-label="Page">
+          <a href="#features">Features</a>
+          <a href="#screenshots">Screenshots</a>
+          <a class="ld-nav__play" href="./play/">Play</a>
+        </nav>
+      </div>
+    </header>
+
+    <main id="main">
+      <section class="ld-hero" aria-labelledby="ld-title">
+        <div class="ld-wrap ld-hero__grid">
+          <div class="ld-hero__copy">
+            <p class="ld-eyebrow">FPV drone simulator</p>
+            <h1 class="ld-title" id="ld-title">Drone Sim</h1>
+            <p class="ld-tagline">Race a real-feel FPV quad through a neon night loft. Learn to hover, then thread the rings in acro.</p>
+            <div class="ld-cta">
+              <a class="ld-btn ld-btn--primary" href="./play/">Play free on the web</a>
+              <p class="ld-cta__note">Runs in your browser. No download, no sign-up.</p>
+            </div>
+            <div class="ld-stores">
+              <p class="ld-stores__label">Also on</p>
+              <div class="st-badges"><!--store-badges--></div>
+            </div>
+          </div>
+          <figure class="ld-hero__shot">
+            <img
+              src="/screenshots/los-1280.jpg"
+              srcset="/screenshots/los-800.jpg 800w, /screenshots/los-1280.jpg 1280w"
+              sizes="(min-width: 960px) 56vw, 100vw"
+              width="1280"
+              height="720"
+              alt="Line-of-sight view: the quad flies between glowing cyan and magenta race rings in a brick loft, touch sticks on screen"
+              fetchpriority="high"
+              decoding="async"
+            />
+          </figure>
+        </div>
+      </section>
+
+      <section class="ld-section" id="features" aria-labelledby="ld-features">
+        <div class="ld-wrap">
+          <h2 class="ld-h2" id="ld-features">Built like a real quad</h2>
+          <ul class="ld-features">
+            <li class="ld-feature">
+              <svg class="ld-feature__icon" viewBox="0 0 24 24" width="28" height="28" aria-hidden="true" focusable="false"><path d="M2.5 8.5h19v8h-6l-2-2.5h-3l-2 2.5h-6z" /><circle cx="7.5" cy="12" r="1.6" /><circle cx="16.5" cy="12" r="1.6" /></svg>
+              <h3 class="ld-feature__title">FPV, line of sight and chase</h3>
+              <p>Fly through the goggles, from the pilot spot like at the field, or with a camera behind the quad. Switch any time.</p>
+            </li>
+            <li class="ld-feature">
+              <svg class="ld-feature__icon" viewBox="0 0 24 24" width="28" height="28" aria-hidden="true" focusable="false"><path d="M3 20.5h18M3 20.5V3.5" /><path d="M4 19c6 0 9-3 16-14" /></svg>
+              <h3 class="ld-feature__title">Betaflight-style rates</h3>
+              <p>RC rate, super rate and expo per axis with live curves. Acro or Angle mode, throttle expo and limit.</p>
+            </li>
+            <li class="ld-feature">
+              <svg class="ld-feature__icon" viewBox="0 0 24 24" width="28" height="28" aria-hidden="true" focusable="false"><path d="M7 7.5h10a4.5 4.5 0 0 1 4.3 5.8l-1.2 4a2.4 2.4 0 0 1-4.1.9L14 16h-4l-2 2.2a2.4 2.4 0 0 1-4.1-.9l-1.2-4A4.5 4.5 0 0 1 7 7.5z" /><path d="M7.5 10.5v3M6 12h3" /><circle cx="16.5" cy="11.5" r=".6" /><circle cx="15" cy="13.5" r=".6" /></svg>
+              <h3 class="ld-feature__title">Gamepad, touch or keyboard</h3>
+              <p>Plug in a gamepad or USB radio (Modes 1–4, axis setup), fly with on-screen sticks on a phone or tablet, or use the keyboard.</p>
+            </li>
+            <li class="ld-feature">
+              <svg class="ld-feature__icon" viewBox="0 0 24 24" width="28" height="28" aria-hidden="true" focusable="false"><path d="M3 8.5A2.5 2.5 0 0 1 5.5 6h13A2.5 2.5 0 0 1 21 8.5v6a2.5 2.5 0 0 1-2.5 2.5h-3.2l-1.6-2.2a2 2 0 0 0-3.4 0L8.7 17H5.5A2.5 2.5 0 0 1 3 14.5z" /></svg>
+              <h3 class="ld-feature__title">Meta Quest VR</h3>
+              <p>Stand on the pilot platform and fly with Touch controllers, with altitude hold on the thumbsticks.</p>
+            </li>
+          </ul>
+        </div>
+      </section>
+
+      <section class="ld-section" id="screenshots" aria-labelledby="ld-shots">
+        <div class="ld-wrap">
+          <h2 class="ld-h2" id="ld-shots">Screenshots</h2>
+          <ul class="ld-gallery">
+            <li>
+              <figure>
+                <img src="/screenshots/chase-800.jpg" width="800" height="450" loading="lazy" decoding="async" alt="Chase camera behind the quad as it lines up a cyan ring, phone touch controls on screen" />
+                <figcaption>Chase camera on a phone</figcaption>
+              </figure>
+            </li>
+            <li>
+              <figure>
+                <img src="/screenshots/fpv-800.jpg" width="800" height="450" loading="lazy" decoding="async" alt="FPV view diving through a striped race ring towards a magenta gate" />
+                <figcaption>FPV through the rings</figcaption>
+              </figure>
+            </li>
+            <li>
+              <figure>
+                <img src="/screenshots/vr-800.jpg" width="800" height="450" loading="lazy" decoding="async" alt="Meta Quest view in FPV with the floating flight card showing speed, mode and altitude" />
+                <figcaption>Meta Quest VR</figcaption>
+              </figure>
+            </li>
+            <li>
+              <figure>
+                <img src="/screenshots/menu-800.jpg" width="800" height="450" loading="lazy" decoding="async" alt="Main menu with Race, Free fly, Settings and Controls over the night loft" />
+                <figcaption>Race or free fly</figcaption>
+              </figure>
+            </li>
+          </ul>
+        </div>
+      </section>
+
+      <section class="ld-section ld-final" aria-labelledby="ld-final">
+        <div class="ld-wrap ld-final__box">
+          <h2 class="ld-h2" id="ld-final">Ready to fly?</h2>
+          <p>Every course is free to fly on a computer, phone or tablet browser.</p>
+          <a class="ld-btn ld-btn--primary" href="./play/">Play free on the web</a>
+        </div>
+      </section>
+    </main>
+
+    <footer class="ld-footer">
+      <div class="ld-wrap ld-footer__row">
+        <nav aria-label="Legal and support">
+          <a href="./privacy/">Privacy policy</a>
+          <a href="mailto:support@coworkgamestudio.com">support@coworkgamestudio.com</a>
+        </nav>
+        <p>© COWORK Game Studio</p>
+      </div>
+    </footer>
   </body>
 </html>
