@@ -427,6 +427,14 @@ describe('hint timer', () => {
     expect(m.hint).toBe(false);
   });
 
+  it('progress restarts the 20 s count', () => {
+    const m = at('throttle');
+    run(m, ctx({ armed: true, agl: 0.05 }), secs(HINT_AFTER - 1));
+    m.update(ctx({ armed: true, agl: 0.5 }));
+    expect(run(m, ctx({ armed: true, agl: 0.5 }), secs(HINT_AFTER - 1))).toEqual([]);
+    expect(m.hint).toBe(false);
+  });
+
   it('progress that falls back (hover window reset) does not count as progress', () => {
     const m = at('hover');
     run(m, ctx({ armed: true, agl: 2 }), secs(1));

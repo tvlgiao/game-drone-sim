@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <meta name="theme-color" content="#05070d" />
+    <title>Drone Sim — tutorial preview</title>
+    <link rel="icon" href="data:," />
+    <style>
+      html, body { margin: 0; height: 100%; background: #05070d; overflow: hidden; }
+      #app { position: fixed; inset: 0; }
+      /* Fake Training Field (daylight meadow) so card contrast can be judged without WebGL. */
+      #scene {
+        position: absolute; inset: 0;
+        background:
+          radial-gradient(ellipse 9% 14% at 50% 52%, transparent 60%, rgba(255, 150, 60, 0.95) 64%, rgba(255, 150, 60, 0.3) 70%, transparent 74%),
+          radial-gradient(ellipse 40% 12% at 25% 58%, #4f7a46 0 60%, transparent 62%),
+          radial-gradient(ellipse 50% 14% at 80% 58%, #5a8650 0 60%, transparent 62%),
+          linear-gradient(180deg, #7fb8e6 0%, #bfe0f4 56%, #6f9d5a 57%, #4c7a3c 100%);
+      }
+      #ui { position: absolute; inset: 0; pointer-events: none; }
+    </style>
+  </head>
+  <body>
+    <div id="app">
+      <div id="scene" aria-hidden="true"></div>
+      <div id="ui"></div>
+    </div>
+    <script type="module" src="/src/ui/tutorial-preview.ts"></script>
+  </body>
+</html>

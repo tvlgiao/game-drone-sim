@@ -64,11 +64,11 @@ export function xrHudContent(s: XrHudState): XrPanelContent {
 
 const XR_BAR_CELLS = 10;
 
-/** Text progress bar for the canvas card (block glyphs: no texture or mesh beyond the existing card). */
+/** Text progress bar for the canvas card (geometric-shape glyphs every headset font has; no extra texture or mesh). */
 export function xrProgressBar(value: number): string {
   const v = Math.min(1, Math.max(0, Number.isFinite(value) ? value : 0));
   const n = Math.round(v * XR_BAR_CELLS);
-  return `${'█'.repeat(n)}${'░'.repeat(XR_BAR_CELLS - n)} ${Math.round(v * 100)}%`;
+  return `${'●'.repeat(n)}${'○'.repeat(XR_BAR_CELLS - n)} ${Math.round(v * 100)}%`;
 }
 
 /**

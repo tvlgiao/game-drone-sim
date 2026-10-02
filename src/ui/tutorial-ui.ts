@@ -100,6 +100,7 @@ export class TutorialUi {
     skip: HTMLButtonElement;
     skipHint: HTMLElement;
     cont: HTMLButtonElement;
+    foot: HTMLElement;
   };
   private readonly textCache = new Map<HTMLElement, string>();
   private open: DialogName | null = null;
@@ -131,6 +132,7 @@ export class TutorialUi {
       skip: q<HTMLButtonElement>('skip'),
       skipHint: q('skiphint'),
       cont: q<HTMLButtonElement>('continue'),
+      foot: this.card.querySelector<HTMLElement>('.ds-tut-card__foot')!,
     };
     this.el.skip.addEventListener('click', () => this.cb.onSkip());
     this.el.cont.addEventListener('click', () => this.cb.onConfirm());
@@ -190,6 +192,7 @@ export class TutorialUi {
       this.text(p, t);
       p.hidden = t === '';
     }
+    e.lines[1]?.classList.toggle('is-notice', view.rearm);
     this.card.classList.toggle('is-hint', view.hint);
     const pct = Math.round(view.progress * 100);
     e.barFill.style.setProperty('--v', view.progress.toFixed(3));
@@ -198,7 +201,9 @@ export class TutorialUi {
     const welcome = view.id === 'welcome';
     e.cont.hidden = !welcome;
     const hold = view.skipHold > 0 ? `Skipping… ${Math.round(view.skipHold * 100)}%` : view.skipLabel;
-    this.text(e.skipHint, view.source === 'touch' ? '' : hold);
+    const skipText = view.source === 'touch' ? '' : hold;
+    this.text(e.skipHint, skipText);
+    e.foot.hidden = !welcome && skipText === '';
     this.setGlow(view.hint ? view : null);
   }
 

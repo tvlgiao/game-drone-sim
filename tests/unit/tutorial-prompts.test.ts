@@ -114,7 +114,9 @@ describe('promptFor', () => {
     expect(text('arm', 'gamepad', s({ stickMode: 1 }))).toContain('(Right stick ↓)');
     expect(text('throttle', 'gamepad', s({ stickMode: 1 }))).toContain('Throttle up (Right stick ↑)');
     expect(text('yaw', 'gamepad', s({ stickMode: 1 }))).toContain('Yaw right (Left stick →)');
-    expect(text('pitch-roll', 'gamepad', s({ stickMode: 1 }))).toContain('Pitch (Left stick ↑ / Left stick ↓)');
+    expect(text('pitch-roll', 'gamepad', s({ stickMode: 1 }))).toContain('Pitch (Left stick ↑ / ↓) flies forward and back, roll (Right stick ← / →) sideways.');
+    expect(text('pitch-roll', 'gamepad', s({ stickMode: 2, throttleSource: 'trigger' }))).toContain('Pitch (Right stick ↑ / ↓)');
+    expect(text('hover', 'gamepad', s({ throttleSource: 'trigger' }))).toContain('(Squeeze RT / Release RT)');
     expect(text('throttle', 'gamepad', s({ throttleSource: 'trigger' }))).toContain('Throttle up (Squeeze RT)');
     expect(text('arm', 'gamepad', s({ throttleSource: 'trigger' }))).toContain('(Release RT)');
     expect(text('welcome', 'gamepad', s({ throttleSource: 'trigger' }))).toContain('RT is throttle');
@@ -125,6 +127,9 @@ describe('promptFor', () => {
   it('touch points at the on-screen ARM / MODE / CAM buttons and thumbs; centring throttle holds height', () => {
     expect(text('welcome', 'touch', s())).toContain('Tap Continue to start.');
     expect(text('welcome', 'touch', s())).toContain('Left thumb: ↕ Throttle');
+    // RT throttle is a gamepad setting: the touch summary still names the throttle thumb
+    expect(text('welcome', 'touch', s({ throttleSource: 'trigger' }))).toContain('Left thumb: ↕ Throttle');
+    expect(text('welcome', 'xr', s({ throttleSource: 'trigger' }))).not.toContain('RT');
     expect(text('arm', 'touch', s())).toContain('Throttle fully down (Left thumb ↓), then tap ARM.');
     expect(text('arm', 'touch', s({ stickMode: 1 }))).toContain('(Right thumb ↓)');
     expect(text('throttle', 'touch', s())).toContain('Let go of the stick to hold that height.');
@@ -179,17 +184,22 @@ describe('tutorialView', () => {
     expect(v).toMatchObject({ id: 'yaw', number: 5, total: 12, title: 'Yaw: turn on the spot', phase: 'running', skipLabel: 'Esc to skip', source: 'keyboard' });
     expect(v.parts.map((p) => p.label)).toEqual(['Right', 'Left']);
     expect(v.lines[1]).toContain('Disarmed');
+    expect(v.rearm).toBe(true);
+    expect(tutorialView(m, 'keyboard', s(), true).rearm).toBe(false);
     m.start('angle', 9);
     expect(tutorialView(m, 'keyboard', s(), false).lines[1]).not.toContain('Disarmed');
+    expect(tutorialView(m, 'keyboard', s(), false).rearm).toBe(false);
+    m.start('angle', 11);
+    expect(tutorialView(m, 'keyboard', s(), false).rearm).toBe(false);
   });
 });
 
 describe('xrTutorialCard', () => {
   it('xrProgressBar: ten cells and a percentage, clamped', () => {
-    expect(xrProgressBar(0)).toBe('░░░░░░░░░░ 0%');
-    expect(xrProgressBar(0.5)).toBe('█████░░░░░ 50%');
-    expect(xrProgressBar(2)).toBe('██████████ 100%');
-    expect(xrProgressBar(Number.NaN)).toBe('░░░░░░░░░░ 0%');
+    expect(xrProgressBar(0)).toBe('○○○○○○○○○○ 0%');
+    expect(xrProgressBar(0.5)).toBe('●●●●●○○○○○ 50%');
+    expect(xrProgressBar(2)).toBe('●●●●●●●●●● 100%');
+    expect(xrProgressBar(Number.NaN)).toBe('○○○○○○○○○○ 0%');
   });
 
   it('welcome at eye level with A start; flight steps low with progress and hold-B skip', () => {
@@ -203,7 +213,7 @@ describe('xrTutorialCard', () => {
     expect(f.layout).toBe('hud');
     expect(f.title).toBe('3/12 · TAKE OFF');
     expect(f.sub).toBe('Throttle up (Left stick ↑) to climb past 1.5 m.');
-    expect(f.hint).toBe('█████░░░░░ 50% · Hold B to skip');
+    expect(f.hint).toBe('●●●●●○○○○○ 50% · Hold B to skip');
   });
 
   it('a hint adds the second line and turns amber; holding B shows the skip fill', () => {

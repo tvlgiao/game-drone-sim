@@ -11,7 +11,7 @@ import { buttonLabel, channelDirLabel, channelSide, pressVerb, stickLong, type P
 export type PromptSettings = Pick<Settings, 'stickMode' | 'throttleSource' | 'invert' | 'touchThrottleCentre'>;
 
 export interface PromptOptions {
-  /** drone armed now: steps that fly say how to re-arm after a crash / disarm */
+  /** drone armed now: the flying steps (3–7) say how to re-arm after a crash / disarm */
   armed?: boolean;
 }
 
@@ -29,6 +29,8 @@ export interface TutorialView {
   title: string;
   /** one or two lines */
   lines: string[];
+  /** the second line is the re-arm notice (keep it visible even where the card shows one line) */
+  rearm: boolean;
   progress: number;
   overall: number;
   hint: boolean;
@@ -41,6 +43,9 @@ export interface TutorialView {
   skipLabel: string;
   source: InputSource;
 }
+
+/** steps whose second line becomes the re-arm notice when disarmed (see `flying` in promptFor) */
+const REARM_STEPS: ReadonlySet<TutorialStepId> = new Set(['throttle', 'hover', 'yaw', 'pitch-roll', 'land']);
 
 const centringThrottle = (src: InputSource, s: PromptSettings): boolean => src === 'xr' || (src === 'touch' && s.touchThrottleCentre);
 
@@ -66,6 +71,13 @@ export function promptFor(id: TutorialStepId, src: InputSource, s: PromptSetting
   const v = verb.toLowerCase();
   const btn = (b: PromptButton): string => buttonLabel(b, src);
   const dir = (ch: Channel, d: 1 | -1): string => channelDirLabel(s, ch, d, src);
+  /** both directions of a channel, the stick named once: "Right thumb ↑ / ↓", "W / S" */
+  const both = (ch: Channel, a: 1 | -1): string => {
+    const x = dir(ch, a);
+    const y = dir(ch, a === 1 ? -1 : 1);
+    const cut = x.lastIndexOf(' ');
+    return cut > 0 && y.startsWith(x.slice(0, cut + 1)) ? `${x} / ${y.slice(cut + 1)}` : `${x} / ${y}`;
+  };
   const rearm = `Disarmed: ${throttleDown(src, s).replace(/^[A-Z]/, (c) => c.toLowerCase())}, then ${v} ${btn('arm')}.`;
   const flying = (lines: [string, string]): string[] => (opts.armed === false ? [lines[0], rearm] : lines);
   switch (id) {
@@ -81,13 +93,13 @@ export function promptFor(id: TutorialStepId, src: InputSource, s: PromptSetting
     case 'hover':
       return flying([
         'Hold between 1 and 3 m, steady, for 3 seconds.',
-        centringThrottle(src, s) ? 'A centred throttle stick holds the height.' : `Small throttle corrections (${dir('throttle', 1)} / ${dir('throttle', -1)}).`,
+        centringThrottle(src, s) ? 'A centred throttle stick holds the height.' : `Small throttle corrections (${both('throttle', 1)}).`,
       ]);
     case 'yaw':
       return flying([`Yaw right (${dir('yaw', 1)}) and left (${dir('yaw', -1)}) to turn on the spot.`, 'Turn 180° each way.']);
     case 'pitch-roll':
       return flying([
-        `Pitch (${dir('pitch', 1)} / ${dir('pitch', -1)}) flies forward and back, roll (${dir('roll', -1)} / ${dir('roll', 1)}) sideways.`,
+        `Pitch (${both('pitch', 1)}) flies forward and back, roll (${both('roll', -1)}) sideways.`,
         'Fly 4 m each way. Angle mode levels the drone when you let go.',
       ]);
     case 'land':
@@ -140,7 +152,8 @@ export function tutorialView(m: TutorialMachine, src: InputSource, s: PromptSett
     number: m.index + 1,
     total: TUTORIAL_STEP_COUNT,
     title: step.title,
-    lines: promptFor(step.id, src, s, { armed: step.needsArmed ? armed : undefined }),
+    lines: promptFor(step.id, src, s, { armed }),
+    rearm: REARM_STEPS.has(step.id) && !armed,
     progress: m.progress,
     overall: m.overall,
     hint: m.hint,
