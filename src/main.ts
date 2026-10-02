@@ -22,7 +22,7 @@ import { MobileShell, hardenGestures } from './ui/mobile-shell';
 import { isQuestBrowser, onSessionGranted, requestVrSession, tuneXrSession, vrSupported, xrSessionObscured } from './core/xr';
 import { Capacitor } from '@capacitor/core';
 import { detectEdition, editionCaps, type EditionCaps } from './core/edition';
-import { checkThisDevice } from './core/ownership';
+import { checkThisDevice, type OwnershipResult } from './core/ownership';
 import { XR_APP_EXIT_HINT, XR_EXIT_HINT, xrHudContent } from './ui/xr-hud';
 import { TouchControls } from './ui/touch-controls';
 import type { ButtonEvents, CameraMode, ControlInput, DroneState, GameEvent, InputFrame, QualityTier } from './types';
@@ -761,9 +761,9 @@ function safeBoot(caps: EditionCaps): void {
 }
 
 /** /app/ boots only for a Meta Horizon Store owner; `?owned=1` skips the check in `npm run dev`. */
-async function owned(params: URLSearchParams): Promise<boolean> {
-  if (import.meta.env.DEV && params.get('owned') === '1') return true;
-  return (await checkThisDevice(safeStorage())).owned;
+async function ownership(params: URLSearchParams): Promise<OwnershipResult> {
+  if (import.meta.env.DEV && params.get('owned') === '1') return { owned: true, via: 'store' };
+  return checkThisDevice(safeStorage());
 }
 
 async function start(): Promise<void> {
@@ -771,8 +771,9 @@ async function start(): Promise<void> {
   const caps = editionCaps(detectEdition(location.pathname, Capacitor.isNativePlatform(), import.meta.env.DEV));
   // `?xremu=1` emulates a Quest 2 (IWER) before boot so navigator.xr is the emulated runtime.
   if (params.get('xremu') === '1') (await import('./core/xr-emulator')).installXrEmulator();
-  if (caps.ownershipCheck && !(await owned(params))) {
-    (await import('./ui/store-gate')).showStoreGate(document);
+  const check = caps.ownershipCheck ? await ownership(params) : null;
+  if (check && !check.owned) {
+    (await import('./ui/store-gate')).showStoreGate(document, check.via === 'error' ? 'unverified' : 'not-owned');
     document.body.classList.add('is-ready');
     return;
   }

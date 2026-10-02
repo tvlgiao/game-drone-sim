@@ -173,6 +173,20 @@ test.describe('/app/: Meta Quest store app', () => {
     expect(await page.evaluate(() => !!(window as unknown as W).__drone)).toBe(false);
   });
 
+  test('a store that cannot be reached on the first launch asks to retry instead of showing the shop', async ({ page }) => {
+    await page.addInitScript(() => {
+      (window as unknown as { getDigitalGoodsService: () => Promise<unknown> }).getDigitalGoodsService = async () => {
+        throw new Error('network');
+      };
+    });
+    await page.goto('/app/');
+    await expect(page.getByRole('heading', { level: 1, name: /Couldn.t confirm your purchase/ })).toBeVisible({ timeout: 20_000 });
+    await expect(page.getByRole('button', { name: 'Try again' })).toBeFocused();
+    await expect(page.locator('.ds-store-gate')).not.toContainText('Coming soon');
+    await expect(page.getByRole('heading', { name: GATE_TITLE })).toHaveCount(0);
+    expect(await page.evaluate(() => !!(window as unknown as W).__drone)).toBe(false);
+  });
+
   test('the store-installed app (owner) boots the full game with Enter VR', async ({ page }) => {
     const errs = trackErrors(page);
     await page.addInitScript(questOwnerStub);

@@ -75,3 +75,17 @@
   outline: 2px solid var(--ds-text);
   outline-offset: 3px;
 }
+
+/* secondary action next to "Try again" */
+.ds-store-gate__play--ghost {
+  background: transparent;
+  color: var(--ds-cyan);
+  border: 1px solid var(--ds-edge-hot);
+  box-shadow: none;
+}
+button.ds-store-gate__play {
+  font-family: inherit;
+  font-size: inherit;
+  border: 0;
+  cursor: pointer;
+}

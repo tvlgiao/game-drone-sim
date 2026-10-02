@@ -11,6 +11,8 @@ import pkg from './package.json';
 const ROOT = fileURLToPath(new URL('.', import.meta.url));
 const define = { __APP_VERSION__: JSON.stringify(pkg.version) };
 const build = { target: 'es2022', sourcemap: true, chunkSizeWarningLimit: 1200 } as const;
+/** unit tests (vitest) — the same in every mode, so `--mode native` cannot point them at play/ */
+const test = { root: ROOT, include: ['tests/unit/**/*.test.ts'], environment: 'node' as const };
 
 /** Landing page store badges, rendered at build time from STORE_LINKS (no JS, no layout shift). */
 function storeBadges(): Plugin {
@@ -34,7 +36,7 @@ const web: UserConfig = {
       input: { landing: resolve(ROOT, 'index.html'), play: resolve(ROOT, 'play/index.html'), app: resolve(ROOT, 'app/index.html') },
     },
   },
-  test: { include: ['tests/unit/**/*.test.ts'], environment: 'node' },
+  test,
 };
 
 /**
@@ -58,6 +60,7 @@ const native: UserConfig = {
     },
   ],
   build: { ...build, outDir: resolve(ROOT, 'dist-native'), emptyOutDir: true },
+  test,
 };
 
 export default defineConfig(({ mode }) => (mode === 'native' ? native : web));
