@@ -69,7 +69,6 @@ function ctx(p: CtxPatch = {}): TutorialCtx {
     source: p.source ?? 'keyboard',
     ringsPassed: p.ringsPassed ?? 0,
     confirm: p.confirm ?? false,
-    skipHeld: p.skipHeld,
   };
 }
 
@@ -469,30 +468,22 @@ describe('skip, persistence and replay', () => {
     expect(loadTutorialRecord(storage)).toMatchObject({ skipped: true, step: 5, done: false });
   });
 
-  it('each step entry is saved (resume point) and an unfinished run is still offered', () => {
+  it('each step entry is saved (resume point); the first-run prompt is shown once, not again for an unfinished run', () => {
     const storage = new MemStorage();
     const m = at('welcome', storage);
     m.update(ctx({ confirm: true }));
     expect(loadTutorialRecord(storage)).toEqual({ done: false, skipped: false, step: 2, at: 1000 });
-    expect(shouldOfferTutorial(loadTutorialRecord(storage))).toBe(true);
+    expect(shouldOfferTutorial(loadTutorialRecord(storage))).toBe(false);
   });
 
-  it('hold-to-skip: 1 s on a gamepad, 1.5 s on Quest; releasing resets', () => {
-    const pad = at('hover');
-    run(pad, ctx({ source: 'gamepad', skipHeld: true }), secs(0.9));
-    expect(pad.skipHoldProgress).toBeGreaterThan(0.85);
-    pad.update(ctx({ source: 'gamepad', skipHeld: false }));
-    expect(pad.skipHoldProgress).toBe(0);
-    run(pad, ctx({ source: 'gamepad', skipHeld: true }), secs(0.9));
-    expect(pad.phase).toBe('running');
-    run(pad, ctx({ source: 'gamepad', skipHeld: true }), secs(0.1) + 1);
-    expect(pad.phase).toBe('skipped');
-
-    const xr = at('hover');
-    run(xr, ctx({ source: 'xr', skipHeld: true }), secs(1.4));
-    expect(xr.phase).toBe('running');
-    const ev = run(xr, ctx({ source: 'xr', skipHeld: true }), secs(0.1) + 1);
-    expect(ev).toEqual([{ type: 'skipped' }]);
+  it('no hold-to-skip: only skip() ends the run, on any source', () => {
+    for (const source of ['gamepad', 'xr', 'keyboard', 'touch'] as const) {
+      const m = at('hover');
+      run(m, ctx({ source }), secs(5));
+      expect(m.phase).toBe('running');
+      expect(m.skip()).toEqual([{ type: 'skipped' }]);
+      expect(m.phase).toBe('skipped');
+    }
   });
 
   it('replay after finishing starts at step 1 and keeps done', () => {

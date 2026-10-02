@@ -35,8 +35,8 @@ export const LEVELS: readonly LevelEntry[] = [
   },
 ];
 
-/** Level the game starts in until the pilot picks one. */
-export const DEFAULT_LEVEL: LevelId = 'night-loft';
+/** Level the game starts in until the pilot picks one: first-time pilots land on the beginner field. */
+export const DEFAULT_LEVEL: LevelId = 'training';
 export const LAST_LEVEL_KEY = 'drone-sim.level';
 
 export function levelEntry(id: LevelId): LevelEntry | undefined {

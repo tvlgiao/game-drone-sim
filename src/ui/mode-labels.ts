@@ -3,6 +3,8 @@ import { FPV_FOV_V_RANGE } from '../core/camera-limits';
 import type { Settings } from '../core/settings';
 import { MODE_TABLE, slotOf, throttleSlot, type Channel, type StickSlot } from '../input/stick';
 import type { InputSource } from '../types';
+import { KEY_BUTTON, KEY_STICKS, PAD_BUTTON } from '../input/input-manager';
+import { actionGlyphs, keyGlyph, padFamily, padGlyph, type Glyph } from './input-glyphs';
 
 export const CH_SHORT: Record<Channel, string> = { throttle: 'THR', yaw: 'YAW', pitch: 'PIT', roll: 'ROL' };
 export const CH_NAME: Record<Channel, string> = { throttle: 'Throttle', yaw: 'Yaw', pitch: 'Pitch', roll: 'Roll' };
@@ -41,7 +43,7 @@ export function keyboardKeys(s: ModeSettings): Record<Channel, string> {
   const keys: Record<string, string> = { lx: 'A / D', ly: 'W / S', rx: '← / →', ry: '↑ / ↓' };
   const out = {} as Record<Channel, string>;
   for (const slot of ['lx', 'ly', 'rx', 'ry'] as const) out[t[slot]] = keys[slot]!;
-  out.throttle += ' (holds)';
+  out.throttle += ' (centre = hover)';
   return out;
 }
 
@@ -85,23 +87,28 @@ export function throttleDownHint(s: ModeSettings, keyboard: boolean): string {
 /** Flight / menu buttons a prompt can name (the `ButtonEvents` the input manager emits). */
 export type PromptButton = 'arm' | 'toggleMode' | 'cycleCamera' | 'reset' | 'pause' | 'confirm';
 
-/**
- * Default bindings as `InputManager` maps them (PAD_BUTTON / KEY_BUTTON / XR_BUTTON there); touch names the
- * on-screen button. Keep in step with input-manager.ts.
- */
-const BUTTON_LABEL: Record<Exclude<InputSource, 'none'>, Record<PromptButton, string>> = {
-  keyboard: { arm: 'Space', toggleMode: 'M', cycleCamera: 'C', reset: 'R', pause: 'Esc', confirm: 'Enter' },
-  gamepad: { arm: 'A', toggleMode: 'Y', cycleCamera: 'RB', reset: 'B', pause: 'Start', confirm: 'A' },
-  touch: { arm: 'ARM', toggleMode: 'MODE', cycleCamera: 'CAM', reset: 'RESET', pause: 'Pause', confirm: 'Continue' },
-  xr: { arm: 'A', toggleMode: 'B', cycleCamera: 'R-stick', reset: 'X', pause: 'Y', confirm: 'A' },
-};
+/** Touch has no binding table: its on-screen buttons carry these names (the card's Continue button confirms). */
+const TOUCH_LABEL: Record<PromptButton, string> = { arm: 'ARM', toggleMode: 'MODE', cycleCamera: 'CAM', reset: 'RESET', pause: 'Pause', confirm: 'Continue' };
 
 /** No device used yet: a desktop browser most likely, so keyboard names. */
 const promptSource = (src: InputSource): Exclude<InputSource, 'none'> => (src === 'none' ? 'keyboard' : src);
 
-/** Name of the control behind a button for an input source, e.g. "Space", "A", "ARM". */
-export function buttonLabel(b: PromptButton, src: InputSource): string {
-  return BUTTON_LABEL[promptSource(src)][b];
+/** A glyph as prompt text: its label, the name of a drawn (PlayStation) or symbol (☰) glyph, "R-stick" for a Quest stick click. */
+function glyphText(g: Glyph): string {
+  if (g.style === 'stick') return g.label.length === 1 ? `${g.label}-stick` : g.label;
+  return g.label && g.style !== 'system' ? g.label : g.name;
+}
+
+/**
+ * Name of the control behind a button for an input source, e.g. "Space", "A", "ARM", read from the input
+ * manager's binding tables through the HUD glyphs, so the tutorial and the HUD can never disagree.
+ */
+export function buttonLabel(b: PromptButton, src: InputSource, padId: string | null = null): string {
+  const p = promptSource(src);
+  if (p === 'touch') return TOUCH_LABEL[b];
+  if (p === 'keyboard') return keyGlyph(KEY_BUTTON[b][0]!).label;
+  if (p === 'xr') return glyphText(actionGlyphs('quest', b === 'confirm' ? 'arm' : b)[0]!);
+  return glyphText(padGlyph(padFamily(padId), PAD_BUTTON[b]));
 }
 
 /** Verb for a button on a source: touch buttons are tapped, everything else pressed. */
@@ -109,7 +116,8 @@ export function pressVerb(src: InputSource): 'Tap' | 'Press' {
   return src === 'touch' ? 'Tap' : 'Press';
 }
 
-const KEY_DIR: Record<StickSlot, [string, string]> = { lx: ['A', 'D'], ly: ['S', 'W'], rx: ['←', '→'], ry: ['↓', '↑'] };
+/** Keyboard key for one direction of a stick slot ([negative, positive] as in KEY_STICKS). */
+const keyDir = (slot: StickSlot, i: 0 | 1): string => keyGlyph(KEY_STICKS[slot][i]).label;
 const ARROW: Record<StickSlot, [string, string]> = { lx: ['←', '→'], ly: ['↓', '↑'], rx: ['←', '→'], ry: ['↓', '↑'] };
 
 type DirSettings = Pick<Settings, 'stickMode' | 'throttleSource' | 'invert'>;
@@ -135,7 +143,7 @@ export function channelDirLabel(s: DirSettings, ch: Channel, dir: 1 | -1, src: I
   const slot = slotOf(s.stickMode, ch);
   const i = phys > 0 ? 1 : 0;
   const p = promptSource(src);
-  if (p === 'keyboard') return KEY_DIR[slot][i];
+  if (p === 'keyboard') return keyDir(slot, i);
   const stick = p === 'touch' ? (side === 'l' ? 'Left thumb' : 'Right thumb') : side === 'l' ? 'Left stick' : 'Right stick';
   return `${stick} ${ARROW[slot][i]}`;
 }

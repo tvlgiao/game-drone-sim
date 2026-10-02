@@ -58,9 +58,11 @@ describe('level registry', () => {
 
   it('remembers the last level; unknown or unreadable values fall back to the default', () => {
     const s = new MemStorage();
-    expect(loadLastLevel(s)).toBe(DEFAULT_LEVEL);
-    saveLastLevel(s, 'training');
+    // a first-time pilot starts on the beginner field
+    expect(DEFAULT_LEVEL).toBe('training');
     expect(loadLastLevel(s)).toBe('training');
+    saveLastLevel(s, 'night-loft');
+    expect(loadLastLevel(s)).toBe('night-loft');
     s.setItem(LAST_LEVEL_KEY, 'city');
     expect(loadLastLevel(s)).toBe(DEFAULT_LEVEL);
     expect(loadLastLevel(null)).toBe(DEFAULT_LEVEL);

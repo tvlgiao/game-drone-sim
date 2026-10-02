@@ -11,7 +11,11 @@ import { loadSettings, saveSettings, type Settings } from './core/settings';
 import { hoverThrottle } from './physics/drone-params';
 import { RaceController, migrateBestTimes, readBestTime } from './game/race';
 import { LEVELS, buildLevel, levelEntry, loadLastLevel, nextLevel, saveLastLevel, type LevelRuntime } from './levels/registry';
-import { InputManager } from './input/input-manager';
+import { InputManager, KEY_STICKS } from './input/input-manager';
+import { TutorialMachine, loadTutorialRecord, shouldOfferTutorial, type TutorialCtx, type TutorialEvent } from './game/tutorial';
+import { TutorialUi, type TutorialFinishAction } from './ui/tutorial-ui';
+import { tutorialView } from './ui/tutorial-prompts';
+import { keyGlyph } from './ui/input-glyphs';
 import { Simulation } from './physics/simulation';
 import { GameView } from './render/game-view';
 import { stickRadius } from './input/touch';
@@ -23,13 +27,13 @@ import { isQuestBrowser, onSessionGranted, requestVrSession, tuneXrSession, vrSu
 import { Capacitor } from '@capacitor/core';
 import { detectEdition, editionCaps, type EditionCaps } from './core/edition';
 import { checkThisDevice, type OwnershipResult } from './core/ownership';
-import { XR_APP_EXIT_HINT, XR_EXIT_HINT, xrHudContent } from './ui/xr-hud';
+import { XR_APP_EXIT_HINT, XR_EXIT_HINT, xrHudContent, xrTutorialCard, xrTutorialPrompt } from './ui/xr-hud';
 import { TouchControls } from './ui/touch-controls';
 import type { ButtonEvents, CameraMode, ControlInput, DroneState, GameEvent, InputFrame, LevelId, QualityTier } from './types';
 
 const PHYSICS_DT = 1 / 1000;
 const CAMERA_CYCLE: CameraMode[] = ['los', 'fpv', 'chase'];
-const BUTTON_KEYS: readonly (keyof ButtonEvents)[] = ['arm', 'toggleMode', 'cycleCamera', 'reset', 'pause', 'confirm'];
+const BUTTON_KEYS: readonly (keyof ButtonEvents)[] = ['arm', 'toggleMode', 'cycleCamera', 'reset', 'pause', 'confirm', 'headingArrow', 'recenter'];
 const XR_PANEL_PERIOD = 0.1;
 /**
  * Frames rendered after a DOM menu (main / pause / settings / tap gate / rotate) opens before the 3D view
@@ -191,6 +195,25 @@ function boot(caps: EditionCaps): void {
   applySettings(settings);
   hud.setSettings(settings);
   publishLevels();
+
+  const tutorial = new TutorialMachine({ storage });
+  /** the tutorial owns the card / overlay: from Start until skip, quit or the completion card is answered */
+  let tutOn = false;
+  /** the welcome card's Continue button (pointer / touch), consumed by the next frame */
+  let tutConfirm = false;
+  /** ring-passed events since the tutorial started */
+  let tutRings = 0;
+  /** a crash or reset: the current step starts over when the drone is back on the pad */
+  let tutRepeat = false;
+  const tutUi = new TutorialUi(uiRoot, {
+    onStart: () => startTutorial(),
+    onSkip: () => skipTutorial(),
+    onConfirm: () => {
+      tutConfirm = true;
+    },
+    onFinish: (action) => finishTutorial(action),
+  });
+
   input.onConnection = (c) => {
     toast(c.connected ? `Controller connected: ${c.name}` : `Controller disconnected: ${c.name}`);
     // the pilot just lost their sticks mid-flight; during a crash, pause once the respawn is done
@@ -255,7 +278,76 @@ function boot(caps: EditionCaps): void {
     return true;
   }
 
+  /**
+   * Tutorial on the Training field: free flight (no timer, every ring passable, crashes and resets respawn on the
+   * pad), LOS camera, angle forced on the early steps.
+   */
+  function startTutorial(): void {
+    void startLevel('training').then((ok) => {
+      if (!ok) return;
+      newSession('freefly');
+      cameraMode = 'los';
+      tutRings = 0;
+      tutConfirm = false;
+      tutRepeat = false;
+      tutorial.start(settings.flightMode);
+      setTutorialOn(true);
+    });
+  }
+
+  function setTutorialOn(on: boolean): void {
+    tutOn = on;
+    hud.setTutorial(on && tutorial.active);
+  }
+
+  /** After skip / done / quit: the pilot's own flight mode comes back (the tutorial only forced it on the FC). */
+  function endTutorial(): void {
+    const mode = tutorial.playerFlightMode;
+    if (mode && settings.flightMode !== mode) {
+      settings = { ...settings, flightMode: mode };
+      saveSettings(settings, storage);
+      hud.setSettings(settings);
+    }
+    sim.fc.mode = settings.flightMode;
+    setTutorialOn(false);
+    tutUi.hide();
+  }
+
+  /** Card Skip, Esc, pause menu "Skip tutorial", or the first-run prompt's Skip: never offered again. */
+  function skipTutorial(): void {
+    const running = tutorial.active;
+    tutorial.skip();
+    if (!running) return;
+    endTutorial();
+    onAction({ type: 'menu' });
+  }
+
+  function finishTutorial(action: TutorialFinishAction): void {
+    endTutorial();
+    if (action === 'training') onAction({ type: 'level', id: 'training', mode: 'race' });
+    else onAction({ type: 'menu' });
+  }
+
+  /** Tutorial complete: the flight freezes (no menu screen) under the completion card until it is answered. */
+  function handleTutorialEvents(events: readonly TutorialEvent[]): void {
+    if (!events.some((e) => e.type === 'done')) return;
+    hud.setTutorial(false);
+    race.pause();
+  }
+
+  /** Height above the walkable surface under the drone (meadow, prop tops). */
+  function aglOf(p: Vector3): number {
+    return p.y - level.surfaces.topBelow(p.x, p.y, p.z);
+  }
+
+  /** Keyboard throttle-up key for the stick mode, e.g. "W" (mode 2) or "↑" (mode 1). */
+  function throttleUpKey(): string {
+    return keyGlyph(KEY_STICKS[throttleSlot(settings.stickMode)][1]).label;
+  }
+
   function newSession(kind: 'race' | 'freefly'): void {
+    // a flight started another way (VR card, automation) answers the first-run offer for this launch
+    if (tutUi.dialogOpen === 'prompt') tutUi.hide();
     toSpawn();
     // A fresh flight starts with the touch throttle at the bottom (or centre when it auto-centres).
     input.touch.sticks.releaseAll();
@@ -269,7 +361,15 @@ function boot(caps: EditionCaps): void {
 
   function onAction(a: UiAction): void {
     if (a.type !== 'exit') void audio.resume();
+    // leaving the tutorial's flight any other way than Resume is a plain quit: the record keeps the step reached
+    if (tutOn && a.type !== 'resume' && a.type !== 'settings' && a.type !== 'fullscreen' && a.type !== 'enter-vr' && a.type !== 'request-quit' && a.type !== 'skip-tutorial') endTutorial();
     switch (a.type) {
+      case 'tutorial':
+        startTutorial();
+        break;
+      case 'skip-tutorial':
+        skipTutorial();
+        break;
       case 'race':
       case 'retry':
         newSession('race');
@@ -395,7 +495,7 @@ function boot(caps: EditionCaps): void {
       else if (b.y) void startLevel(nextLevel(level.def.id));
     } else if (status === 'paused') {
       if (b.a || b.y) onAction({ type: 'resume' });
-      else if (b.x) onAction({ type: 'menu' });
+      else if (b.x) onAction({ type: tutOn && tutorial.active ? 'skip-tutorial' : 'menu' });
     } else if (status === 'finished') {
       if (b.a) onAction({ type: 'retry' });
       else if (b.x) onAction({ type: 'menu' });
@@ -409,6 +509,7 @@ function boot(caps: EditionCaps): void {
     switch (e.type) {
       case 'ring-passed':
         input.rumble(0.15, 0.5, 110);
+        tutRings++;
         break;
       case 'collision':
         input.rumble(0.35, 0.25, 70);
@@ -417,6 +518,8 @@ function boot(caps: EditionCaps): void {
         input.rumble(1, 1, 380);
         if (device.vibrate && input.activeSource === 'touch') navigator.vibrate?.(120);
         sim.setArmed(false, zeroThrottle);
+        // the same step again once the drone is back on the pad (free flight respawns on the level spawn)
+        if (tutorial.active) tutRepeat = true;
         break;
       case 'respawn':
         respawnPending = true;
@@ -443,7 +546,9 @@ function boot(caps: EditionCaps): void {
     const src = input.activeSource;
     if (src === 'touch') return `drag the ${throttleSlot(settings.stickMode) === 'ly' ? 'left' : 'right'} stick fully down`;
     if (src === 'xr') return `release the ${throttleSlot(settings.stickMode) === 'ly' ? 'left' : 'right'} thumbstick`;
-    return throttleDownHint(settings, src === 'keyboard').toLowerCase();
+    // the arm key zeroes the spring-back keyboard throttle itself: only a held throttle-up key blocks it
+    if (src === 'keyboard') return `release ${throttleUpKey()}`;
+    return throttleDownHint(settings, false).toLowerCase();
   }
 
   function handleFlightButtons(b: ButtonEvents, control: ControlInput): void {
@@ -452,7 +557,7 @@ function boot(caps: EditionCaps): void {
       const ok = sim.setArmed(want, control);
       if (want && !ok) toast(control.throttle >= 0.05 ? `Arming blocked: ${throttleZeroHint()}` : 'Arming blocked: level the drone');
       if (!sim.fc.armed) input.latchTakeoff();
-      else if (input.takeoffLatched) toast('Armed — push the throttle stick up to take off');
+      else if (input.takeoffLatched) toast(input.activeSource === 'keyboard' ? `Armed — hold ${throttleUpKey()} to take off` : 'Armed — push the throttle stick up to take off');
       dispatch({ type: 'armed', armed: sim.fc.armed });
     }
     if (b.toggleMode) {
@@ -528,6 +633,7 @@ function boot(caps: EditionCaps): void {
 
   hud.showScreen('main');
   toSpawn();
+  if (!selftest && shouldOfferTutorial(loadTutorialRecord(storage))) tutUi.showPrompt();
 
   let last = performance.now();
   let time = 0;
@@ -558,14 +664,35 @@ function boot(caps: EditionCaps): void {
     if (flying && shell?.rotateOpen) pauseFlight();
 
     const inVr = view.presenting;
-    if (inVr && inp.xr?.lStick) view.recenterXr();
-    if (inVr && inp.xr?.lTrigger) {
+    // keyboard Z also centres the mouse stick (input manager); the view only recentres in a headset
+    if (inVr && inp.buttons.recenter) view.recenterXr();
+    if (inp.buttons.headingArrow) {
       settings = { ...settings, headingArrow: !settings.headingArrow };
       saveSettings(settings, storage);
       hud.setSettings(settings);
       toast(`Heading arrow ${settings.headingArrow ? 'on' : 'off'}`);
     }
-    if (!flying) {
+    // first-run prompt / completion card: menu input goes to the dialog, also over a flying status (done card)
+    let dialogInput = false;
+    if (tutUi.dialogOpen) {
+      if (inVr && inp.xr) {
+        const x = inp.xr;
+        if (tutUi.dialogOpen === 'prompt') {
+          if (x.a) {
+            tutUi.hide();
+            startTutorial();
+          } else if (x.x) {
+            tutUi.hide();
+            skipTutorial();
+          }
+        } else if (x.a) finishTutorial('training');
+        else if (x.x) finishTutorial('menu');
+      } else {
+        tutUi.navigate(inp.nav, inp.buttons.confirm);
+      }
+      dialogInput = true;
+    }
+    if (!flying && !dialogInput) {
       if (inVr && inp.xr) {
         handleXrMenu(status, inp.xr);
       } else {
@@ -575,10 +702,23 @@ function boot(caps: EditionCaps): void {
     }
 
     let alpha = 1;
+    const tutRunning = tutOn && tutorial.active;
     if (flying) {
-      // Touch auto-centre sticks fly DJI-style: centre holds altitude (barometer hold), like 'A/Atti' mode.
-      // Quest thumbsticks always spring back to centre, so VR flies with altitude hold too.
-      sim.fc.altitudeHold = input.altitudeHold(settings);
+      if (tutRunning) {
+        // angle forced on steps 2–8 (the FC only: settings keep the pilot's mode); arm locked on the welcome card
+        sim.fc.mode = tutorial.requiredFlightMode() ?? settings.flightMode;
+        for (const b of tutorial.lockedButtons()) inp.buttons[b] = false;
+        // keyboard skips with Esc (no pause menu in the tutorial); pad / Quest skip from their pause menu
+        if (inp.source === 'keyboard' && inp.buttons.pause) {
+          inp.buttons.pause = false;
+          skipTutorial();
+        }
+        // reset (R / pad B / Quest X) repeats the step from the pad: free flight resets to the spawn
+        if (inp.buttons.reset) tutRepeat = true;
+      }
+      // Sources whose throttle springs back to centre fly with altitude hold, centre = hover (DJI 'A/Atti' style):
+      // keyboard keys, Quest thumbsticks and touch auto-centre sticks (input-manager holdsAltitude).
+      sim.fc.altitudeHold = input.altitudeHold(tutRunning ? { ...settings, flightMode: sim.fc.mode } : settings);
       // …and the right thumbstick flies speed, braking to a stop when released (Angle mode).
       sim.fc.positionHold = inp.source === 'xr';
       const control = status === 'countdown' ? { ...inp.control, throttle: 0 } : inp.control;
@@ -594,9 +734,30 @@ function boot(caps: EditionCaps): void {
         const p = race.respawnPoint();
         placeDrone(p.position, p.yaw);
         alpha = 1;
+        if (tutRepeat) {
+          tutRepeat = false;
+          tutorial.crash();
+        }
+      }
+      // between a crash / reset and the respawn on the pad the step neither progresses nor completes
+      if (tutOn && tutorial.active && !tutRepeat) {
+        const st = sim.world.state;
+        const ctx: TutorialCtx = {
+          dt: frameSec,
+          drone: st,
+          agl: aglOf(st.position),
+          armed: sim.fc.armed,
+          flightMode: sim.fc.mode,
+          cameraMode,
+          source: inp.source,
+          ringsPassed: tutRings,
+          confirm: inp.buttons.confirm || tutConfirm,
+        };
+        tutConfirm = false;
+        handleTutorialEvents(tutorial.update(ctx));
       }
       // After stepping: a race-start 'respawn' emitted this frame must not undo the pilot's arm press.
-      handleFlightButtons(inp.buttons, inp.control);
+      if (!dialogInput) handleFlightButtons(inp.buttons, inp.control);
     }
 
     const drone = sim.world.interpolate(alpha, renderState);
@@ -639,11 +800,17 @@ function boot(caps: EditionCaps): void {
     if (inVr) {
       // the take-off prompt is stale as soon as the throttle leaves the latch
       if (xrToast && (performance.now() > xrToastUntil || (xrToast.startsWith('Armed') && !input.takeoffLatched))) xrToast = '';
-      if (time - xrPanelAt >= XR_PANEL_PERIOD || snap.status !== xrPanelStatus) {
+      const tutCard = tutUi.dialogOpen === 'prompt' ? 'prompt' : tutOn && (tutorial.phase === 'done' || snap.status !== 'paused') ? 'card' : '';
+      const panelKey = `${snap.status}|${tutCard}`;
+      if (time - xrPanelAt >= XR_PANEL_PERIOD || panelKey !== xrPanelStatus) {
         xrPanelAt = time;
-        xrPanelStatus = snap.status;
+        xrPanelStatus = panelKey;
         view.xrPanel.set(
-          xrHudContent({
+          tutCard === 'prompt'
+            ? xrTutorialPrompt()
+            : tutCard === 'card'
+              ? xrTutorialCard(tutorialView(tutorial, 'xr', settings, sim.fc.armed))
+              : xrHudContent({
             race: snap,
             armed: sim.fc.armed,
             latched: input.takeoffLatched,
@@ -654,6 +821,7 @@ function boot(caps: EditionCaps): void {
             toast: xrToast,
             exitHint: questApp ? XR_APP_EXIT_HINT : XR_EXIT_HINT,
             level: levelEntry(level.def.id)?.name,
+            tutorial: tutOn && tutorial.active,
           }),
         );
       }
@@ -671,6 +839,8 @@ function boot(caps: EditionCaps): void {
       tier,
       settings,
     });
+    // the card hides behind menus (pause) and in a headset (the XR card shows it there)
+    tutUi.render(tutOn && !inVr && hud.screen === 'none' ? tutorialView(tutorial, inp.source, settings, sim.fc.armed, inp.gamepadId) : null);
     if (pauseAfterRespawn && snap.status !== 'crashed') {
       pauseAfterRespawn = false;
       pauseFlight();
@@ -734,6 +904,16 @@ function boot(caps: EditionCaps): void {
     },
     /** switch level without starting a run (resolves false when superseded) */
     startLevel: (id: LevelId) => startLevel(id),
+    /** tutorial state: phase, current step, open dialog, whether the card is up */
+    get tutorial() {
+      return { on: tutOn, phase: tutorial.phase, step: tutorial.step.id, index: tutorial.index, progress: tutorial.progress, dialog: tutUi.dialogOpen };
+    },
+    startTutorial: () => startTutorial(),
+    /** drone position projected by the rendered camera (NDC: −1..1 inside the frame; z > 1 = behind) */
+    get droneNdc() {
+      const p = sim.world.state.position.clone().project(view.camera);
+      return { x: p.x, y: p.y, z: p.z };
+    },
     /** camera the view is rendering (menus show LOS; pause keeps the flight camera) */
     get renderedCamera() {
       return view.renderedCamera;

@@ -187,6 +187,8 @@ export class Hud {
   private wasFlying = false;
   /** flight view without a menu over it: pointer lock may be taken, the legend toggles */
   private flightView = false;
+  /** the tutorial runs: on a keyboard Esc skips it instead of pausing */
+  private tutorial = false;
   private readonly storage: Storage | null;
 
   private readonly onPointerDown = (e: PointerEvent): void => {
@@ -332,6 +334,12 @@ export class Hud {
 
   navigate(nav: NavEvents, confirm: boolean): void {
     this.menus.navigate(nav, confirm);
+  }
+
+  /** The tutorial is running: the pause menu offers Replay / Skip tutorial. */
+  setTutorial(on: boolean): void {
+    this.tutorial = on;
+    this.menus.setTutorial(on);
   }
 
   /** Keeps the settings screen in sync when settings change outside it (e.g. Y toggles flight mode). */
@@ -502,7 +510,7 @@ export class Hud {
     const mouse = !!inp.mouse;
     const locked = !!doc.pointerLockElement;
     const lockable = scheme === 'keyboard' && !this.root.classList.contains('is-touch') && pointerLockSupported(doc);
-    const key = [scheme, inp.source, inp.gamepadId, mouse, locked, lockable, this.legendOpen].join('|');
+    const key = [scheme, inp.source, inp.gamepadId, mouse, locked, lockable, this.legendOpen, this.tutorial].join('|');
     if (key === this.hintKey && f.settings === this.hintSettings) return;
     this.hintKey = key;
     this.hintSettings = f.settings;
@@ -519,7 +527,9 @@ export class Hud {
       return g.length ? `<span class="ds-bind" data-bind="${tag}">${glyphsHtml(g)}<span>${label}</span></span>` : '';
     };
     // under pointer lock Esc both releases the mouse and pauses: one chip says so
-    let strip = bind('reset') + (lockable && locked ? bind('pause', 'Pause · free mouse', 'mouse') : bind('pause')) + bind('recenter') + bind('headingArrow', 'Arrow');
+    // recentring only does something in a headset; on a flat screen the legend lists it as a VR control
+    const pauseLabel = this.tutorial && scheme === 'keyboard' ? 'Skip tutorial' : ACTION_LABEL.pause;
+    let strip = bind('reset') + (lockable && locked ? bind('pause', `${pauseLabel} · free mouse`, 'mouse') : bind('pause', pauseLabel)) + (scheme === 'quest' ? bind('recenter') : '') + bind('headingArrow', 'Arrow');
     if (lockable && !locked) strip += `<span class="ds-bind" data-bind="mouse">${glyphHtml({ style: 'mouse', label: '', name: 'Mouse' })}<span>Click view: fly with mouse</span></span>`;
     if (mouse && s.mouseStick === 'hold') strip += bind('mouseCentre');
     const legendG = actionGlyphs(scheme, 'legend');
@@ -543,7 +553,8 @@ export class Hud {
     const actions = (['arm', 'toggleMode', 'cycleCamera', 'reset', 'pause', 'recenter', 'headingArrow'] as const)
       .map((a) => {
         const g = actionGlyphs(scheme, a);
-        return g.length ? row(ACTION_LABEL[a], glyphsHtml(g)) : '';
+        const label = a === 'recenter' && scheme !== 'quest' ? `${ACTION_LABEL[a]} (VR)` : a === 'pause' ? pauseLabel : ACTION_LABEL[a];
+        return g.length ? row(label, glyphsHtml(g)) : '';
       })
       .join('');
     let extra = '';

@@ -3,6 +3,10 @@
  * race, soft bounds, the remembered level, and GPU resources released when switching (renderer.info).
  */
 import { expect, test, type Page } from '@playwright/test';
+import { skipTutorialOffer } from './seed';
+
+// the first-run tutorial offer is covered by tutorial.spec.ts; here it would cover the menus
+test.beforeEach(({ context }) => skipTutorialOffer(context));
 
 interface Stats {
   calls: number;
@@ -69,9 +73,10 @@ test('level picker: cards with thumbnails and Race / Free Fly per level, focus o
   await expect(cards).toHaveCount(2);
   await expect(cards.nth(0)).toContainText('Training Field');
   await expect(cards.nth(1)).toContainText('Night Loft');
-  await expect(cards.nth(1)).toContainText('Selected');
+  // a first-time pilot is on the beginner field
+  await expect(cards.nth(0)).toContainText('Selected');
   // opened from Race: the current level's Race button has the focus
-  await expect(page.locator('.ds-screen--levels .is-focused')).toHaveAttribute('data-act', 'level-race:night-loft');
+  await expect(page.locator('.ds-screen--levels .is-focused')).toHaveAttribute('data-act', 'level-race:training');
   for (const id of ['training', 'night-loft']) expect(await thumbVariety(page, id)).toBeGreaterThan(0.02);
   // every Race / Free Fly button is on screen and is what a tap at its centre hits (after the rise-in animation)
   await page.waitForTimeout(600);
@@ -91,7 +96,7 @@ test('level picker: cards with thumbnails and Race / Free Fly per level, focus o
 test.describe('desktop', () => {
   test.skip(({ isMobile }) => isMobile, 'desktop only');
 
-  test('keyboard: Free Fly opens the picker on Free Fly, ← → move between levels, Enter starts Training', async ({ page }) => {
+  test('keyboard: Free Fly opens the picker on Free Fly, ← → move between levels, Enter starts the Night Loft', async ({ page }) => {
     await boot(page);
     await page.waitForTimeout(300);
     await page.keyboard.press('ArrowDown', { delay: 40 });
@@ -99,13 +104,13 @@ test.describe('desktop', () => {
     await page.keyboard.press('Enter', { delay: 40 });
     await expect.poll(() => hook(page, (d) => d.screen)).toBe('levels');
     const focus = page.locator('.ds-screen--levels .is-focused');
-    await expect(focus).toHaveAttribute('data-act', 'level-freefly:night-loft');
-    await page.waitForTimeout(150);
-    await page.keyboard.press('ArrowLeft', { delay: 40 });
     await expect(focus).toHaveAttribute('data-act', 'level-freefly:training');
     await page.waitForTimeout(150);
+    await page.keyboard.press('ArrowRight', { delay: 40 });
+    await expect(focus).toHaveAttribute('data-act', 'level-freefly:night-loft');
+    await page.waitForTimeout(150);
     await page.keyboard.press('Enter', { delay: 40 });
-    await expect.poll(() => hook(page, (d) => [d.level, d.race.status, d.screen])).toEqual(['training', 'freefly', 'none']);
+    await expect.poll(() => hook(page, (d) => [d.level, d.race.status, d.screen])).toEqual(['night-loft', 'freefly', 'none']);
     expect(errors).toEqual([]);
   });
 
@@ -117,10 +122,13 @@ test.describe('desktop', () => {
     const spawn = await hook(page, (d) => [d.state.position.x, d.state.position.z]);
     expect(spawn[0]).toBeCloseTo(0, 3);
     expect(spawn[1]).toBeCloseTo(33, 3);
+    // the pick is remembered: Night Loft after a reload, although first-time pilots start on Training
+    await hook(page, (d) => d.action({ type: 'level', id: 'night-loft', mode: 'freefly' }));
+    await expect.poll(() => hook(page, (d) => d.level)).toBe('night-loft');
     await page.reload();
     await page.waitForFunction(() => !!(window as unknown as { __drone?: Hook }).__drone);
-    expect(await hook(page, (d) => d.level)).toBe('training');
-    await expect(page.locator('.ds-screen--main [data-f="best"]')).toContainText('Training Field');
+    expect(await hook(page, (d) => d.level)).toBe('night-loft');
+    await expect(page.locator('.ds-screen--main [data-f="best"]')).toContainText('Night Loft');
     expect(errors).toEqual([]);
   });
 

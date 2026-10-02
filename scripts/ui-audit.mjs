@@ -113,10 +113,23 @@ async function run() {
           await sleep(400);
         }
       }
+      // first launch: the tutorial offer covers the main menu once
+      const offer = page.getByRole('dialog', { name: 'New to FPV?' });
+      if (await offer.isVisible().catch(() => false)) {
+        await shot('tutorial-offer');
+        await offer.getByRole('button', { name: 'Skip' }).click();
+        await sleep(400);
+      }
       await shot('main-menu');
+      await page.getByRole('button', { name: 'Race', exact: true }).click();
+      await sleep(700);
+      await shot('levels');
+      await screen('main');
       for (const s of ['settings', 'rates', 'controls', 'controller', 'about', 'confirm-reset']) await screen(s);
       await screen('main');
-      // flight HUD in each camera
+      // flight HUD in each camera, on the Night Loft like earlier rounds (first-time pilots start on Training)
+      await h(() => window.__drone.startLevel('night-loft'));
+      await sleep(600);
       await h(() => window.__drone.action({ type: 'freefly' }));
       await h(() => {
         window.__drone.teleport(-9, 1.6, 5.2, 0);
@@ -154,6 +167,11 @@ async function run() {
       await h(() => window.__drone.toast('Controller connected: Xbox Wireless Controller'));
       await sleep(250);
       await shot('toast');
+      await h(() => window.__drone.startTutorial());
+      await sleep(1500);
+      await shot('tutorial-welcome', 'tutorial step 1 on Training (LOS)');
+      await h(() => window.__drone.action({ type: 'menu' }));
+      await sleep(400);
       await screen('bye');
       await h(() => window.__drone.showError('WebGL2 is not available on this device/browser (context lost). Enable hardware acceleration or try a recent Chrome, Edge, Firefox or Safari.'));
       await sleep(400);

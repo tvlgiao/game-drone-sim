@@ -6,6 +6,7 @@ import type { Settings } from '../core/settings';
 import type { Channel } from '../input/stick';
 import type { InputSource } from '../types';
 import { TUTORIAL_STEP_COUNT, type TutorialMachine, type TutorialPhase, type TutorialStepId } from '../game/tutorial';
+import { holdsAltitude } from '../input/input-manager';
 import { buttonLabel, channelDirLabel, channelSide, pressVerb, stickLong, type PromptButton } from './mode-labels';
 
 export type PromptSettings = Pick<Settings, 'stickMode' | 'throttleSource' | 'invert' | 'touchThrottleCentre'>;
@@ -13,6 +14,8 @@ export type PromptSettings = Pick<Settings, 'stickMode' | 'throttleSource' | 'in
 export interface PromptOptions {
   /** drone armed now: the flying steps (3–7) say how to re-arm after a crash / disarm */
   armed?: boolean;
+  /** Gamepad id: PlayStation pads name their face buttons (Cross, Triangle) */
+  padId?: string | null;
 }
 
 export interface TutorialViewPart {
@@ -38,8 +41,7 @@ export interface TutorialView {
   /** sticks (by side) and button a hint highlights; `trigger` = RT carries the throttle */
   focus: { sides: ('l' | 'r')[]; button: PromptButton | null; trigger: boolean };
   phase: TutorialPhase;
-  skipHold: number;
-  /** how to skip on this source, e.g. "Hold B to skip" */
+  /** how to skip on this source, e.g. "Esc to skip" */
   skipLabel: string;
   source: InputSource;
 }
@@ -47,7 +49,9 @@ export interface TutorialView {
 /** steps whose second line becomes the re-arm notice when disarmed (see `flying` in promptFor) */
 const REARM_STEPS: ReadonlySet<TutorialStepId> = new Set(['throttle', 'hover', 'yaw', 'pitch-roll', 'land']);
 
-const centringThrottle = (src: InputSource, s: PromptSettings): boolean => src === 'xr' || (src === 'touch' && s.touchThrottleCentre);
+/** Keys (like a spring-back stick) and the centring sticks fly with altitude hold: let go = hold height. */
+const centringThrottle = (src: InputSource, s: PromptSettings): boolean => holdsAltitude(src === 'none' ? 'keyboard' : src, s);
+const isKeyboard = (src: InputSource): boolean => src === 'keyboard' || src === 'none';
 
 function controlsSummary(src: InputSource, s: PromptSettings): string {
   if (src === 'keyboard' || src === 'none') {
@@ -59,8 +63,12 @@ function controlsSummary(src: InputSource, s: PromptSettings): string {
   return `${name[0]}: ${stickLong(ms, 'l')} · ${name[1]}: ${stickLong(ms, 'r')}`;
 }
 
-/** How to bring the throttle to zero before arming. */
+/**
+ * How to bring the throttle to zero before arming; '' when the source's centring throttle is already latched at
+ * zero for take-off (keyboard, touch auto-centre), so arming is just the button.
+ */
 function throttleDown(src: InputSource, s: PromptSettings): string {
+  if (isKeyboard(src) || (src === 'touch' && s.touchThrottleCentre)) return '';
   if (src === 'xr') return `Let go of the ${channelSide(s, 'throttle', src) === 'l' ? 'left' : 'right'} stick`;
   return `Throttle fully down (${channelDirLabel(s, 'throttle', -1, src)})`;
 }
@@ -69,7 +77,7 @@ function throttleDown(src: InputSource, s: PromptSettings): string {
 export function promptFor(id: TutorialStepId, src: InputSource, s: PromptSettings, opts: PromptOptions = {}): string[] {
   const verb = pressVerb(src);
   const v = verb.toLowerCase();
-  const btn = (b: PromptButton): string => buttonLabel(b, src);
+  const btn = (b: PromptButton): string => buttonLabel(b, src, opts.padId ?? null);
   const dir = (ch: Channel, d: 1 | -1): string => channelDirLabel(s, ch, d, src);
   /** both directions of a channel, the stick named once: "Right thumb ↑ / ↓", "W / S" */
   const both = (ch: Channel, a: 1 | -1): string => {
@@ -78,22 +86,28 @@ export function promptFor(id: TutorialStepId, src: InputSource, s: PromptSetting
     const cut = x.lastIndexOf(' ');
     return cut > 0 && y.startsWith(x.slice(0, cut + 1)) ? `${x} / ${y.slice(cut + 1)}` : `${x} / ${y}`;
   };
-  const rearm = `Disarmed: ${throttleDown(src, s).replace(/^[A-Z]/, (c) => c.toLowerCase())}, then ${v} ${btn('arm')}.`;
+  const down = throttleDown(src, s);
+  const rearm = down ? `Disarmed: ${down.replace(/^[A-Z]/, (c) => c.toLowerCase())}, then ${v} ${btn('arm')}.` : `Disarmed: ${v} ${btn('arm')} to arm again.`;
+  const kb = isKeyboard(src);
   const flying = (lines: [string, string]): string[] => (opts.armed === false ? [lines[0], rearm] : lines);
   switch (id) {
     case 'welcome':
       return [controlsSummary(src, s), `${verb} ${btn('confirm')} to start.`];
     case 'arm':
-      return [`${throttleDown(src, s)}, then ${v} ${btn('arm')}.`, 'Armed means the props spin: the drone is live.'];
+      return [down ? `${down}, then ${v} ${btn('arm')}.` : `${verb} ${btn('arm')} to arm.`, 'Armed means the props spin: the drone is live.'];
     case 'throttle':
       return flying([
-        `Throttle up (${dir('throttle', 1)}) to climb past 1.5 m.`,
-        centringThrottle(src, s) ? 'Let go of the stick to hold that height.' : 'Ease off as it rises: small, gentle inputs.',
+        kb ? `Hold ${dir('throttle', 1)} to climb past 1.5 m.` : `Throttle up (${dir('throttle', 1)}) to climb past 1.5 m.`,
+        kb ? `Let go of ${dir('throttle', 1)} to hold that height.` : centringThrottle(src, s) ? 'Let go of the stick to hold that height.' : 'Ease off as it rises: small, gentle inputs.',
       ]);
     case 'hover':
       return flying([
         'Hold between 1 and 3 m, steady, for 3 seconds.',
-        centringThrottle(src, s) ? 'A centred throttle stick holds the height.' : `Small throttle corrections (${both('throttle', 1)}).`,
+        kb
+          ? `No key held = hold height; tap ${both('throttle', 1)} to adjust.`
+          : centringThrottle(src, s)
+            ? 'A centred throttle stick holds the height.'
+            : `Small throttle corrections (${both('throttle', 1)}).`,
       ]);
     case 'yaw':
       return flying([`Yaw right (${dir('yaw', 1)}) and left (${dir('yaw', -1)}) to turn on the spot.`, 'Turn 180° each way.']);
@@ -103,7 +117,7 @@ export function promptFor(id: TutorialStepId, src: InputSource, s: PromptSetting
         'Fly 4 m each way. Angle mode levels the drone when you let go.',
       ]);
     case 'land':
-      return flying([`Throttle down gently (${dir('throttle', -1)}) to touch down.`, 'Settle on the ground for a second.']);
+      return flying([kb ? `Hold ${dir('throttle', -1)} to descend and touch down.` : `Throttle down gently (${dir('throttle', -1)}) to touch down.`, 'Settle on the ground for a second.']);
     case 'disarm':
       return [`${verb} ${btn('arm')} to disarm.`, 'Always disarm once you have landed.'];
     case 'modes':
@@ -129,15 +143,18 @@ const PART_LABEL: Record<string, string> = {
   chase: 'Chase',
 };
 
-/** Skip instruction per source (Esc, hold B, the on-screen chip). */
-export function skipLabel(src: InputSource): string {
-  if (src === 'gamepad' || src === 'xr') return 'Hold B to skip';
+/**
+ * Skip instruction per source. There is no hold-to-skip: keyboard skips with Esc, touch / mouse with the card's
+ * Skip button, pad and Quest through the pause menu's "Skip tutorial" (pause = Start/Menu on a pad, Y on Quest).
+ */
+export function skipLabel(src: InputSource, padId: string | null = null): string {
   if (src === 'touch') return 'Skip';
-  return 'Esc to skip';
+  if (src === 'gamepad' || src === 'xr') return `${buttonLabel('pause', src, padId)} › Skip tutorial`;
+  return `${buttonLabel('pause', src)} to skip`;
 }
 
 /** Everything a card needs for the machine's current state. */
-export function tutorialView(m: TutorialMachine, src: InputSource, s: PromptSettings, armed: boolean): TutorialView {
+export function tutorialView(m: TutorialMachine, src: InputSource, s: PromptSettings, armed: boolean, padId: string | null = null): TutorialView {
   const step = m.step;
   const focus = step.focus;
   const sides = new Set<'l' | 'r'>();
@@ -152,7 +169,7 @@ export function tutorialView(m: TutorialMachine, src: InputSource, s: PromptSett
     number: m.index + 1,
     total: TUTORIAL_STEP_COUNT,
     title: step.title,
-    lines: promptFor(step.id, src, s, { armed }),
+    lines: promptFor(step.id, src, s, { armed, padId }),
     rearm: REARM_STEPS.has(step.id) && !armed,
     progress: m.progress,
     overall: m.overall,
@@ -160,8 +177,7 @@ export function tutorialView(m: TutorialMachine, src: InputSource, s: PromptSett
     parts: m.parts().map((p) => ({ ...p, label: PART_LABEL[p.id] ?? p.id })),
     focus: { sides: [...sides], button: focus.button, trigger },
     phase: m.phase,
-    skipHold: m.skipHoldProgress,
-    skipLabel: skipLabel(src),
+    skipLabel: skipLabel(src, padId),
     source: src,
   };
 }

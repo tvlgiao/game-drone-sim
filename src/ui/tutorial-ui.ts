@@ -164,6 +164,8 @@ export class TutorialUi {
     if (this.disposed) return;
     const running = view !== null && view.phase === 'running';
     this.card.hidden = !running;
+    // phones hide the HUD's arm hint under a running card: the card says the same, and there is no room for both
+    this.root.classList.toggle('ds-tut-running', running);
     if (view?.id !== 'done') this.doneDismissed = false;
     if (view?.id === 'done' && view.phase === 'done' && !this.doneDismissed) {
       this.text(this.dialogs.done.querySelector<HTMLElement>('#ds-tut-done-text')!, view.lines[0] ?? '');
@@ -177,7 +179,8 @@ export class TutorialUi {
       return;
     }
     const e = this.el;
-    this.text(e.step, `Step ${view.number} / ${view.total}`);
+    if (this.card.dataset.step !== view.id) this.card.dataset.step = view.id;
+    this.text(e.step,`Step ${view.number} / ${view.total}`);
     this.text(e.title, view.title);
     // a hint re-announces the prompt: the live region only speaks changed text
     const reannounce = view.hint && !this.hintShown;
@@ -200,8 +203,7 @@ export class TutorialUi {
     this.renderParts(view);
     const welcome = view.id === 'welcome';
     e.cont.hidden = !welcome;
-    const hold = view.skipHold > 0 ? `Skipping… ${Math.round(view.skipHold * 100)}%` : view.skipLabel;
-    const skipText = view.source === 'touch' ? '' : hold;
+    const skipText = view.source === 'touch' ? '' : view.skipLabel;
     this.text(e.skipHint, skipText);
     e.foot.hidden = !welcome && skipText === '';
     this.setGlow(view.hint ? view : null);

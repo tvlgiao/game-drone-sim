@@ -400,8 +400,9 @@ export type TutorialPhase = 'idle' | 'running' | 'done' | 'skipped';
   `throttleDownHint`), honouring stick modes 1–4 and remaps. Touch points at the virtual sticks and ARM;
   gamepad shows the pad diagram; keyboard shows key caps; XR shows Touch controller glyphs.
 - VR: an `xrHudContent` `tutorial` branch — one card in front of the platform with title, 1–2 lines and
-  a progress bar; trigger advances, holding B 1.5 s skips; LOS on the platform; no DOM in the headset.
-- Skip: HUD button, Esc, gamepad B held 1 s, touch "Skip" chip, VR B-hold.
+  a progress bar; trigger advances; Y opens the pause card, whose X skips; LOS on the platform; no DOM in the headset.
+- Skip (owner decision, no hold-to-skip): the card's Skip button (mouse / touch), Esc on a keyboard, and "Skip
+  tutorial" in the pause menu (Start / Menu on a pad, Y on Quest). See docs/08-tutorial-integration.md §3.
 - Storage `drone-sim.tutorial.v1 = { done, skipped, step, at }`. First run: modal "New to FPV? 3-minute
   tutorial" [Start] [Skip]; Skip never nags again. Replay from the menu and the pause menu. Completion
   shows the Full Game card once, non-blocking.

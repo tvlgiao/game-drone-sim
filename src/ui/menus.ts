@@ -20,8 +20,9 @@ import type { InputFrame, LevelId, NavEvents } from '../types';
 import { formatTime } from './format';
 import { drawThumbs, levelAct, levelCardsHtml, parseLevelAct, type LevelCard, type LevelMode } from './level-select';
 import { controllerDiagram } from './icons';
+import { actionGlyphs, type Glyph, type HintAction, type HintScheme } from './input-glyphs';
 import { HOVER, RateCharts } from './rate-charts';
-import { CH_NAME, CH_SHORT, effectiveFovDeg, keyboardKeys, padControls, stickLong, stickShort, throttleControl, throttleDownHint, touchControls, xrControls } from './mode-labels';
+import { CH_NAME, CH_SHORT, effectiveFovDeg, keyboardKeys, padControls, stickLong, stickShort, throttleControl, touchControls, xrControls } from './mode-labels';
 
 /** package.json version, injected by vite.config.ts `define`. */
 declare const __APP_VERSION__: string;
@@ -55,6 +56,10 @@ export type UiAction =
   | { type: 'resume' }
   | { type: 'menu' }
   | { type: 'retry' }
+  /** start (or replay) the tutorial on the Training field */
+  | { type: 'tutorial' }
+  /** pause menu while the tutorial runs: end it for good (no first-run prompt again) */
+  | { type: 'skip-tutorial' }
   /** HUD quit button: pause and ask for confirmation */
   | { type: 'request-quit' }
   /** leave the game (close tab when allowed) */
@@ -93,7 +98,7 @@ type Row =
   | (RowBase & { kind: 'range'; range: { min: number; max: number; step: number }; fmt: (v: number) => string; get: (s: Settings) => number; set: (s: Settings, v: number) => void })
   | (RowBase & { kind: 'bool'; on?: string; off?: string; get: (s: Settings) => boolean; set: (s: Settings, v: boolean) => void });
 
-type NumKey = 'cameraTiltDeg' | 'fovDeg' | 'volume' | 'deadzone' | 'throttleExpo' | 'throttleLimit' | 'angleMaxTiltDeg';
+type NumKey = 'cameraTiltDeg' | 'fovDeg' | 'volume' | 'deadzone' | 'throttleExpo' | 'throttleLimit' | 'angleMaxTiltDeg' | 'mouseSensitivity' | 'mouseExpo' | 'mouseDeadzone';
 const rangeRow = (id: NumKey, label: string, hint: string, fmt: (v: number) => string): Row => ({
   id,
   label,
@@ -107,7 +112,25 @@ const rangeRow = (id: NumKey, label: string, hint: string, fmt: (v: number) => s
   },
 });
 
+/** One binding as table text, read from the input tables: "Menu (☰)", "Left trigger", "Space", '—' when unbound. */
+function bindingText(scheme: HintScheme, action: HintAction): string {
+  const g: Glyph | undefined = actionGlyphs(scheme, action)[0];
+  if (!g) return '—';
+  if (g.style === 'system' && g.label !== g.name) return `${g.name} (${g.label})`;
+  if (g.style === 'stick' || g.label.includes(' ')) return g.name;
+  return g.label;
+}
+const ACTION_ROWS: readonly [string, HintAction][] = [
+  ['Arm / disarm', 'arm'],
+  ['Flight mode', 'toggleMode'],
+  ['Camera', 'cycleCamera'],
+  ['Reset to checkpoint', 'reset'],
+  ['Pause', 'pause'],
+  ['Heading arrow', 'headingArrow'],
+];
 const FOV_HINT = 'FPV lens width';
+const pct = (v: number): string => `${Math.round(v * 100)}%`;
+const MOUSE_STICK_LABEL: Record<Settings['mouseStick'], string> = { auto: 'Auto', hold: 'Hold', spring: 'Spring' };
 const FIELD_NAME: Record<RateField, string> = { center: 'Center sensitivity', max: 'Max rate', expo: 'Expo' };
 const rateCell = (axis: RateAxis, field: RateField): Row => ({
   id: `rate.${axis}.${field}`,
@@ -274,6 +297,43 @@ const ROW_DEFS: Row[] = [
   },
   rangeRow('deadzone', 'Stick deadzone', 'Radial deadzone for worn sticks', (v) => v.toFixed(2)),
   {
+    id: 'mouseStick',
+    label: 'Mouse stick',
+    hint: 'Auto: Angle hold / Acro spring · Hold stays put · Spring re-centres',
+    kind: 'enum',
+    options: SETTINGS_OPTIONS.mouseStick.map((m) => ({ value: m, label: MOUSE_STICK_LABEL[m] })),
+    get: (s) => s.mouseStick,
+    set: (s, v) => {
+      s.mouseStick = v as Settings['mouseStick'];
+    },
+  },
+  rangeRow('mouseSensitivity', 'Mouse sensitivity', 'Stick travel per mouse movement', pct),
+  {
+    id: 'mouseInvertY',
+    label: 'Invert mouse Y',
+    hint: 'Off: push the mouse away to pitch forward, like a stick',
+    kind: 'bool',
+    on: 'Inverted',
+    off: 'Normal',
+    get: (s) => s.mouseInvertY,
+    set: (s, v) => {
+      s.mouseInvertY = v;
+    },
+  },
+  {
+    id: 'mouseXAxis',
+    label: 'Mouse X axis',
+    hint: 'What left / right flies (Yaw moves roll onto the yaw keys)',
+    kind: 'enum',
+    options: SETTINGS_OPTIONS.mouseXAxis.map((a) => ({ value: a, label: a === 'roll' ? 'Roll' : 'Yaw' })),
+    get: (s) => s.mouseXAxis,
+    set: (s, v) => {
+      s.mouseXAxis = v as Settings['mouseXAxis'];
+    },
+  },
+  rangeRow('mouseExpo', 'Mouse expo', 'Softens small mouse movements', pct),
+  rangeRow('mouseDeadzone', 'Mouse deadzone', 'Mouse travel around centre that reads as centred', pct),
+  {
     id: 'touchThrottleCentre',
     label: 'Touch throttle',
     hint: 'Auto-centre: stick springs back, centre holds altitude (DJI-style) · Hold: stays where released like an FPV radio',
@@ -300,8 +360,10 @@ const ROW_DEFS: Row[] = [
 ];
 /** Rows only shown on touch devices. */
 const TOUCH_ROWS: ReadonlySet<string> = new Set(['touchThrottleCentre', 'touchSticksFixed']);
+/** Rows hidden on touch devices (pointer-lock mouse flight is a desktop feature). */
+const MOUSE_ROWS: ReadonlySet<string> = new Set(['mouseStick', 'mouseSensitivity', 'mouseInvertY', 'mouseXAxis', 'mouseExpo', 'mouseDeadzone']);
 const ROWS = new Map(ROW_DEFS.map((r) => [r.id, r]));
-const SETTINGS_ROWS = ['stickMode', 'touchThrottleCentre', 'touchSticksFixed', 'throttleSource', 'flightMode', 'ratePreset', 'cameraTiltDeg', 'fovDeg', 'quality', 'volume', 'showFps', 'headingArrow', 'deadzone'];
+const SETTINGS_ROWS = ['stickMode', 'touchThrottleCentre', 'touchSticksFixed', 'throttleSource', 'flightMode', 'ratePreset', 'cameraTiltDeg', 'fovDeg', 'quality', 'volume', 'showFps', 'headingArrow', 'deadzone', ...MOUSE_ROWS];
 const CONTROLLER_ROWS = ['stickMode', 'throttleSource', 'squareGate', 'invert.throttle', 'invert.yaw', 'invert.pitch', 'invert.roll'];
 const CHANNELS: readonly Channel[] = ['throttle', 'yaw', 'pitch', 'roll'];
 const SLOT_NAME: Record<StickSlot, string> = { lx: 'LX', ly: 'LY', rx: 'RX', ry: 'RY' };
@@ -369,6 +431,7 @@ export class Menus {
   private aboutReturn: ScreenName = 'main';
   /** touch device (set by enableTouch) */
   private touch = false;
+  private tutorial = false;
   /** immersive VR available (set by enableVr) */
   private vr = false;
   /** a gamepad is connected (live, from updateLive) */
@@ -465,6 +528,9 @@ export class Menus {
       el.querySelectorAll<HTMLElement>('[data-touch-only]').forEach((x) => {
         x.hidden = false;
       });
+      el.querySelectorAll<HTMLElement>('[data-mouse-only]').forEach((x) => {
+        x.hidden = true;
+      });
       if (fullscreen) {
         el.querySelectorAll<HTMLElement>('[data-fs-only]').forEach((x) => {
           x.hidden = false;
@@ -481,6 +547,21 @@ export class Menus {
     for (const el of this.screens.values()) {
       el.querySelectorAll<HTMLElement>('[data-act="exit"]').forEach((x) => {
         x.hidden = true;
+      });
+    }
+    this.refreshItems();
+  }
+
+  /** While the tutorial runs the pause menu offers Replay / Skip tutorial instead of Restart. */
+  setTutorial(on: boolean): void {
+    if (on === this.tutorial) return;
+    this.tutorial = on;
+    for (const el of this.screens.values()) {
+      el.querySelectorAll<HTMLElement>('[data-tut-only]').forEach((x) => {
+        x.hidden = !on;
+      });
+      el.querySelectorAll<HTMLElement>('[data-no-tut]').forEach((x) => {
+        x.hidden = on;
       });
     }
     this.refreshItems();
@@ -815,6 +896,8 @@ export class Menus {
       case 'retry':
       case 'exit':
       case 'enter-vr':
+      case 'tutorial':
+      case 'skip-tutorial':
         this.onAction({ type: act });
         break;
       case 'settings':
@@ -1039,22 +1122,19 @@ export class Menus {
       ['Yaw', vr?.yaw ?? '', pad.yaw, kb.yaw],
       ['Pitch', vr?.pitch ?? '', pad.pitch, kb.pitch],
       ['Roll', vr?.roll ?? '', pad.roll, kb.roll],
-      ['Arm / disarm', 'A', 'A', 'Space'],
-      ['Flight mode', 'B', 'Y', 'M'],
-      ['Camera', 'Right stick click', 'RB', 'C'],
-      ['Reset to checkpoint', 'X', 'B', 'R'],
-      ['Pause', 'Y', 'Menu (☰)', 'Esc'],
+      ...ACTION_ROWS.map(([label, a]): [string, string, string, string] => [label, bindingText('quest', a), bindingText('xbox', a), bindingText('keyboard', a)]),
     ];
-    if (xr) map.push(['Recentre view', 'Left stick click', '—', '—'], ['Heading arrow', 'Left trigger', '—', '—']);
+    if (xr) map.push(['Recentre view', bindingText('quest', 'recenter'), bindingText('xbox', 'recenter'), bindingText('keyboard', 'recenter')]);
     const rows = map
       .map(([a, v, x, k]) => `<tr><th scope="row">${a}</th>${xr ? `<td>${v}</td>` : ''}<td>${x}</td><td>${k === '—' ? k : `<kbd class="ds-kbd">${k}</kbd>`}</td></tr>`)
       .join('');
+    const kbTip = 'Keyboard: keys spring back like a stick and centre holds altitude; press Space to arm, then hold W (↑ in modes 1/3) to take off.';
     const padTip =
       thr === 'rt'
-        ? 'Arming needs throttle at zero: release RT, then press A (keyboard: Space).'
-        : `Arming needs throttle at zero: hold the ${thr} stick fully down (keyboard: ${throttleDownHint(s, true).replace(/^Hold/, 'hold')}), then press A (Space). The throttle does not re-centre — like a real radio.`;
+        ? 'Arming needs throttle at zero: release RT, then press A.'
+        : `Arming needs throttle at zero: hold the ${thr} stick fully down, then press A. The throttle does not re-centre — like a real radio.`;
     // next to the VR note the two would contradict (Touch sticks spring back, a gamepad throttle does not)
-    const tip = xr ? `Gamepad / keyboard: ${padTip.charAt(0).toLowerCase()}${padTip.slice(1)}` : padTip;
+    const tip = `${xr ? `Gamepad: ${padTip.charAt(0).toLowerCase()}${padTip.slice(1)}` : padTip} ${kbTip}`;
     const thrXr = throttleSlotSide(s);
     const xrTip = xr
       ? `<p class="ds-tip" data-f="xrTip">VR: the Touch controller sticks spring back — the ${thrXr} stick's centre holds altitude and the other stick's centre holds position. Press A to arm, then push the ${thrXr} stick up to take off.</p>`
@@ -1159,7 +1239,7 @@ export class Menus {
         const r = ROWS.get(id)!;
         const track = r.kind === 'range' ? `<span class="ds-row__track" aria-hidden="true"><span class="ds-row__fill"></span></span>` : '';
         return `
-        <div class="ds-row" data-nav data-key="${r.id}" role="group" aria-label="${r.label}"${TOUCH_ROWS.has(r.id) ? ' data-touch-only hidden' : ''}>
+        <div class="ds-row" data-nav data-key="${r.id}" role="group" aria-label="${r.label}"${TOUCH_ROWS.has(r.id) ? ' data-touch-only hidden' : MOUSE_ROWS.has(r.id) ? ' data-mouse-only' : ''}>
           <div class="ds-row__text"><span class="ds-row__label">${r.label}</span><span class="ds-row__hint">${r.hint}</span></div>
           <div class="ds-row__ctl">
             <button type="button" class="ds-arrow" data-dir="-1" aria-label="Previous ${r.label}" tabindex="-1">‹</button>
@@ -1206,6 +1286,7 @@ export class Menus {
           ${this.btn('enter-vr', 'Enter VR', false, '', ' data-vr-only hidden')}
           ${this.btn('levels-race', 'Race', true)}
           ${this.btn('levels-freefly', 'Free Fly')}
+          ${this.btn('tutorial', 'Tutorial')}
           ${this.btn('settings', 'Settings')}
           ${this.btn('controls', 'Controls')}
           ${this.btn('about', 'About')}
@@ -1443,7 +1524,9 @@ export class Menus {
         <h2 class="ds-dialog__title">Paused</h2>
         <nav class="ds-menu">
           ${this.btn('resume', 'Resume', true)}
-          ${this.btn('retry', 'Restart')}
+          ${this.btn('retry', 'Restart', false, '', ' data-no-tut')}
+          ${this.btn('tutorial', 'Replay tutorial', false, '', ' data-tut-only hidden')}
+          ${this.btn('skip-tutorial', 'Skip tutorial', false, '', ' data-tut-only hidden')}
           ${this.btn('settings', 'Settings')}
           ${this.btn('controls', 'Controls')}
           ${this.btn('menu', 'Quit to menu', false, ' ds-btn--quit')}

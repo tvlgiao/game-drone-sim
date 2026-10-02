@@ -5,6 +5,10 @@
  * listeners as a finger. Buttons are tapped with Playwright's real touchscreen tap.
  */
 import { expect, test, type Page } from '@playwright/test';
+import { skipTutorialOffer } from './seed';
+
+// the first-run tutorial offer is covered by tutorial.spec.ts; here it would cover the menus
+test.beforeEach(({ context }) => skipTutorialOffer(context));
 
 interface Track {
   cx: number;
@@ -188,6 +192,9 @@ test.describe('touch devices', () => {
     expect(new Set(camW).size, `CAM widths ${camW}`).toBe(1);
     await page.evaluate(() => (window as unknown as { __drone: Hook }).__drone.action({ type: 'race' }));
     await page.waitForTimeout(3600);
+    // with GO! still in the centre a short screen lays the toast over the arm hint on purpose (hud.placeToasts):
+    // the level switch from the picker can delay the countdown past the fixed wait
+    await expect(page.locator('[data-r="center"]')).toHaveText('', { timeout: 5000 });
     await page.evaluate(() => (window as unknown as { __drone: Hook & { toast: (t: string) => void } }).__drone.toast('Controller connected: Xbox Wireless Controller'));
     await page.waitForTimeout(400);
     const r = await page.evaluate(() => {

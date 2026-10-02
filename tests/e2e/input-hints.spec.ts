@@ -3,6 +3,10 @@
  * with altitude hold, and keyboard + mouse flight under pointer lock.
  */
 import { expect, test, type Page } from '@playwright/test';
+import { skipTutorialOffer } from './seed';
+
+// the first-run tutorial offer is covered by tutorial.spec.ts; here it would cover the menus
+test.beforeEach(({ context }) => skipTutorialOffer(context));
 
 // window.__drone is typed by the global declaration in game.spec.ts.
 type Ctl = { control: { throttle: number; pitch: number; roll: number; yaw: number } | null };
@@ -75,6 +79,8 @@ test('the legend shows for the first flight, then stays collapsed; H toggles it 
   const legend = ui(page, '[data-r="cmap"]');
   await expect(legend).toBeVisible();
   await page.evaluate(() => window.__drone.action({ type: 'menu' }));
+  // the HUD has drawn the main menu (its per-frame update collapses the legend there), not just the race state
+  await page.waitForFunction(() => document.querySelector<HTMLElement>('#ui')?.dataset.status === 'menu');
   await page.waitForFunction(() => window.__drone.race.status === 'menu');
   await page.evaluate(() => window.__drone.action({ type: 'freefly' }));
   await page.waitForFunction(() => window.__drone.race.status === 'freefly');

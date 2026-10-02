@@ -5,8 +5,12 @@
  * Meta Digital Goods API with an owner's account.
  */
 import { expect, test, type Page } from '@playwright/test';
+import { skipTutorialOffer } from './seed';
 import { XR_CARD_PX, XR_CARD_TEXT_W, type XrPanelView } from '../../src/render/xr-panel';
 import { questOwnerStub } from './quest-owner';
+
+// the first-run tutorial offer is covered by tutorial.spec.ts; here it would cover the menus
+test.beforeEach(({ context }) => skipTutorialOffer(context));
 
 interface Hook {
   state: { position: { x: number; y: number; z: number } };
@@ -199,6 +203,7 @@ const QUEST_UA = 'Mozilla/5.0 (X11; Linux x86_64; Quest 2) AppleWebKit/537.36 (K
 for (const installed of [true, false]) {
   test(`Quest ${installed ? 'installed app (standalone) enters VR at launch' : 'browser tab does not auto-enter VR'}`, async ({ browser }) => {
     const ctx = await browser.newContext({ userAgent: QUEST_UA });
+    await skipTutorialOffer(ctx);
     await ctx.addInitScript(questOwnerStub);
     if (installed) {
       // the Horizon OS app shows the page in display-mode standalone

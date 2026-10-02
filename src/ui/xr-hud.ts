@@ -25,6 +25,8 @@ export interface XrHudState {
   exitHint?: string;
   /** selected level name on the menu card; with it, Y cycles levels */
   level?: string;
+  /** the tutorial runs: the pause card's X skips it instead of quitting to the menu */
+  tutorial?: boolean;
 }
 
 export const XR_EXIT_HINT = 'B Exit VR';
@@ -54,7 +56,7 @@ export function xrHudContent(s: XrHudState): XrPanelContent {
     case 'menu':
       return { layout: 'menu', title: 'DRONE SIM VR', sub: menuSub(s.level, r.bestTime), hint: hint(`A Race · X Free fly · ${s.level ? 'Y Level · ' : ''}${exit}`), accent: CYAN };
     case 'paused':
-      return { layout: 'menu', title: 'PAUSED', sub: 'L-stick click recentre · L-trigger heading arrow', hint: hint(`A Resume · X Menu · ${exit}`), accent: AMBER };
+      return { layout: 'menu', title: 'PAUSED', sub: 'L-stick click recentre · L-trigger heading arrow', hint: hint(`A Resume · X ${s.tutorial ? 'Skip tutorial' : 'Menu'} · ${exit}`), accent: AMBER };
     case 'finished':
       return { layout: 'menu', title: `FINISH ${formatTime(r.time)}`, sub: r.bestTime !== null ? `Best ${formatTime(r.bestTime)}` : '', hint: hint(`A Retry · X Menu · ${exit}`), accent: GREEN };
     case 'countdown':
@@ -86,7 +88,7 @@ export function xrProgressBar(value: number): string {
 /**
  * In-headset tutorial card: step title, the instruction line, progress and how to skip. Welcome and done sit
  * at eye level ('menu'); flight steps use the low 'hud' placement so the drone stays in view.
- * VR buttons: A starts / confirms, hold B skips, on the done card A = Start Training, X = Menu.
+ * VR buttons: A starts / confirms, Y pauses (the pause card skips), on the done card A = Start Training, X = Menu.
  */
 export function xrTutorialCard(v: TutorialView): XrPanelContent {
   if (v.id === 'done') {
@@ -96,12 +98,11 @@ export function xrTutorialCard(v: TutorialView): XrPanelContent {
   const first = v.lines[0] ?? '';
   const sub = welcome ? (v.lines[1] ?? '') : v.hint && v.lines[1] ? `${first} · ${v.lines[1]}` : first;
   const status = welcome ? 'A start' : xrProgressBar(v.progress);
-  const skip = v.skipHold > 0 ? `Skipping ${Math.round(v.skipHold * 100)}%` : v.skipLabel;
   return {
     layout: welcome ? 'menu' : 'hud',
     title: `${v.number}/${v.total} · ${v.title.toUpperCase()}`,
     sub,
-    hint: `${status} · ${skip}`,
+    hint: `${status} · ${v.skipLabel}`,
     accent: v.hint ? AMBER : CYAN,
   };
 }

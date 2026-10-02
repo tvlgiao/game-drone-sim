@@ -39,8 +39,6 @@ export interface TutorialCtx {
   ringsPassed: number;
   /** confirm edge this frame (Enter / A / the card's Continue button) */
   confirm: boolean;
-  /** skip button held this frame (gamepad B, Quest B): hold-to-skip */
-  skipHeld?: boolean;
 }
 
 export type TutorialStepId =
@@ -122,8 +120,6 @@ export const TRAVEL_MIN_AGL = 0.3;
 export const LAND_AGL = 0.15;
 export const LAND_MAX_SPEED = 0.3;
 export const LAND_HOLD = 1;
-export const SKIP_HOLD = 1;
-export const SKIP_HOLD_XR = 1.5;
 /** below this horizontal length of the nose vector the heading is undefined (nose straight up / down) */
 const HEADING_MIN_HORIZONTAL = 0.2;
 const CAMERAS: readonly CameraMode[] = ['los', 'fpv', 'chase'];
@@ -366,9 +362,12 @@ export function saveTutorialRecord(storage: Storage | null, r: TutorialRecord): 
   }
 }
 
-/** First-run prompt: offered until the pilot finished or skipped the tutorial once. */
+/**
+ * First-run prompt, shown once: only while there is no record at all. Starting, skipping or finishing writes one;
+ * a pilot who left half-way replays from the main menu's Tutorial entry instead of being asked again.
+ */
 export function shouldOfferTutorial(r: TutorialRecord | null): boolean {
-  return !r || (!r.done && !r.skipped);
+  return r === null;
 }
 
 export interface TutorialMachineOptions {
@@ -387,8 +386,6 @@ export class TutorialMachine {
   private best = 0;
   private stall = 0;
   private _hint = false;
-  private skipHold = 0;
-  private skipHoldMax = SKIP_HOLD;
   private _playerFlightMode: FlightMode | null = null;
   private readonly storage: Storage | null;
   private readonly now: () => number;
@@ -426,11 +423,6 @@ export class TutorialMachine {
     return this._hint;
   }
 
-  /** hold-to-skip fill, 0..1 */
-  get skipHoldProgress(): number {
-    return clamp01(this.skipHold / this.skipHoldMax);
-  }
-
   /** the pilot's flight mode when the tutorial started; restore it when the tutorial ends */
   get playerFlightMode(): FlightMode | null {
     return this._playerFlightMode;
@@ -455,13 +447,6 @@ export class TutorialMachine {
   update(ctx: TutorialCtx): TutorialEvent[] {
     if (this._phase !== 'running') return [];
     const dt = Number.isFinite(ctx.dt) && ctx.dt > 0 ? ctx.dt : 0;
-    this.skipHoldMax = ctx.source === 'xr' ? SKIP_HOLD_XR : SKIP_HOLD;
-    if (ctx.skipHeld) {
-      this.skipHold += dt;
-      if (this.skipHold >= this.skipHoldMax) return this.skip();
-    } else {
-      this.skipHold = 0;
-    }
     const step = this.step;
     const p = clamp01(step.update(dt === ctx.dt ? ctx : { ...ctx, dt }, this));
     this._progress = p;
@@ -491,13 +476,15 @@ export class TutorialMachine {
     return true;
   }
 
-  /** Ends the tutorial without finishing it; the record remembers the skip so the first-run prompt never returns. */
+  /**
+   * Ends the tutorial without finishing it (card Skip, Esc, pause menu "Skip tutorial"); the record remembers
+   * the skip so the first-run prompt never returns.
+   */
   skip(): TutorialEvent[] {
     if (this._phase === 'skipped') return [];
     const prev = this.record;
     this._phase = 'skipped';
     this._hint = false;
-    this.skipHold = 0;
     saveTutorialRecord(this.storage, { done: prev?.done ?? false, skipped: true, step: this._index + 1, at: this.now() });
     return [{ type: 'skipped' }];
   }
