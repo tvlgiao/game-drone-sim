@@ -127,7 +127,11 @@ test.describe('/app/: Meta Quest store app', () => {
     await expect(page.getByRole('heading', { level: 1, name: GATE_TITLE })).toBeVisible({ timeout: 20_000 });
     await expect(page.locator('#splash')).toBeHidden();
     expect(await page.evaluate(() => !!(window as unknown as W).__drone)).toBe(false);
-    await expect(page.locator('.ds-gate .st-badge--quest')).toContainText('Coming soon');
+    await expect(page.locator('.ds-store-gate .st-badge--quest')).toContainText('Coming soon');
+    // its own styles only: the game's touch tap gate (mobile.css) must not leak in
+    const title = page.getByRole('heading', { level: 1, name: GATE_TITLE });
+    expect(await title.evaluate((el) => getComputedStyle(el).letterSpacing)).toBe('normal');
+    expect(await title.evaluate((el) => getComputedStyle(el).textShadow)).toBe('none');
     const play = page.getByRole('link', { name: 'Play free on the web' });
     await expect(play).toBeFocused();
     await play.click();

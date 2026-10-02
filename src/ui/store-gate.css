@@ -1,4 +1,4 @@
-.ds-gate {
+.ds-store-gate {
   position: fixed;
   inset: 0;
   z-index: 200;
@@ -16,7 +16,7 @@
   user-select: text;
 }
 
-.ds-gate__card {
+.ds-store-gate__card {
   width: min(100%, 40rem);
   display: grid;
   justify-items: center;
@@ -24,7 +24,7 @@
   text-align: center;
 }
 
-.ds-gate__logo {
+.ds-store-gate__logo {
   margin: 0;
   font-size: clamp(2.2rem, 7vw, 4.2rem);
   font-weight: 900;
@@ -34,14 +34,14 @@
   text-shadow: 0 0 10px rgba(40, 231, 255, 0.9), 0 0 40px rgba(40, 231, 255, 0.5);
 }
 
-.ds-gate__title {
+.ds-store-gate__title {
   margin: 0.4rem 0 0;
   font-size: clamp(1.25rem, 3vw, 1.75rem);
   font-weight: 700;
   line-height: 1.25;
 }
 
-.ds-gate__text {
+.ds-store-gate__text {
   margin: 0;
   max-width: 34rem;
   color: var(--ds-muted);
@@ -49,7 +49,7 @@
   line-height: 1.5;
 }
 
-.ds-gate__actions {
+.ds-store-gate__actions {
   display: flex;
   flex-wrap: wrap;
   justify-content: center;
@@ -58,7 +58,7 @@
   margin-top: 0.6rem;
 }
 
-.ds-gate__play {
+.ds-store-gate__play {
   display: inline-flex;
   align-items: center;
   min-height: 48px;
@@ -71,7 +71,7 @@
   text-decoration: none;
 }
 
-.ds-gate__play:focus-visible {
+.ds-store-gate__play:focus-visible {
   outline: 2px solid var(--ds-text);
   outline-offset: 3px;
 }

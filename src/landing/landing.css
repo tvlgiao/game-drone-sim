@@ -255,7 +255,7 @@ body.ld {
   overflow: hidden;
   border: 1px solid var(--ds-edge);
   box-shadow: 0 30px 80px rgba(0, 0, 0, 0.55), 0 0 0 1px rgba(40, 231, 255, 0.08), 0 0 60px rgba(40, 231, 255, 0.12);
-  aspect-ratio: 16 / 9;
+  aspect-ratio: 2868 / 1320;
   background: #0b1220;
 }
 
@@ -267,7 +267,7 @@ body.ld {
 
 @media (min-width: 960px) {
   .ld-hero__grid {
-    grid-template-columns: minmax(0, 0.8fr) minmax(0, 1.2fr);
+    grid-template-columns: minmax(0, 0.9fr) minmax(0, 1.1fr);
     gap: clamp(2.5rem, 5vw, 5rem);
   }
 }
@@ -329,6 +329,8 @@ body.ld {
   stroke-width: 1.6;
   stroke-linecap: round;
   stroke-linejoin: round;
+  width: 2rem;
+  height: 2rem;
 }
 
 .ld-feature:nth-child(even) .ld-feature__icon {
@@ -435,6 +437,9 @@ body.ld {
 @media (max-width: 520px) {
   .ld-nav a:not(.ld-nav__play) {
     display: none;
+  }
+  .st-badge {
+    min-width: 0;
   }
   .ld-btn {
     width: 100%;

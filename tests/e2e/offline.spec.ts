@@ -42,7 +42,7 @@ test('the Quest app launches offline after one successful store check (cached ow
   await context.setOffline(true);
   await page.reload();
   await page.waitForFunction(() => !!(window as unknown as W).__drone, null, { timeout: 20_000 });
-  await expect(page.locator('.ds-gate')).toHaveCount(0);
+  await expect(page.locator('.ds-store-gate')).toHaveCount(0);
   expect(errors).toEqual([]);
   await context.setOffline(false);
 });
