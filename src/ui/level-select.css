@@ -85,7 +85,8 @@
 }
 
 .ds-lvl__acts .ds-btn {
-  min-height: calc(44 * var(--ds-u));
+  /* never below the 44 px touch target, whatever the design-pixel scale */
+  min-height: max(44px, calc(44 * var(--ds-u)));
   padding: 0 calc(10 * var(--ds-u));
   font-size: 0.86em;
   letter-spacing: 0.16em;

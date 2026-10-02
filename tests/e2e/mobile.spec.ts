@@ -86,6 +86,7 @@ async function knob(page: Page, side: 'l' | 'r'): Promise<{ x: number; y: number
 
 async function startFreeFly(page: Page): Promise<void> {
   await page.getByRole('button', { name: 'Free Fly' }).tap();
+  await page.getByRole('button', { name: 'Free Fly · Night Loft' }).tap(); // level picker
   await page.waitForFunction(() => (window as unknown as { __drone: Hook }).__drone.touchVisible, null, { timeout: 5000 });
 }
 
