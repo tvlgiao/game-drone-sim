@@ -10,11 +10,12 @@
 import { chromium, webkit, devices } from '@playwright/test';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 const ROUND = process.argv[2] ?? 'round-1';
 const BASE = process.argv[3] ?? 'http://localhost:4173';
 const FILTER = process.argv[4] ?? '';
-const OUT = new URL(`../audit/${ROUND}/`, import.meta.url).pathname;
+const OUT = fileURLToPath(new URL(`../audit/${ROUND}/`, import.meta.url));
 const QUEST_UA = 'Mozilla/5.0 (X11; Linux x86_64; Quest 2) AppleWebKit/537.36 (KHTML, like Gecko) OculusBrowser/152.0.0.44.30 Chrome/152.0.7977.64 VR Safari/537.36';
 const GPU = ['--use-angle=metal', '--enable-gpu', '--ignore-gpu-blocklist'];
 
