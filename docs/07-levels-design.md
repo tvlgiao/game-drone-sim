@@ -12,10 +12,11 @@ Status: design only. Grounded in `src/types.ts` (`LevelDef`, `Collider`, `Collid
 
 ## 0. Decisions in one screen
 
-- **Free**: Tutorial, Training Field, Night Loft. **Full Game** (one non-consumable, **$4.99**, SKU
-  `full_game`): City, Alpine Valley (mountains / forest), Infinite World. The free tier shows the physics,
-  the FC feel and the signature look; the paid content is the volume (large outdoor levels, replayable
-  through seeds).
+- **Pricing (owner decision 2026-10-02): paid upfront, $4.99, every store, no free tier.** All levels
+  (Tutorial, Training, Night Loft, City, Alpine Valley, Infinite) ship in the one purchase. This supersedes the
+  free + `full_game` IAP split below; §5 shrinks to an ownership check where the platform needs one
+  (Quest PWA loading a public URL), and the public website must not give the full game away (strategy
+  pending research).
 - **One engine for all outdoor content**: a pure-TS `src/world/` module (no DOM, no three) exposing an
   analytic `TerrainField.heightAt(x, z)` plus chunk generators. Training, Alpine Valley and Infinite are
   presets of it; City uses the same chunk / instancing plumbing with a grid generator.
@@ -406,6 +407,10 @@ export type TutorialPhase = 'idle' | 'running' | 'done' | 'skipped';
   shows the Full Game card once, non-blocking.
 
 ## 5. Entitlements and IAP (src/store)
+
+> Superseded by the paid-upfront decision in §0: no IAP unlock, no locked levels. Kept for the
+> Quest ownership check (Digital Goods / entitlement) and as a fallback if a store cannot sell a
+> web app upfront.
 
 ```ts
 export type Sku = 'full_game';
