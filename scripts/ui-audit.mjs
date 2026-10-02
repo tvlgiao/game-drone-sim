@@ -78,7 +78,8 @@ async function run() {
       }
     };
     try {
-      await page.goto(`${BASE}/${d.portrait ? '' : '?rotate=0'}${d.vr ? (d.portrait ? '?' : '&') + 'xremu=1' : ''}`);
+      // plain load first: ?xremu=1 makes the app treat the desktop as a Quest (Touch copy, Quest advice)
+      await page.goto(`${BASE}/${d.portrait ? '' : '?rotate=0'}`);
       await page.waitForFunction(() => !!window.__drone, null, { timeout: 30_000 });
       await sleep(1500);
       if (d.portrait) {
@@ -100,7 +101,7 @@ async function run() {
         }
       }
       await shot('main-menu');
-      for (const s of ['settings', 'rates', 'controls', 'controller']) await screen(s);
+      for (const s of ['settings', 'rates', 'controls', 'controller', 'about', 'confirm-reset']) await screen(s);
       await screen('main');
       // flight HUD in each camera
       await h(() => window.__drone.action({ type: 'freefly' }));
@@ -145,7 +146,7 @@ async function run() {
       await sleep(400);
       await shot('error');
       if (d.vr) {
-        await page.reload();
+        await page.goto(`${BASE}/?rotate=0&xremu=1`);
         await page.waitForFunction(() => !!window.__drone && !!window.__xrDevice, null, { timeout: 30_000 });
         await sleep(800);
         await shot('main-menu-with-enter-vr');
