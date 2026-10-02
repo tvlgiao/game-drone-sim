@@ -155,16 +155,16 @@ describe('InputManager throttle reset and pad disconnects', () => {
     return { win, key };
   };
 
-  it('latchTakeoff (respawn / disarm) drops the held keyboard throttle to zero', () => {
+  it('latchTakeoff (respawn / disarm) drops the keyboard throttle from hover to zero', () => {
     const { win, key } = keyWin();
     const im = new InputManager(win, { ...DEFAULT_SETTINGS });
     key('keydown', 'KeyW');
     let f = im.poll(0.01);
     for (let i = 0; i < 99; i++) f = im.poll(0.01);
     key('keyup', 'KeyW');
-    f = im.poll(0.01);
+    for (let i = 0; i < 30; i++) f = im.poll(0.01);
     expect(f.source).toBe('keyboard');
-    expect(f.control.throttle).toBeGreaterThan(0.5);
+    expect(f.control.throttle).toBe(0.5);
     im.latchTakeoff();
     expect(im.poll(0.01).control.throttle).toBe(0);
     im.dispose();

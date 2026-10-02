@@ -656,6 +656,431 @@
   box-shadow: 0 0 calc(10 * var(--ds-u)) var(--ds-cyan);
 }
 
+/* control hints: key / button glyphs for the active input (hud.ts + input-glyphs.ts) */
+.ds-ui {
+  --ds-g: calc(20 * var(--ds-u));
+  --ds-pad-a: #5bd16b;
+  --ds-pad-b: #ff5a6e;
+  --ds-pad-x: #4aa3ff;
+  --ds-pad-y: #ffd23d;
+  --ds-ps-cross: #8fb4ff;
+  --ds-ps-circle: #ff7d8b;
+  --ds-ps-square: #ff9ee0;
+  --ds-ps-triangle: #4fe3b5;
+  --ds-g-ink: #07101c;
+}
+
+.ds-g {
+  display: inline-grid;
+  place-items: center;
+  flex: none;
+  min-width: var(--ds-g);
+  height: var(--ds-g);
+  padding: 0 calc(5 * var(--ds-u));
+  font-family: var(--ds-mono);
+  font-size: calc(11 * var(--ds-u));
+  font-weight: 700;
+  font-style: normal;
+  line-height: 1;
+  letter-spacing: 0;
+  text-transform: none;
+  color: var(--ds-text);
+  white-space: nowrap;
+}
+
+.ds-g svg {
+  display: block;
+}
+
+.ds-g--key {
+  background: rgba(255, 255, 255, 0.1);
+  border: 1px solid rgba(255, 255, 255, 0.32);
+  border-bottom-width: calc(2 * var(--ds-u));
+  border-radius: calc(5 * var(--ds-u));
+}
+
+.ds-g--key.is-wide {
+  font-size: calc(10 * var(--ds-u));
+  padding: 0 calc(6 * var(--ds-u));
+}
+
+.ds-g--face {
+  width: var(--ds-g);
+  padding: 0;
+  border-radius: 50%;
+  font-family: var(--ds-font);
+  font-size: calc(12 * var(--ds-u));
+  font-weight: 800;
+  color: var(--ds-text);
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.45);
+}
+
+.ds-g--face.is-green,
+.ds-g--face.is-red,
+.ds-g--face.is-blue,
+.ds-g--face.is-yellow {
+  color: var(--ds-g-ink);
+  border-color: transparent;
+}
+
+.ds-g--face.is-green { background: var(--ds-pad-a); }
+.ds-g--face.is-red { background: var(--ds-pad-b); }
+.ds-g--face.is-blue { background: var(--ds-pad-x); }
+.ds-g--face.is-yellow { background: var(--ds-pad-y); }
+
+.ds-g--ps {
+  background: #141c2b;
+  border-color: rgba(255, 255, 255, 0.28);
+}
+
+.ds-g--ps svg {
+  width: 72%;
+  height: 72%;
+  fill: none;
+  stroke-width: 2.6;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.ds-g--ps.is-cross svg { stroke: var(--ds-ps-cross); }
+.ds-g--ps.is-circle svg { stroke: var(--ds-ps-circle); }
+.ds-g--ps.is-square svg { stroke: var(--ds-ps-square); }
+.ds-g--ps.is-triangle svg { stroke: var(--ds-ps-triangle); }
+
+.ds-g--shoulder {
+  font-size: calc(10 * var(--ds-u));
+  padding: 0 calc(6 * var(--ds-u));
+  background: rgba(255, 255, 255, 0.1);
+  border: 1px solid rgba(255, 255, 255, 0.4);
+  border-radius: calc(9 * var(--ds-u)) calc(9 * var(--ds-u)) calc(4 * var(--ds-u)) calc(4 * var(--ds-u));
+}
+
+.ds-g--system {
+  height: calc(17 * var(--ds-u));
+  font-family: var(--ds-font);
+  font-size: calc(10 * var(--ds-u));
+  font-weight: 700;
+  padding: 0 calc(6 * var(--ds-u));
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.32);
+  border-radius: calc(999 * var(--ds-u));
+}
+
+.ds-g--stick {
+  width: var(--ds-g);
+  padding: 0;
+  font-family: var(--ds-font);
+  font-size: calc(10 * var(--ds-u));
+  border-radius: 50%;
+  background: radial-gradient(circle, rgba(255, 255, 255, 0.16) 0 45%, rgba(255, 255, 255, 0.04) 47%);
+  border: 1px solid rgba(255, 255, 255, 0.45);
+}
+
+.ds-g--stick.is-press {
+  min-width: calc(26 * var(--ds-u));
+  width: auto;
+  padding: 0 calc(4 * var(--ds-u));
+  border-radius: calc(999 * var(--ds-u));
+  border-style: dashed;
+}
+
+.ds-g--mouse {
+  display: inline-flex;
+  align-items: center;
+  gap: calc(2 * var(--ds-u));
+  padding: 0 calc(3 * var(--ds-u));
+  color: var(--ds-cyan);
+}
+
+.ds-g--mouse svg {
+  width: calc(11 * var(--ds-u));
+  height: calc(15 * var(--ds-u));
+}
+
+.ds-g--mouse span:empty {
+  display: none;
+}
+
+/* glyph inside the armed / mode / camera chips */
+.ds-chip__g {
+  display: inline-flex;
+  gap: calc(3 * var(--ds-u));
+  margin-left: calc(-5 * var(--ds-u));
+}
+
+.ds-chip__g:empty {
+  display: none;
+}
+
+.ds-chip .ds-g {
+  --ds-g: calc(18 * var(--ds-u));
+}
+
+/* reset / pause / controls … strip under the chips */
+.ds-binds {
+  flex-basis: 100%;
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: calc(5 * var(--ds-u));
+}
+
+.ds-binds:empty {
+  display: none;
+}
+
+.ds-bind {
+  display: inline-flex;
+  align-items: center;
+  gap: calc(5 * var(--ds-u));
+  height: calc(26 * var(--ds-u));
+  padding: 0 calc(9 * var(--ds-u)) 0 calc(4 * var(--ds-u));
+  font: inherit;
+  font-size: 0.72em;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  color: var(--ds-muted);
+  background: rgba(6, 10, 20, 0.62);
+  border: 1px solid rgba(120, 220, 255, 0.14);
+  border-radius: calc(999 * var(--ds-u));
+  white-space: nowrap;
+}
+
+.ds-bind .ds-g {
+  --ds-g: calc(18 * var(--ds-u));
+}
+
+.ds-bind--btn {
+  pointer-events: auto;
+  cursor: pointer;
+  color: var(--ds-text);
+  border-color: rgba(40, 231, 255, 0.4);
+}
+
+.ds-bind--btn:hover,
+.ds-bind--btn:focus-visible {
+  border-color: var(--ds-edge-hot);
+  outline: none;
+}
+
+.ds-bind--btn:focus-visible {
+  box-shadow: 0 0 0 calc(2 * var(--ds-u)) var(--ds-cyan);
+}
+
+/* key cluster under each stick well: inverted T like the keys themselves */
+.ds-stick__keys {
+  display: flex;
+  align-items: center;
+  gap: calc(3 * var(--ds-u));
+  min-height: calc(18 * var(--ds-u));
+}
+
+.ds-stick__keys:empty {
+  display: none;
+}
+
+.ds-kc {
+  display: grid;
+  grid-template-columns: repeat(3, auto);
+  gap: calc(2 * var(--ds-u));
+  --ds-g: calc(15 * var(--ds-u));
+}
+
+.ds-kc .ds-g {
+  font-size: calc(9 * var(--ds-u));
+  padding: 0 calc(3 * var(--ds-u));
+}
+
+.ds-kc > .ds-g {
+  grid-row: 2;
+}
+
+.ds-kc__u {
+  grid-column: 2;
+  grid-row: 1;
+  display: grid;
+}
+
+.ds-thr__g:empty {
+  display: none;
+}
+
+.ds-thr__g .ds-g {
+  --ds-g: calc(16 * var(--ds-u));
+  font-size: calc(9 * var(--ds-u));
+}
+
+/* Controls legend (H / View / Create toggles it) */
+.ds-cmap {
+  left: var(--ds-gap);
+  top: calc(var(--ds-gap) + calc(108 * var(--ds-u)));
+  position: absolute;
+  width: calc(236 * var(--ds-u));
+  max-height: calc(100% - var(--ds-gap) * 2 - calc(230 * var(--ds-u)));
+  overflow: hidden;
+  padding: calc(10 * var(--ds-u)) calc(12 * var(--ds-u)) calc(10 * var(--ds-u));
+  font-size: calc(12 * var(--ds-u));
+  background: linear-gradient(160deg, rgba(14, 24, 40, 0.86), rgba(6, 10, 20, 0.8));
+}
+
+.ds-cmap__head {
+  display: flex;
+  align-items: center;
+  gap: calc(8 * var(--ds-u));
+  margin-bottom: calc(6 * var(--ds-u));
+}
+
+.ds-cmap__src {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 0.9em;
+  font-weight: 600;
+  color: var(--ds-cyan);
+}
+
+.ds-cmap__close {
+  display: inline-flex;
+  align-items: center;
+  gap: calc(4 * var(--ds-u));
+  font-size: 0.85em;
+  color: var(--ds-muted);
+}
+
+.ds-cmap__close .ds-g {
+  --ds-g: calc(17 * var(--ds-u));
+}
+
+.ds-cmap__list {
+  margin: 0;
+  display: grid;
+  gap: calc(3 * var(--ds-u));
+}
+
+.ds-cmap__list--act {
+  margin-top: calc(7 * var(--ds-u));
+  padding-top: calc(7 * var(--ds-u));
+  border-top: 1px solid var(--ds-edge);
+}
+
+.ds-cmap__row {
+  display: grid;
+  grid-template-columns: 6.4em 1fr;
+  align-items: center;
+  gap: calc(8 * var(--ds-u));
+  min-height: calc(22 * var(--ds-u));
+}
+
+.ds-cmap__row dt {
+  color: var(--ds-muted);
+  font-weight: 600;
+}
+
+.ds-cmap__row dd {
+  margin: 0;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: calc(4 * var(--ds-u));
+}
+
+.ds-cmap__row small {
+  font-size: 0.85em;
+  color: var(--ds-muted);
+}
+
+.ds-cmap__foot {
+  margin: calc(8 * var(--ds-u)) 0 0;
+  font-size: 0.85em;
+  line-height: 1.35;
+  color: var(--ds-muted);
+}
+
+/* mouse stick: where the mouse holds the stick (hold) / how far it deflects (spring) */
+.ds-mstick {
+  display: grid;
+  justify-items: center;
+  gap: calc(4 * var(--ds-u));
+  padding-bottom: calc(4 * var(--ds-u));
+  border-bottom: 1px solid var(--ds-edge);
+}
+
+.ds-mstick__well {
+  position: relative;
+  width: calc(78 * var(--ds-u));
+  height: calc(78 * var(--ds-u));
+  border-radius: 50%;
+  background: radial-gradient(circle, rgba(40, 231, 255, 0.05), rgba(0, 0, 0, 0.3));
+  border: 1px solid rgba(120, 220, 255, 0.3);
+}
+
+.ds-mstick__ring {
+  /* centre mark: where Z / the middle button snaps the stick */
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: calc(18 * var(--ds-u));
+  height: calc(18 * var(--ds-u));
+  transform: translate(-50%, -50%);
+  border-radius: 50%;
+  border: 1px dashed rgba(120, 220, 255, 0.45);
+}
+
+.ds-mstick__dot {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: calc(13 * var(--ds-u));
+  height: calc(13 * var(--ds-u));
+  border-radius: 50%;
+  background: var(--ds-cyan);
+  box-shadow: 0 0 calc(10 * var(--ds-u)) var(--ds-cyan);
+  transform: translate(-50%, -50%);
+  will-change: transform;
+}
+
+.ds-mstick.is-on .ds-mstick__dot {
+  background: var(--ds-amber);
+  box-shadow: 0 0 calc(10 * var(--ds-u)) var(--ds-amber);
+}
+
+.ds-mstick__lbl {
+  display: inline-flex;
+  align-items: center;
+  gap: calc(4 * var(--ds-u));
+  font-size: 0.68em;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  color: var(--ds-muted);
+}
+
+.ds-mstick__lbl .ds-g {
+  --ds-g: calc(15 * var(--ds-u));
+  font-size: calc(9 * var(--ds-u));
+}
+
+/* the touch layer's own buttons carry their labels */
+.ds-ui[data-scheme='touch'] .ds-chip__g,
+.ds-ui[data-scheme='touch'] .ds-binds,
+.ds-ui[data-scheme='touch'] .ds-stick__keys,
+.ds-ui[data-scheme='touch'] .ds-cmap {
+  display: none;
+}
+
+/* the legend and strip are flight aids: hidden on the main menu backdrop */
+.ds-ui[data-status='menu'] .ds-cmap,
+.ds-ui[data-status='menu'] .ds-binds {
+  display: none;
+}
+
+@media (max-height: 560px) {
+  .ds-cmap { top: calc(var(--ds-gap) + calc(92 * var(--ds-u))); max-height: calc(100% - var(--ds-gap) * 2 - calc(190 * var(--ds-u))); }
+  .ds-cmap__foot { display: none; }
+}
+
 /* screen flashes */
 .ds-flash {
   position: absolute;
