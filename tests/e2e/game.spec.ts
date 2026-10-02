@@ -265,3 +265,64 @@ for (const quality of ['ultra', 'medium']) {
     await ctx.close();
   });
 }
+
+test('keyboard throttle does not survive a reset or a disarm (the respawned quad stays on the ground)', async ({ page }) => {
+  await boot(page);
+  await page.evaluate(() => window.__drone.action({ type: 'freefly' }));
+  const throttle = () => page.evaluate(() => (window.__drone as unknown as { control: { throttle: number } | null }).control?.throttle ?? -1);
+  await page.keyboard.press('Space');
+  await page.waitForFunction(() => window.__drone.armed);
+  await page.keyboard.down('KeyW');
+  await page.waitForTimeout(1200);
+  await page.keyboard.up('KeyW');
+  await page.waitForTimeout(300);
+  expect(await throttle()).toBeGreaterThan(0.5);
+  await page.keyboard.press('KeyR');
+  await page.waitForTimeout(400);
+  expect(await throttle()).toBe(0);
+  expect(await page.evaluate(() => window.__drone.state.position.y)).toBeLessThan(0.3);
+  // disarm with the throttle up: it drops to zero so the next arm is not refused
+  await page.keyboard.press('Space');
+  await page.waitForFunction(() => window.__drone.armed);
+  await page.keyboard.down('KeyW');
+  await page.waitForTimeout(1000);
+  await page.keyboard.up('KeyW');
+  await page.keyboard.press('Space');
+  await page.waitForFunction(() => !window.__drone.armed);
+  await page.waitForTimeout(100);
+  expect(await throttle()).toBe(0);
+  await page.keyboard.press('Space');
+  await page.waitForFunction(() => window.__drone.armed, null, { timeout: 2000 });
+  expect(errors).toEqual([]);
+});
+
+test('unplugging the gamepad that is flying pauses the flight', async ({ page }) => {
+  await page.addInitScript(() => {
+    const buttons = Array.from({ length: 17 }, () => ({ pressed: false, touched: false, value: 0 }));
+    const pad = { id: 'Xbox Wireless Controller (STANDARD GAMEPAD)', index: 0, connected: true, mapping: 'standard', axes: [0, 1, 0, 0], buttons, timestamp: 0, vibrationActuator: null };
+    const w = window as unknown as { __pad: typeof pad; __pads: (typeof pad)[] };
+    w.__pad = pad;
+    w.__pads = [pad];
+    Object.defineProperty(navigator, 'getGamepads', { value: () => w.__pads, configurable: true });
+  });
+  await boot(page);
+  await page.evaluate(() => window.__drone.action({ type: 'freefly' }));
+  type PadWin = { __pad: { buttons: { pressed: boolean; touched: boolean; value: number }[] }; __pads: unknown[] };
+  // A arms with the throttle stick down: the pad becomes the active source
+  await page.evaluate(() => {
+    (window as unknown as PadWin).__pad.buttons[0] = { pressed: true, touched: true, value: 1 };
+  });
+  await page.waitForFunction(() => window.__drone.armed);
+  await page.evaluate(() => {
+    (window as unknown as PadWin).__pad.buttons[0] = { pressed: false, touched: false, value: 0 };
+  });
+  expect(await page.evaluate(() => (window.__drone as unknown as { source: string }).source)).toBe('gamepad');
+  await page.evaluate(() => {
+    const w = window as unknown as PadWin;
+    w.__pads = [];
+    window.dispatchEvent(Object.assign(new Event('gamepaddisconnected'), { gamepad: w.__pad }));
+  });
+  await page.waitForFunction(() => window.__drone.race.status === 'paused', null, { timeout: 2000 });
+  expect(await page.evaluate(() => window.__drone.screen)).toBe('pause');
+  expect(errors).toEqual([]);
+});

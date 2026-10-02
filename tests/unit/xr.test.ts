@@ -1,11 +1,13 @@
 import { describe, expect, it } from 'vitest';
 import { DEFAULT_SETTINGS } from '../../src/core/settings';
-import { isQuestBrowser } from '../../src/core/xr';
+import * as THREE from 'three';
+import { XR_TARGET_FPS, isQuestBrowser, tuneXrSession, xrSessionObscured } from '../../src/core/xr';
+import { XR_HUD_DOWN, wrapHint, xrPanelPose } from '../../src/render/xr-panel';
 import { InputManager } from '../../src/input/input-manager';
 import { XR_BTN, XR_YAW_SCALE, XrControllers, shapeXrControl, xrExpo, type XrSourceLike } from '../../src/input/xr-controllers';
 import { actualRate, RATE_PRESETS } from '../../src/control/rates';
 import { loadSettings } from '../../src/core/settings';
-import { xrHudContent, type XrHudState } from '../../src/ui/xr-hud';
+import { XR_APP_EXIT_HINT, xrHudContent, type XrHudState } from '../../src/ui/xr-hud';
 import type { RaceSnapshot } from '../../src/types';
 
 /** Quest Touch controller: xr-standard, thumbstick on axes 2/3 (Y +down). */
@@ -148,6 +150,95 @@ describe('xrHudContent', () => {
 
   it('a toast replaces the hint line', () => {
     expect(xrHudContent(state({ race: race({ status: 'freefly' }), toast: 'ACRO mode' })).hint).toBe('ACRO mode');
+  });
+
+  it('armed and disarmed flight cards list every flight button: B mode, X reset, stick-click camera, Y pause', () => {
+    for (const armed of [true, false]) {
+      const hint = xrHudContent(state({ race: race({ status: 'freefly' }), armed })).hint;
+      for (const part of [armed ? 'A disarm' : 'A arm', 'B mode', 'X reset', 'R-stick click cam', 'Y pause']) expect(hint, `armed=${armed}`).toContain(part);
+    }
+  });
+
+  it('pause card spells out the left trigger; free fly shows speed in km/h like the flat HUD', () => {
+    expect(xrHudContent(state({ race: race({ status: 'paused' }) })).sub).toContain('L-trigger: heading arrow');
+    expect(xrHudContent(state({ race: race({ status: 'freefly' }), speed: 5 })).title).toBe('FREE FLY · 18 km/h');
+  });
+
+  it('menus offer B Exit VR in the browser and B 2D menu in the installed Quest app', () => {
+    for (const status of ['menu', 'paused', 'finished'] as const) {
+      expect(xrHudContent(state({ race: race({ status }) })).hint).toContain('B Exit VR');
+      const app = xrHudContent(state({ race: race({ status }), exitHint: XR_APP_EXIT_HINT })).hint;
+      expect(app).toContain('B 2D menu');
+      expect(app).not.toContain('Exit VR');
+    }
+  });
+});
+
+describe('VR card layout', () => {
+  const head = new THREE.Vector3(0, 1.6, 0);
+  const normalTowardsEye = (layout: 'menu' | 'hud'): { pos: THREE.Vector3; dot: number } => {
+    const pos = new THREE.Vector3();
+    const rot = new THREE.Euler();
+    xrPanelPose(layout, head, pos, rot);
+    const n = new THREE.Vector3(0, 0, 1).applyEuler(rot);
+    return { pos, dot: n.dot(head.clone().sub(pos).normalize()) };
+  };
+
+  it('the flight card sits low and left of the line of sight and faces the eye squarely', () => {
+    const { pos, dot } = normalTowardsEye('hud');
+    expect(head.y - pos.y).toBeCloseTo(XR_HUD_DOWN, 5);
+    expect(XR_HUD_DOWN).toBeGreaterThan(0.45);
+    expect(pos.x).toBeLessThan(head.x);
+    expect(dot).toBeGreaterThan(0.999);
+  });
+
+  it('menu cards sit at eye level facing the eye', () => {
+    const { pos, dot } = normalTowardsEye('menu');
+    expect(head.y - pos.y).toBeLessThan(0.1);
+    expect(dot).toBeGreaterThan(0.999);
+  });
+
+  it('a hint wider than the card wraps at a separator into two balanced lines', () => {
+    const measure = (t: string) => t.length * 10;
+    expect(wrapHint('A Race · X Free fly', measure, 400)).toEqual(['A Race · X Free fly']);
+    const lines = wrapHint('A disarm · B mode · X reset · R-stick click cam · Y pause', measure, 400);
+    expect(lines).toHaveLength(2);
+    expect(lines.join(' · ')).toBe('A disarm · B mode · X reset · R-stick click cam · Y pause');
+    for (const l of lines) expect(measure(l)).toBeLessThanOrEqual(400);
+  });
+});
+
+describe('XR session tuning (Quest frame rate + foveation)', () => {
+  const fov = () => {
+    const calls: number[] = [];
+    return { calls, xr: { setFoveation: (v: number) => void calls.push(v) } };
+  };
+
+  it('asks for 72 Hz when the runtime lists it, and maximum fixed foveation', async () => {
+    const asked: number[] = [];
+    const f = fov();
+    await tuneXrSession({ supportedFrameRates: new Float32Array([72, 80, 90, 120]), updateTargetFrameRate: async (r) => void asked.push(r) }, f.xr);
+    expect(asked).toEqual([XR_TARGET_FPS]);
+    expect(XR_TARGET_FPS).toBe(72);
+    expect(f.calls).toEqual([1]);
+  });
+
+  it('leaves runtimes without the API or without 72 Hz alone, and swallows a refusal', async () => {
+    const asked: number[] = [];
+    await expect(tuneXrSession({}, fov().xr)).resolves.toBeUndefined();
+    await tuneXrSession({ supportedFrameRates: new Float32Array([90, 120]), updateTargetFrameRate: async (r) => void asked.push(r) }, fov().xr);
+    expect(asked).toEqual([]);
+    const refuse = { supportedFrameRates: [72], updateTargetFrameRate: () => Promise.reject(new DOMException('no', 'InvalidStateError')) };
+    await expect(tuneXrSession(refuse, { setFoveation: () => { throw new Error('no layer'); } })).resolves.toBeUndefined();
+  });
+});
+
+describe('XR visibility (Quest system menu, headset off)', () => {
+  it('blurred and hidden sessions count as obscured; visible does not', () => {
+    expect(xrSessionObscured('visible-blurred')).toBe(true);
+    expect(xrSessionObscured('hidden')).toBe(true);
+    expect(xrSessionObscured('visible')).toBe(false);
+    expect(xrSessionObscured(undefined)).toBe(false);
   });
 });
 
