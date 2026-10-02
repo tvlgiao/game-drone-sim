@@ -23,8 +23,19 @@ test('boot splash is removed once the first frame is up', async ({ page }) => {
   await page.goto('/');
   await expect(page.locator('#splash')).toBeAttached();
   await page.waitForFunction(() => !!window.__drone, null, { timeout: 20_000 });
+  // main.ts signals the first drawn frame itself; the splash's 20 s fallback must not be what clears it
+  await expect(page.locator('body')).toHaveClass(/is-ready/, { timeout: 5_000 });
   await expect(page.locator('#splash')).toHaveCount(0, { timeout: 5_000 });
-  await expect(page.locator('body')).toHaveClass(/is-ready/);
+});
+
+test('the centre title keeps unrelated classes on its wrapper', async ({ page }) => {
+  await boot(page);
+  await page.evaluate(() => document.querySelector('[data-r="center"]')!.parentElement!.classList.add('x-keep'));
+  await page.evaluate(() => window.__drone.action({ type: 'race' }));
+  await page.waitForFunction(() => document.querySelector('[data-r="center"]')?.textContent === '3', null, { timeout: 3_000 });
+  const cls = await page.evaluate(() => document.querySelector('[data-r="center"]')!.parentElement!.className);
+  expect(cls).toContain('x-keep');
+  expect(cls).toContain('is-count');
 });
 
 test('race countdown digit stays visible for each whole second', async ({ page }) => {

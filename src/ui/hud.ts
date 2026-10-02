@@ -115,6 +115,9 @@ const HUD_HTML = `
   <div class="ds-toasts" data-r="toasts" role="status" aria-live="polite"></div>
 </div>`;
 
+/** state classes `setCenter` toggles on the centre title and its wrapper */
+const CENTER_KINDS = ['is-crash', 'is-count', 'is-go', 'is-ok', 'is-dim'] as const;
+
 export class Hud {
   private readonly root: HTMLElement;
   private readonly refs: Record<Ref, HTMLElement>;
@@ -447,7 +450,11 @@ export class Hud {
     r.center.getAnimations?.().forEach((a) => a.cancel());
     this.text(r.center, big);
     r.center.className = `ds-center__big ${kind}`;
-    r.center.parentElement!.className = `ds-center ${kind}`;
+    const wrap = r.center.parentElement;
+    if (wrap) {
+      wrap.classList.remove(...CENTER_KINDS);
+      if (kind) wrap.classList.add(kind);
+    }
     this.text(r.centerSub, sub);
     this.placeToasts();
   }

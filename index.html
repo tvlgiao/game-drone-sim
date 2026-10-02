@@ -106,8 +106,8 @@
       <span class="sp-sr">Loading Drone Sim…</span>
     </div>
     <script>
-      // Fades the splash after the first rendered frame: main.ts may add body.is-ready itself; otherwise
-      // window.__drone (set right after the render loop starts) plus two frames, or a fatal-error screen.
+      // Fades the splash once main.ts adds body.is-ready (first rendered frame, or a boot that threw), on a
+      // fatal-error screen, or after 20 s as a last resort.
       (function () {
         var b = document.body;
         var t0 = Date.now();
@@ -121,7 +121,6 @@
         (function poll() {
           if (b.classList.contains('is-ready')) return done();
           if (document.querySelector('#ui.ds-fatal') || Date.now() - t0 > 20000) return done();
-          if (window.__drone) return requestAnimationFrame(function () { requestAnimationFrame(done); });
           setTimeout(poll, 50);
         })();
       })();

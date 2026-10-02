@@ -13,7 +13,7 @@ interface Hook {
   camera: string;
   screen: string;
   audio: string;
-  xr: { presenting: boolean; source: string; latched: boolean; panelDraws: number; frameRate: number | null; foveation: number | null; panel: XrPanelView | null };
+  xr: { presenting: boolean; source: string; latched: boolean; panelDraws: number; frameRate: number | null; foveation: number | null; motorsMuted: boolean; panel: XrPanelView | null };
   pixelRatio: number;
   renderScale: number;
   stats: () => { calls: number; triangles: number };
@@ -243,10 +243,12 @@ test('Quest system menu / headset off: the flight pauses and the sound stops; ba
     await page.waitForFunction(() => (window as unknown as W).__drone.audio === 'suspended', null, { timeout: 5_000 });
     await page.evaluate(() => (window as unknown as W).__xrDevice.updateVisibilityState('visible'));
     await page.waitForFunction(() => (window as unknown as W).__drone.audio === 'running', null, { timeout: 5_000 });
-    // still paused until the pilot resumes with A
+    // still paused until the pilot resumes with A; the audio context runs again (menu sounds), the motors stay muted
     expect(await page.evaluate(() => (window as unknown as W).__drone.race.status)).toBe('paused');
+    expect(await page.evaluate(() => (window as unknown as W).__drone.xr.motorsMuted)).toBe(true);
     await press(page, 'right', 'a-button');
     await page.waitForFunction(() => (window as unknown as W).__drone.race.status === 'freefly');
+    await page.waitForFunction(() => !(window as unknown as W).__drone.xr.motorsMuted);
   }
   expect(errs).toEqual([]);
 });

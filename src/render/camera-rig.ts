@@ -1,10 +1,8 @@
 /** FPV / Chase / LOS cameras with smooth mode transitions and shake. No per-frame allocations. */
 import * as THREE from 'three';
 import type { CameraMode, DroneState } from '../types';
+import { FPV_FOV_V_RANGE } from '../core/camera-limits';
 import { CAMERA_PIVOT, LENS_OFFSET } from './drone-model';
-
-/** Vertical FPV FOV clamp (deg): the horizontal FOV setting is converted per aspect, then held in this range. */
-export const FPV_FOV_V_RANGE = { min: 35, max: 110 } as const;
 
 const CHASE_BACK = 1.0;
 const CHASE_UP = 0.35;
