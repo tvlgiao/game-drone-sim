@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { DEFAULT_SETTINGS } from '../../src/core/settings';
 import * as THREE from 'three';
 import { XR_TARGET_FPS, isQuestBrowser, tuneXrSession, xrSessionObscured } from '../../src/core/xr';
-import { XR_HUD_DOWN, wrapHint, xrPanelPose } from '../../src/render/xr-panel';
+import { XR_CAP_RATIO, XR_CARD_H, XR_CARD_PX, XR_CARD_TEXT_W, XR_CARD_W, XR_HUD_DOWN, layoutCard, wrapHint, xrPanelPose } from '../../src/render/xr-panel';
 import { InputManager } from '../../src/input/input-manager';
 import { XR_BTN, XR_YAW_SCALE, XrControllers, shapeXrControl, xrExpo, type XrSourceLike } from '../../src/input/xr-controllers';
 import { actualRate, RATE_PRESETS } from '../../src/control/rates';
@@ -128,9 +128,10 @@ describe('InputManager with XR controllers', () => {
   });
 });
 
+const race = (p: Partial<RaceSnapshot>): RaceSnapshot => ({ status: 'menu', time: 0, countdown: 0, nextRing: 0, totalRings: 10, bestTime: null, lastSplit: null, ...p });
+const state = (p: Partial<XrHudState>): XrHudState => ({ race: race({}), armed: false, latched: false, mode: 'angle', camera: 'los', altitude: 1.23, speed: 0, toast: '', ...p });
+
 describe('xrHudContent', () => {
-  const race = (p: Partial<RaceSnapshot>): RaceSnapshot => ({ status: 'menu', time: 0, countdown: 0, nextRing: 0, totalRings: 10, bestTime: null, lastSplit: null, ...p });
-  const state = (p: Partial<XrHudState>): XrHudState => ({ race: race({}), armed: false, latched: false, mode: 'angle', camera: 'los', altitude: 1.23, speed: 0, toast: '', ...p });
 
   it('menu screens sit at eye level with Quest button hints', () => {
     const c = xrHudContent(state({}));
@@ -160,7 +161,7 @@ describe('xrHudContent', () => {
   });
 
   it('pause card spells out the left trigger; free fly shows speed in km/h like the flat HUD', () => {
-    expect(xrHudContent(state({ race: race({ status: 'paused' }) })).sub).toContain('L-trigger: heading arrow');
+    expect(xrHudContent(state({ race: race({ status: 'paused' }) })).sub).toContain('L-trigger heading arrow');
     expect(xrHudContent(state({ race: race({ status: 'freefly' }), speed: 5 })).title).toBe('FREE FLY · 18 km/h');
   });
 
@@ -205,6 +206,57 @@ describe('VR card layout', () => {
     expect(lines).toHaveLength(2);
     expect(lines.join(' · ')).toBe('A disarm · B mode · X reset · R-stick click cam · Y pause');
     for (const l of lines) expect(measure(l)).toBeLessThanOrEqual(400);
+  });
+
+  it('text without a separator wraps at a space', () => {
+    expect(wrapHint('Armed — push the throttle stick up to take off', (t) => t.length * 10, 300)).toEqual(['Armed — push the throttle', 'stick up to take off']);
+  });
+
+  it('the flight card spans at most ~25° of view and its smallest text clears 1.1° of cap height', () => {
+    const pos = new THREE.Vector3();
+    const width = xrPanelPose('hud', head, pos, new THREE.Euler());
+    const dist = pos.distanceTo(head);
+    const deg = (m: number): number => THREE.MathUtils.radToDeg(2 * Math.atan(m / 2 / dist));
+    expect(deg(width)).toBeLessThanOrEqual(25);
+    const cap = (Math.min(XR_CARD_PX.sub, XR_CARD_PX.hint) * XR_CAP_RATIO * width) / XR_CARD_W;
+    expect(deg(cap)).toBeGreaterThanOrEqual(1.1);
+  });
+
+  // ~SF / Roboto (measured: 600 64px "A disarm · B mode · X reset" = 750 px), a touch wider
+  const measure = (t: string, weight: number, px: number): number => t.length * px * (0.42 + weight / 10_000);
+  const statuses: RaceSnapshot['status'][] = ['menu', 'paused', 'finished', 'countdown', 'crashed', 'freefly', 'racing'];
+  const cards = statuses.flatMap((status) =>
+    [false, true].map((armed) => xrHudContent(state({ race: race({ status, time: 3599.99, nextRing: 11, totalRings: 12 }), armed, camera: 'chase', altitude: 123.4, speed: 99 }))),
+  );
+
+  it('every card line fits the text width at its own font size (never squeezed horizontally)', () => {
+    for (const c of cards) {
+      const lines = layoutCard(c, measure);
+      for (const l of lines) {
+        expect(l.width, `${c.title}: ${l.text}`).toBeLessThanOrEqual(XR_CARD_TEXT_W);
+        expect(l.width).toBeCloseTo(measure(l.text, l.weight, l.px), 6);
+        expect(l.y - (l.px * 1.12) / 2).toBeGreaterThanOrEqual(0);
+        expect(l.y + (l.px * 1.12) / 2).toBeLessThanOrEqual(XR_CARD_H);
+      }
+      const flat = (t: string): string => t.replaceAll(' · ', ' ');
+      expect(flat(lines.map((l) => l.text).join(' '))).toContain(flat(c.title));
+    }
+  });
+
+  it('the pause help wraps onto two full-size lines instead of being squeezed', () => {
+    const paused = layoutCard(xrHudContent(state({ race: race({ status: 'paused' }) })), measure);
+    const sub = paused.filter((l) => l.px === XR_CARD_PX.sub && l.weight === 500);
+    expect(sub.map((l) => l.text)).toEqual(['L-stick click recentre', 'L-trigger heading arrow']);
+  });
+
+  it('a single word too wide for the card shrinks uniformly rather than squeezing', () => {
+    const [l] = layoutCard({ layout: 'hud', title: 'W'.repeat(40), sub: '', hint: '' }, measure);
+    expect(l.px).toBeLessThan(XR_CARD_PX.title);
+    expect(l.width).toBeLessThanOrEqual(XR_CARD_TEXT_W);
+  });
+
+  it('button hints use one style: "A arm", never "A: arm"', () => {
+    for (const c of cards) for (const t of [c.sub, c.hint]) expect(t).not.toMatch(/(\b[ABXY]|trigger|click):/);
   });
 });
 
