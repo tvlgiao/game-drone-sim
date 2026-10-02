@@ -276,8 +276,11 @@ export const TUTORIAL_STEPS: readonly TutorialStepDef[] = [
     title: 'Angle vs acro',
     update: (c, m) => {
       const s = m.scratch;
-      if (c.flightMode === 'acro') s.acro = 1;
-      else if (s.acro) s.angle = 1;
+      // an acro pilot arrives in acro: only a switch into acro made during this step counts
+      if (c.flightMode === 'angle') {
+        if (s.acro) s.angle = 1;
+        s.seenAngle = 1;
+      } else if (s.seenAngle) s.acro = 1;
       return ((s.acro ?? 0) + (s.angle ?? 0)) / 2;
     },
     parts: (m) => [

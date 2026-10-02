@@ -279,6 +279,19 @@ describe('step completion', () => {
     expect(idOf(m)).toBe('cameras');
   });
 
+  it('9 angle vs acro: an acro pilot arriving in acro gets no credit until a switch into acro this step', () => {
+    const m = at('modes');
+    run(m, ctx({ flightMode: 'acro' }), 30);
+    expect(m.progress).toBe(0);
+    expect(m.parts().map((p) => p.value)).toEqual([0, 0]);
+    m.update(ctx({ flightMode: 'angle' }));
+    expect(m.progress).toBe(0);
+    m.update(ctx({ flightMode: 'acro' }));
+    expect(m.progress).toBe(0.5);
+    m.update(ctx({ flightMode: 'angle' }));
+    expect(idOf(m)).toBe('cameras');
+  });
+
   it('10 cameras: LOS, FPV and chase each active once', () => {
     const m = at('cameras');
     m.update(ctx({ cameraMode: 'los' }));
@@ -341,6 +354,8 @@ describe('scripted full run', () => {
     }
     push(run(m, (i) => ctx({ armed: true, agl: Math.max(0.05, 2 - i * 0.05) }), secs(2)));
     push(m.update(ctx({ armed: false })));
+    // the modes step starts in angle (main.ts), even for this acro pilot
+    push(m.update(ctx({ flightMode: 'angle' })));
     push(m.update(ctx({ flightMode: 'acro' })));
     push(m.update(ctx({ flightMode: 'angle' })));
     for (const c of ['los', 'fpv', 'chase'] as const) push(m.update(ctx({ cameraMode: c })));

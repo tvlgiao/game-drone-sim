@@ -52,13 +52,15 @@ export function xrHudContent(s: XrHudState): XrPanelContent {
   const flightHint = !s.armed ? `A arm · ${buttons}` : s.latched ? 'Push throttle up to take off' : `A disarm · ${buttons}`;
   const exit = s.exitHint ?? XR_EXIT_HINT;
   const hint = (h: string): string => s.toast || h;
+  // menu cards keep their button line: a toast takes the sub line there instead
+  const menuSubOr = (t: string): string => s.toast || t;
   switch (r.status) {
     case 'menu':
-      return { layout: 'menu', title: 'DRONE SIM VR', sub: menuSub(s.level, r.bestTime), hint: hint(`A Race · X Free fly · ${s.level ? 'Y Level · ' : ''}${exit}`), accent: CYAN };
+      return { layout: 'menu', title: 'DRONE SIM VR', sub: menuSubOr(menuSub(s.level, r.bestTime)), hint: `A Race · X Free fly · ${s.level ? 'Y Level · ' : ''}R-stick click Tutorial · ${exit}`, accent: CYAN };
     case 'paused':
-      return { layout: 'menu', title: 'PAUSED', sub: 'L-stick click recentre · L-trigger heading arrow', hint: hint(`A Resume · X ${s.tutorial ? 'Skip tutorial' : 'Menu'} · ${exit}`), accent: AMBER };
+      return { layout: 'menu', title: 'PAUSED', sub: menuSubOr('L-stick click recentre · L-trigger heading arrow'), hint: `A Resume · X ${s.tutorial ? 'Skip tutorial' : 'Menu'} · ${exit}`, accent: AMBER };
     case 'finished':
-      return { layout: 'menu', title: `FINISH ${formatTime(r.time)}`, sub: r.bestTime !== null ? `Best ${formatTime(r.bestTime)}` : '', hint: hint(`A Retry · X Menu · ${exit}`), accent: GREEN };
+      return { layout: 'menu', title: `FINISH ${formatTime(r.time)}`, sub: menuSubOr(r.bestTime !== null ? `Best ${formatTime(r.bestTime)}` : ''), hint: `A Retry · X Menu · ${exit}`, accent: GREEN };
     case 'countdown':
       return { layout: 'hud', title: r.countdown > 0 ? String(Math.ceil(r.countdown)) : 'GO', sub: flightLine, hint: hint(flightHint), accent: AMBER };
     case 'crashed':
@@ -76,33 +78,25 @@ export function xrTutorialPrompt(): XrPanelContent {
   return { layout: 'menu', title: 'NEW TO FPV?', sub: '3-minute tutorial: arm, hover, turn, land, fly a ring', hint: 'A Start · X Skip', accent: CYAN };
 }
 
-const XR_BAR_CELLS = 10;
-
-/** Text progress bar for the canvas card (geometric-shape glyphs every headset font has; no extra texture or mesh). */
-export function xrProgressBar(value: number): string {
-  const v = Math.min(1, Math.max(0, Number.isFinite(value) ? value : 0));
-  const n = Math.round(v * XR_BAR_CELLS);
-  return `${'●'.repeat(n)}${'○'.repeat(XR_BAR_CELLS - n)} ${Math.round(v * 100)}%`;
-}
-
 /**
- * In-headset tutorial card: step title, the instruction line, progress and how to skip. Welcome and done sit
- * at eye level ('menu'); flight steps use the low 'hud' placement so the drone stays in view.
+ * In-headset tutorial card ('card' layout: ~1.2 m out, just under eye level, facing the pilot): step label, title,
+ * the instruction, a drawn progress bar and how to skip, with the Quest buttons drawn as glyphs.
  * VR buttons: A starts / confirms, Y pauses (the pause card skips), on the done card A = Start Training, X = Menu.
  */
 export function xrTutorialCard(v: TutorialView): XrPanelContent {
   if (v.id === 'done') {
-    return { layout: 'menu', title: v.title.toUpperCase(), sub: v.lines[0] ?? '', hint: 'A Start Training · X Menu', accent: GREEN };
+    return { layout: 'card', kicker: 'TUTORIAL', title: v.title, sub: v.lines[0] ?? '', hint: 'A Start Training · X Menu', accent: GREEN };
   }
   const welcome = v.id === 'welcome';
   const first = v.lines[0] ?? '';
-  const sub = welcome ? (v.lines[1] ?? '') : v.hint && v.lines[1] ? `${first} · ${v.lines[1]}` : first;
-  const status = welcome ? 'A start' : xrProgressBar(v.progress);
+  const sub = welcome ? first : (v.hint || v.rearm) && v.lines[1] ? `${first} ${v.lines[1]}` : first;
   return {
-    layout: welcome ? 'menu' : 'hud',
-    title: `${v.number}/${v.total} · ${v.title.toUpperCase()}`,
+    layout: 'card',
+    kicker: `STEP ${v.number} / ${v.total}${v.hint ? ' · HINT' : ''}`,
+    title: v.title,
     sub,
-    hint: `${status} · ${v.skipLabel}`,
+    progress: welcome ? undefined : v.progress,
+    hint: welcome ? `A Start · ${v.skipLabel}` : v.skipLabel,
     accent: v.hint ? AMBER : CYAN,
   };
 }

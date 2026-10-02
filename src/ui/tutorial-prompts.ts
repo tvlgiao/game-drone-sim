@@ -30,8 +30,10 @@ export interface TutorialView {
   number: number;
   total: number;
   title: string;
-  /** one or two lines */
+  /** one or two lines (plain text: the VR card, screen readers) */
   lines: string[];
+  /** the same lines with every key / button / stick token wrapped in TOKEN_OPEN … TOKEN_CLOSE (the DOM card's glyph chips) */
+  rich: string[];
   /** the second line is the re-arm notice (keep it visible even where the card shows one line) */
   rearm: boolean;
   progress: number;
@@ -44,7 +46,16 @@ export interface TutorialView {
   /** how to skip on this source, e.g. "Esc to skip" */
   skipLabel: string;
   source: InputSource;
+  /** Gamepad id of the active pad (PlayStation glyphs), null otherwise */
+  padId: string | null;
 }
+
+/** Private-use delimiters around a control token in `TutorialView.rich`; `promptFor` strips them. */
+export const TOKEN_OPEN = '\uE000';
+export const TOKEN_CLOSE = '\uE001';
+const tok = (t: string): string => `${TOKEN_OPEN}${t}${TOKEN_CLOSE}`;
+const TOKEN_RE = /[\uE000\uE001]/g;
+export const stripTokens = (t: string): string => t.replace(TOKEN_RE, '');
 
 /** steps whose second line becomes the re-arm notice when disarmed (see `flying` in promptFor) */
 const REARM_STEPS: ReadonlySet<TutorialStepId> = new Set(['throttle', 'hover', 'yaw', 'pitch-roll', 'land']);
@@ -55,7 +66,7 @@ const isKeyboard = (src: InputSource): boolean => src === 'keyboard' || src === 
 
 function controlsSummary(src: InputSource, s: PromptSettings): string {
   if (src === 'keyboard' || src === 'none') {
-    const d = (ch: Channel, a: 1 | -1, b: 1 | -1): string => `${channelDirLabel(s, ch, a, src)} / ${channelDirLabel(s, ch, b, src)}`;
+    const d = (ch: Channel, a: 1 | -1, b: 1 | -1): string => `${tok(channelDirLabel(s, ch, a, src))} / ${tok(channelDirLabel(s, ch, b, src))}`;
     return `Throttle ${d('throttle', 1, -1)} · Yaw ${d('yaw', -1, 1)} · Pitch ${d('pitch', 1, -1)} · Roll ${d('roll', -1, 1)}`;
   }
   const ms = { stickMode: s.stickMode, throttleSource: src === 'gamepad' ? s.throttleSource : ('stick' as const) };
@@ -70,21 +81,26 @@ function controlsSummary(src: InputSource, s: PromptSettings): string {
 function throttleDown(src: InputSource, s: PromptSettings): string {
   if (isKeyboard(src) || (src === 'touch' && s.touchThrottleCentre)) return '';
   if (src === 'xr') return `Let go of the ${channelSide(s, 'throttle', src) === 'l' ? 'left' : 'right'} stick`;
-  return `Throttle fully down (${channelDirLabel(s, 'throttle', -1, src)})`;
+  return `Throttle fully down (${tok(channelDirLabel(s, 'throttle', -1, src))})`;
 }
 
 /** One or two lines of instruction for a step on an input source, honouring stick mode, throttle source and inverts. */
 export function promptFor(id: TutorialStepId, src: InputSource, s: PromptSettings, opts: PromptOptions = {}): string[] {
+  return promptRich(id, src, s, opts).map(stripTokens);
+}
+
+/** `promptFor` with the control tokens delimited (TOKEN_OPEN / TOKEN_CLOSE). */
+export function promptRich(id: TutorialStepId, src: InputSource, s: PromptSettings, opts: PromptOptions = {}): string[] {
   const verb = pressVerb(src);
   const v = verb.toLowerCase();
-  const btn = (b: PromptButton): string => buttonLabel(b, src, opts.padId ?? null);
-  const dir = (ch: Channel, d: 1 | -1): string => channelDirLabel(s, ch, d, src);
+  const btn = (b: PromptButton): string => tok(buttonLabel(b, src, opts.padId ?? null));
+  const dir = (ch: Channel, d: 1 | -1): string => tok(channelDirLabel(s, ch, d, src));
   /** both directions of a channel, the stick named once: "Right thumb ↑ / ↓", "W / S" */
   const both = (ch: Channel, a: 1 | -1): string => {
-    const x = dir(ch, a);
-    const y = dir(ch, a === 1 ? -1 : 1);
+    const x = channelDirLabel(s, ch, a, src);
+    const y = channelDirLabel(s, ch, a === 1 ? -1 : 1, src);
     const cut = x.lastIndexOf(' ');
-    return cut > 0 && y.startsWith(x.slice(0, cut + 1)) ? `${x} / ${y.slice(cut + 1)}` : `${x} / ${y}`;
+    return cut > 0 && y.startsWith(x.slice(0, cut + 1)) ? `${tok(x)} / ${tok(y.slice(cut + 1))}` : `${tok(x)} / ${tok(y)}`;
   };
   const down = throttleDown(src, s);
   const rearm = down ? `Disarmed: ${down.replace(/^[A-Z]/, (c) => c.toLowerCase())}, then ${v} ${btn('arm')}.` : `Disarmed: ${v} ${btn('arm')} to arm again.`;
@@ -157,6 +173,7 @@ export function skipLabel(src: InputSource, padId: string | null = null): string
 export function tutorialView(m: TutorialMachine, src: InputSource, s: PromptSettings, armed: boolean, padId: string | null = null): TutorialView {
   const step = m.step;
   const focus = step.focus;
+  const rich = promptRich(step.id, src, s, { armed, padId });
   const sides = new Set<'l' | 'r'>();
   let trigger = false;
   for (const ch of focus.channels) {
@@ -169,7 +186,8 @@ export function tutorialView(m: TutorialMachine, src: InputSource, s: PromptSett
     number: m.index + 1,
     total: TUTORIAL_STEP_COUNT,
     title: step.title,
-    lines: promptFor(step.id, src, s, { armed, padId }),
+    lines: rich.map(stripTokens),
+    rich,
     rearm: REARM_STEPS.has(step.id) && !armed,
     progress: m.progress,
     overall: m.overall,
@@ -179,5 +197,6 @@ export function tutorialView(m: TutorialMachine, src: InputSource, s: PromptSett
     phase: m.phase,
     skipLabel: skipLabel(src, padId),
     source: src,
+    padId,
   };
 }

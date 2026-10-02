@@ -5,9 +5,11 @@
  * confirm, back) and stay plain buttons for pointer, Tab and screen readers.
  */
 import './tutorial.css';
-import type { NavEvents } from '../types';
-import type { PromptButton } from './mode-labels';
-import type { TutorialView } from './tutorial-prompts';
+import type { InputSource, NavEvents } from '../types';
+import { GP } from '../input/gamepad';
+import { buttonLabel, type PromptButton } from './mode-labels';
+import { glyphHtml, hintScheme, keyGlyph, padFamily, padGlyph, type Glyph } from './input-glyphs';
+import { TOKEN_CLOSE, TOKEN_OPEN, type TutorialView } from './tutorial-prompts';
 
 export type TutorialFinishAction = 'training' | 'menu';
 
@@ -41,15 +43,15 @@ const CARD_HTML = `
 <div class="ds-tut-card ds-panel" role="region" aria-label="Tutorial" hidden>
   <div class="ds-tut-card__head">
     <span class="ds-tut-card__step" data-t="step"></span>
-    <button type="button" class="ds-tut-skip" data-t="skip">Skip</button>
+    <span class="ds-tut-card__tag" data-t="tag" hidden>Hint</span>
+    <button type="button" class="ds-tut-skip" data-t="skip"><span>Skip</span><span class="ds-tut-skip__g" data-t="skipg"></span></button>
   </div>
   <h2 class="ds-tut-card__title" data-t="title"></h2>
   <div class="ds-tut-card__lines" data-t="lines" aria-live="polite"><p></p><p></p></div>
   <div class="ds-tut-parts" data-t="parts" hidden></div>
   <div class="ds-tut-bar" data-t="bar" role="progressbar" aria-label="Step progress" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0"><i></i></div>
-  <div class="ds-tut-card__foot">
-    <span class="ds-tut-card__skiphint" data-t="skiphint"></span>
-    <button type="button" class="ds-btn ds-btn--sm ds-btn--primary ds-tut-continue" data-t="continue" hidden>Continue</button>
+  <div class="ds-tut-card__foot" data-t="foot" hidden>
+    <button type="button" class="ds-btn ds-btn--sm ds-btn--primary ds-tut-continue" data-t="continue"><span class="ds-tut-continue__g" data-t="contg"></span><span>Continue</span></button>
   </div>
 </div>`;
 
@@ -79,6 +81,65 @@ const DONE_HTML = `
   </div>
 </div>`;
 
+const ESC: Record<string, string> = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' };
+const escapeHtml = (t: string): string => t.replace(/[&<>"]/g, (c) => ESC[c]!);
+const ARROW_WORD: Record<string, string> = { '↑': 'up', '↓': 'down', '←': 'left', '→': 'right' };
+
+/** Prompt name of a glyph, as mode-labels' buttonLabel spells it ("A", "Cross", "Menu", "R-stick"). */
+function promptName(g: Glyph): string {
+  if (g.style === 'stick') return g.label.length === 1 ? `${g.label}-stick` : g.label;
+  return g.label && g.style !== 'system' ? g.label : g.name;
+}
+
+/**
+ * Glyph chip(s) for one prompt token: keycaps for keys, coloured face / shoulder glyphs for pad and Quest buttons,
+ * a stick glyph plus its arrow for stick directions, the on-screen button's own look for touch.
+ */
+export function tokenHtml(token: string, src: InputSource, padId: string | null): string {
+  const stick = /^(Left|Right) (stick|thumb) ([↑↓←→])$/.exec(token);
+  if (stick) {
+    const name = `${stick[1]} ${stick[2]} ${ARROW_WORD[stick[3]!]}`;
+    return `<span class="ds-tut-tok" role="img" aria-label="${name}">${glyphHtml({ style: 'stick', label: stick[1]![0]!, name: `${stick[1]} ${stick[2]}` })}<span class="ds-tut-tok__arrow" aria-hidden="true">${stick[3]}</span></span>`;
+  }
+  const scheme = hintScheme(src === 'none' ? 'keyboard' : src, padId);
+  const family = padFamily(padId);
+  const trigger = /^(Squeeze|Release) (\S+)$/.exec(token);
+  if (trigger) return `${trigger[1]} ${glyphHtml(padGlyph(family, GP.RT))}`;
+  if (scheme === 'touch') return `<kbd class="ds-g ds-g--touch">${escapeHtml(token)}</kbd>`;
+  if (scheme === 'quest') {
+    const face = /^[ABXY]$/.test(token);
+    return glyphHtml(face ? { style: 'face', label: token, name: token } : { style: 'stick', label: token[0]!, name: token, press: true });
+  }
+  if (scheme !== 'keyboard') {
+    for (let i = 0; i <= GP.RIGHT; i++) {
+      const g = padGlyph(family, i);
+      if (promptName(g) === token) return glyphHtml(g);
+    }
+  }
+  const named = Object.entries({ Esc: 'Escape', Space: 'Space', Enter: 'Enter' }).find(([l]) => l === token);
+  return glyphHtml(named ? keyGlyph(named[1]) : keyGlyph(token.length === 1 && /[A-Z0-9]/.test(token) ? `Key${token}` : token));
+}
+
+/** A prompt line with its delimited tokens as glyph chips (the copy around them is escaped). */
+export function richHtml(line: string, src: InputSource, padId: string | null): string {
+  let out = '';
+  let rest = line;
+  for (let i = rest.indexOf(TOKEN_OPEN); i >= 0; i = rest.indexOf(TOKEN_OPEN)) {
+    const j = rest.indexOf(TOKEN_CLOSE, i);
+    if (j < 0) break;
+    out += escapeHtml(rest.slice(0, i)) + tokenHtml(rest.slice(i + 1, j), src, padId);
+    rest = rest.slice(j + 1);
+  }
+  return out + escapeHtml(rest);
+}
+
+/** The control that skips the tutorial, drawn in the card's Skip button ('' on touch: the button is it). */
+function skipGlyphHtml(src: InputSource, padId: string | null): string {
+  if (src === 'keyboard' || src === 'none') return glyphHtml(keyGlyph('Escape'));
+  if (src === 'gamepad') return glyphHtml(padGlyph(padFamily(padId), GP.START));
+  return '';
+}
+
 function fragment(html: string): HTMLElement {
   const t = document.createElement('template');
   t.innerHTML = html.trim();
@@ -98,10 +159,13 @@ export class TutorialUi {
     bar: HTMLElement;
     barFill: HTMLElement;
     skip: HTMLButtonElement;
-    skipHint: HTMLElement;
+    skipGlyph: HTMLElement;
+    tag: HTMLElement;
     cont: HTMLButtonElement;
+    contGlyph: HTMLElement;
     foot: HTMLElement;
   };
+  private readonly htmlCache = new Map<HTMLElement, string>();
   private readonly textCache = new Map<HTMLElement, string>();
   private open: DialogName | null = null;
   private focus = 0;
@@ -130,9 +194,11 @@ export class TutorialUi {
       bar: q('bar'),
       barFill: q('bar').firstElementChild as HTMLElement,
       skip: q<HTMLButtonElement>('skip'),
-      skipHint: q('skiphint'),
+      skipGlyph: q('skipg'),
+      tag: q('tag'),
       cont: q<HTMLButtonElement>('continue'),
-      foot: this.card.querySelector<HTMLElement>('.ds-tut-card__foot')!,
+      contGlyph: q('contg'),
+      foot: q('foot'),
     };
     this.el.skip.addEventListener('click', () => this.cb.onSkip());
     this.el.cont.addEventListener('click', () => this.cb.onConfirm());
@@ -180,32 +246,42 @@ export class TutorialUi {
     }
     const e = this.el;
     if (this.card.dataset.step !== view.id) this.card.dataset.step = view.id;
-    this.text(e.step,`Step ${view.number} / ${view.total}`);
+    this.html(e.step, `<span class="ds-tut-card__stepw">Step </span>${view.number} / ${view.total}`);
     this.text(e.title, view.title);
     // a hint re-announces the prompt: the live region only speaks changed text
     const reannounce = view.hint && !this.hintShown;
     this.hintShown = view.hint;
+    // the welcome card's "Press Enter to start" is the Continue button (its glyph says which key)
+    const welcome = view.id === 'welcome';
+    const rich = welcome ? view.rich.slice(0, 1) : view.rich;
     for (let i = 0; i < e.lines.length; i++) {
       const p = e.lines[i]!;
-      const t = view.lines[i] ?? '';
+      const t = rich[i] ?? '';
       if (reannounce) {
-        this.textCache.delete(p);
+        this.htmlCache.delete(p);
         p.textContent = '';
       }
-      this.text(p, t);
+      this.html(p, t ? richHtml(t, view.source, view.padId) : '');
       p.hidden = t === '';
     }
     e.lines[1]?.classList.toggle('is-notice', view.rearm);
     this.card.classList.toggle('is-hint', view.hint);
+    e.tag.hidden = !view.hint;
     const pct = Math.round(view.progress * 100);
     e.barFill.style.setProperty('--v', view.progress.toFixed(3));
     if (e.bar.getAttribute('aria-valuenow') !== String(pct)) e.bar.setAttribute('aria-valuenow', String(pct));
     this.renderParts(view);
-    const welcome = view.id === 'welcome';
-    e.cont.hidden = !welcome;
-    const skipText = view.source === 'touch' ? '' : view.skipLabel;
-    this.text(e.skipHint, skipText);
-    e.foot.hidden = !welcome && skipText === '';
+    e.foot.hidden = !welcome;
+    const skipG = skipGlyphHtml(view.source, view.padId);
+    this.html(e.skipGlyph, skipG);
+    e.skipGlyph.hidden = skipG === '';
+    const via = view.source === 'gamepad' ? `pause with ${buttonLabel('pause', view.source, view.padId)}` : view.source === 'keyboard' || view.source === 'none' ? 'Esc' : '';
+    e.skip.setAttribute('aria-label', via ? `Skip tutorial (${via})` : 'Skip tutorial');
+    if (welcome) {
+      const confirm = view.source === 'touch' ? '' : tokenHtml(buttonLabel('confirm', view.source, view.padId), view.source, view.padId);
+      this.html(e.contGlyph, confirm);
+      e.contGlyph.hidden = confirm === '';
+    }
     this.setGlow(view.hint ? view : null);
   }
 
@@ -342,6 +418,12 @@ export class TutorialUi {
       this.closeDialog();
       this.cb.onFinish(act);
     }
+  }
+
+  private html(el: HTMLElement, h: string): void {
+    if (this.htmlCache.get(el) === h) return;
+    this.htmlCache.set(el, h);
+    el.innerHTML = h;
   }
 
   private text(el: HTMLElement, t: string): void {

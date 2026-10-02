@@ -199,6 +199,8 @@ function boot(caps: EditionCaps): void {
   const tutorial = new TutorialMachine({ storage });
   /** the tutorial owns the card / overlay: from Start until skip, quit or the completion card is answered */
   let tutOn = false;
+  /** Quest app first run: the headset menu card offers the tutorial (A start / X skip) instead of the 2D dialog */
+  let vrOffer = false;
   /** the welcome card's Continue button (pointer / touch), consumed by the next frame */
   let tutConfirm = false;
   /** ring-passed events since the tutorial started */
@@ -282,7 +284,8 @@ function boot(caps: EditionCaps): void {
    * Tutorial on the Training field: free flight (no timer, every ring passable, crashes and resets respawn on the
    * pad), LOS camera, angle forced on the early steps.
    */
-  function startTutorial(): void {
+  function startTutorial(fromStep = 1): void {
+    vrOffer = false;
     void startLevel('training').then((ok) => {
       if (!ok) return;
       newSession('freefly');
@@ -290,9 +293,16 @@ function boot(caps: EditionCaps): void {
       tutRings = 0;
       tutConfirm = false;
       tutRepeat = false;
-      tutorial.start(settings.flightMode);
+      const events = tutorial.start(settings.flightMode, fromStep);
       setTutorialOn(true);
+      handleTutorialEvents(events);
     });
+  }
+
+  /** FC mode and altitude hold for the current step (angle forced on steps 2–8; settings keep the pilot's mode). */
+  function applyTutorialFc(): void {
+    sim.fc.mode = tutorial.requiredFlightMode() ?? settings.flightMode;
+    sim.fc.altitudeHold = input.altitudeHold({ ...settings, flightMode: sim.fc.mode });
   }
 
   function setTutorialOn(on: boolean): void {
@@ -328,8 +338,22 @@ function boot(caps: EditionCaps): void {
     else onAction({ type: 'menu' });
   }
 
-  /** Tutorial complete: the flight freezes (no menu screen) under the completion card until it is answered. */
+  /**
+   * A new step takes effect in the frame it starts (its forced mode must not be a frame late). The modes step
+   * starts from angle so the lesson is two switches for every pilot (endTutorial restores the pilot's mode).
+   * Tutorial complete: the flight freezes (no menu screen) under the completion card until it is answered.
+   */
   function handleTutorialEvents(events: readonly TutorialEvent[]): void {
+    let stepped = false;
+    for (const e of events) {
+      if (e.type !== 'step') continue;
+      stepped = true;
+      if (e.id === 'modes' && settings.flightMode !== 'angle') {
+        settings = { ...settings, flightMode: 'angle' };
+        hud.setSettings(settings);
+      }
+    }
+    if (stepped) applyTutorialFc();
     if (!events.some((e) => e.type === 'done')) return;
     hud.setTutorial(false);
     race.pause();
@@ -348,6 +372,7 @@ function boot(caps: EditionCaps): void {
   function newSession(kind: 'race' | 'freefly'): void {
     // a flight started another way (VR card, automation) answers the first-run offer for this launch
     if (tutUi.dialogOpen === 'prompt') tutUi.hide();
+    vrOffer = false;
     toSpawn();
     // A fresh flight starts with the touch throttle at the bottom (or centre when it auto-centres).
     input.touch.sticks.releaseAll();
@@ -493,6 +518,7 @@ function boot(caps: EditionCaps): void {
       if (b.a) onAction({ type: 'race' });
       else if (b.x) onAction({ type: 'freefly' });
       else if (b.y) void startLevel(nextLevel(level.def.id));
+      else if (b.rStick) onAction({ type: 'tutorial' });
     } else if (status === 'paused') {
       if (b.a || b.y) onAction({ type: 'resume' });
       else if (b.x) onAction({ type: tutOn && tutorial.active ? 'skip-tutorial' : 'menu' });
@@ -551,13 +577,27 @@ function boot(caps: EditionCaps): void {
     return throttleDownHint(settings, false).toLowerCase();
   }
 
+  /**
+   * Arm / take-off guidance, one voice at a time: the tutorial card while it runs; otherwise the HUD's amber hint
+   * when it is up (it says the same, and keeps saying it). The VR card has no amber hint, so it still gets the line.
+   */
+  function armToast(msg: string): void {
+    if (tutOn && tutorial.active) return;
+    if (!hud.hintOn) {
+      toast(msg);
+      return;
+    }
+    xrToast = msg;
+    xrToastUntil = performance.now() + 2200;
+  }
+
   function handleFlightButtons(b: ButtonEvents, control: ControlInput): void {
     if (b.arm) {
       const want = !sim.fc.armed;
       const ok = sim.setArmed(want, control);
-      if (want && !ok) toast(control.throttle >= 0.05 ? `Arming blocked: ${throttleZeroHint()}` : 'Arming blocked: level the drone');
+      if (want && !ok) armToast(control.throttle >= 0.05 ? `Arming blocked: ${throttleZeroHint()}` : 'Arming blocked: level the drone');
       if (!sim.fc.armed) input.latchTakeoff();
-      else if (input.takeoffLatched) toast(input.activeSource === 'keyboard' ? `Armed — hold ${throttleUpKey()} to take off` : 'Armed — push the throttle stick up to take off');
+      else if (input.takeoffLatched) armToast(input.activeSource === 'keyboard' ? `Armed — hold ${throttleUpKey()} to take off` : 'Armed — push the throttle stick up to take off');
       dispatch({ type: 'armed', armed: sim.fc.armed });
     }
     if (b.toggleMode) {
@@ -633,7 +673,11 @@ function boot(caps: EditionCaps): void {
 
   hud.showScreen('main');
   toSpawn();
-  if (!selftest && shouldOfferTutorial(loadTutorialRecord(storage))) tutUi.showPrompt();
+  // the Quest app goes straight into VR: a 2D dialog would sit over Enter VR, so the headset card offers it instead
+  if (!selftest && shouldOfferTutorial(loadTutorialRecord(storage))) {
+    if (questApp) vrOffer = true;
+    else tutUi.showPrompt();
+  }
 
   let last = performance.now();
   let time = 0;
@@ -674,7 +718,14 @@ function boot(caps: EditionCaps): void {
     }
     // first-run prompt / completion card: menu input goes to the dialog, also over a flying status (done card)
     let dialogInput = false;
-    if (tutUi.dialogOpen) {
+    if (vrOffer && inVr && inp.xr && status === 'menu') {
+      if (inp.xr.a) startTutorial();
+      else if (inp.xr.x) {
+        vrOffer = false;
+        skipTutorial();
+      }
+      dialogInput = !inp.xr.b;
+    } else if (tutUi.dialogOpen) {
       if (inVr && inp.xr) {
         const x = inp.xr;
         if (tutUi.dialogOpen === 'prompt') {
@@ -755,6 +806,8 @@ function boot(caps: EditionCaps): void {
         };
         tutConfirm = false;
         handleTutorialEvents(tutorial.update(ctx));
+        // the step that just started locks its buttons from this frame on (arm / mode presses below)
+        for (const b of tutorial.lockedButtons()) inp.buttons[b] = false;
       }
       // After stepping: a race-start 'respawn' emitted this frame must not undo the pilot's arm press.
       if (!dialogInput) handleFlightButtons(inp.buttons, inp.control);
@@ -800,7 +853,7 @@ function boot(caps: EditionCaps): void {
     if (inVr) {
       // the take-off prompt is stale as soon as the throttle leaves the latch
       if (xrToast && (performance.now() > xrToastUntil || (xrToast.startsWith('Armed') && !input.takeoffLatched))) xrToast = '';
-      const tutCard = tutUi.dialogOpen === 'prompt' ? 'prompt' : tutOn && (tutorial.phase === 'done' || snap.status !== 'paused') ? 'card' : '';
+      const tutCard = tutUi.dialogOpen === 'prompt' || (vrOffer && snap.status === 'menu') ? 'prompt' : tutOn && (tutorial.phase === 'done' || snap.status !== 'paused') ? 'card' : '';
       const panelKey = `${snap.status}|${tutCard}`;
       if (time - xrPanelAt >= XR_PANEL_PERIOD || panelKey !== xrPanelStatus) {
         xrPanelAt = time;
@@ -906,9 +959,10 @@ function boot(caps: EditionCaps): void {
     startLevel: (id: LevelId) => startLevel(id),
     /** tutorial state: phase, current step, open dialog, whether the card is up */
     get tutorial() {
-      return { on: tutOn, phase: tutorial.phase, step: tutorial.step.id, index: tutorial.index, progress: tutorial.progress, dialog: tutUi.dialogOpen };
+      return { on: tutOn, phase: tutorial.phase, step: tutorial.step.id, index: tutorial.index, progress: tutorial.progress, dialog: tutUi.dialogOpen, vrOffer };
     },
-    startTutorial: () => startTutorial(),
+    /** e2e: start the tutorial, optionally at a 1-based step */
+    startTutorial: (fromStep?: number) => startTutorial(fromStep),
     /** drone position projected by the rendered camera (NDC: −1..1 inside the frame; z > 1 = behind) */
     get droneNdc() {
       const p = sim.world.state.position.clone().project(view.camera);

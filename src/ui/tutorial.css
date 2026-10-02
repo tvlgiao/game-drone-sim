@@ -5,9 +5,11 @@
   --ds-tut-accent: var(--ds-cyan);
   position: absolute;
   z-index: 15;
+  /* top centre, under the status chips and the bind strip: clear of the timer, the legend and the drone */
   top: calc(var(--ds-gap) + calc(104 * var(--ds-u)));
-  left: max(var(--ds-gap), env(safe-area-inset-left));
-  width: min(calc(400 * var(--ds-u)), 44vw);
+  left: 50%;
+  transform: translateX(-50%);
+  width: min(520px, calc(100% - 2 * var(--ds-gap)));
   padding: calc(14 * var(--ds-u)) calc(18 * var(--ds-u)) calc(16 * var(--ds-u));
   display: grid;
   gap: calc(8 * var(--ds-u));
@@ -16,17 +18,21 @@
   transition: border-color 0.25s ease, box-shadow 0.25s ease;
 }
 
-/* The first flight opens the Controls legend in the same left column: the card moves right of it. */
-.ds-ui:has(.ds-cmap:not([hidden])) .ds-tut-card {
-  left: calc(2 * var(--ds-gap) + calc(236 * var(--ds-u)));
+/* .ds-panel (styles.css, which may load after this file) makes panels position: relative */
+.ds-ui .ds-tut-card {
+  position: absolute;
 }
 
-/* Touch layout: under the PAUSE · CAM · timer row (the timer panel is taller than the buttons), clear of the
-   right-hand button column. Tablets have room above the resting left stick; phones move the card (below). */
+/* Touch layout: the top band between the PAUSE · CAM · timer row and the RESET · MODE · ARM column, centred
+   there, so the card never reaches down to the drone (LOS keeps it in the lower half) or the sticks. */
 .ds-ui.ds-touch-on .ds-tut-card {
-  top: calc(var(--ds-safe-t) + var(--ds-tbtn) + 2 * var(--ds-tgap) + 4px);
-  left: var(--ds-safe-l);
-  width: min(360px, calc(100% - var(--ds-safe-l) - var(--ds-tzone-r)));
+  top: var(--ds-safe-t);
+  left: calc(var(--ds-tzone-l) + var(--ds-ttimer) + var(--ds-tgap));
+  right: calc(var(--ds-tzone-r) + var(--ds-tgap));
+  width: auto;
+  max-width: 520px;
+  margin-inline: auto;
+  transform: none;
   font-size: 15px;
 }
 
@@ -40,6 +46,59 @@
   align-items: center;
   justify-content: space-between;
   gap: calc(10 * var(--ds-u));
+}
+
+.ds-tut-card__tag {
+  margin-right: auto;
+  padding: 1px calc(7 * var(--ds-u));
+  font-size: max(11px, 0.66em);
+  font-weight: 800;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: #1a1200;
+  background: var(--ds-amber);
+  border-radius: calc(999 * var(--ds-u));
+}
+
+.ds-tut-card__tag[hidden],
+.ds-tut-skip__g[hidden],
+.ds-tut-continue__g[hidden] {
+  display: none;
+}
+
+.ds-tut-card__head .ds-tut-card__step:has(+ .ds-tut-card__tag[hidden]) {
+  margin-right: auto;
+}
+
+/* glyph chips inside the copy sit on the text line, like the HUD's */
+.ds-tut-card__lines .ds-g {
+  vertical-align: 0.05em;
+}
+
+.ds-tut-tok {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.15em;
+  white-space: nowrap;
+}
+
+.ds-tut-tok__arrow {
+  font-weight: 700;
+}
+
+.ds-g--touch {
+  display: inline-flex;
+  align-items: center;
+  padding: 0 0.45em;
+  min-height: 1.45em;
+  font: inherit;
+  font-size: 0.78em;
+  font-weight: 800;
+  letter-spacing: 0.1em;
+  color: var(--ds-text);
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(234, 246, 255, 0.4);
+  border-radius: 0.5em;
 }
 
 .ds-tut-card__step {
@@ -152,12 +211,6 @@
   min-height: calc(28 * var(--ds-u));
 }
 
-.ds-tut-card__skiphint {
-  font-size: max(12px, 0.78em);
-  color: var(--ds-muted);
-  letter-spacing: 0.06em;
-}
-
 .ds-tut-card .ds-btn {
   pointer-events: auto;
   width: auto;
@@ -166,6 +219,9 @@
 
 .ds-tut-skip {
   pointer-events: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5em;
   min-width: 44px;
   min-height: 44px;
   margin-block: calc(-10 * var(--ds-u));
@@ -196,6 +252,11 @@
 
 .ds-tut-continue {
   min-height: 44px;
+  gap: 0.6em;
+}
+
+.ds-tut-card__foot {
+  justify-content: flex-end;
 }
 
 /* Hint after 20 s without progress: the card and the control to use glow amber. */
@@ -229,6 +290,11 @@
   50% {
     box-shadow: 0 0 calc(30 * var(--ds-u)) rgba(255, 197, 61, 0.6);
   }
+}
+
+/* The completion card freezes the flight: the stopped timer and the rest of the HUD go with it. */
+.ds-ui:has(.ds-tut-screen[data-dialog='done'].is-open) .ds-hud {
+  opacity: 0;
 }
 
 /* Dialogs reuse .ds-screen / .ds-dialog; above the step card and the touch layer. */
@@ -268,13 +334,21 @@
     padding: 10px 14px 12px;
   }
 
-  /* No room above the resting left stick: the card takes the column between the two sticks, right of the
-     left stick's base and its hint glow (anchor = inset + R + 26 px in touch-controls.ts) and left of RESET (whose label makes it wider than --ds-tbtn-wide, hence the extra gaps). */
   .ds-ui.ds-touch-on .ds-tut-card {
-    --ds-tut-l: max(var(--ds-tzone-l), calc(env(safe-area-inset-left) + 2 * var(--ds-stick-r) + 26px + var(--ds-tgap) + 6px));
-    left: var(--ds-tut-l);
     font-size: 13px;
-    width: min(440px, calc(100% - var(--ds-tut-l) - var(--ds-tzone-r) - 3 * var(--ds-tgap)));
+  }
+
+  /* one instruction line, at most two rows: the card's height stays capped */
+  .ds-ui.ds-touch-on .ds-tut-card__lines p:first-child {
+    display: -webkit-box;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 2;
+    line-clamp: 2;
+    overflow: hidden;
+  }
+
+  .ds-ui.ds-touch-on .ds-tut-card__stepw {
+    display: none;
   }
 
   .ds-tut-card:not(.is-hint) .ds-tut-card__lines p + p:not(.is-notice) {
@@ -283,7 +357,7 @@
 
   /* step · title · skip share the first row */
   .ds-tut-card {
-    grid-template-columns: auto 1fr auto;
+    grid-template-columns: auto auto 1fr auto;
     align-items: center;
     column-gap: 10px;
   }
@@ -296,12 +370,20 @@
     grid-area: 1 / 1;
   }
 
-  .ds-tut-card__title {
+  .ds-tut-card__tag {
     grid-area: 1 / 2;
   }
 
-  .ds-tut-skip {
+  .ds-tut-card__title {
     grid-area: 1 / 3;
+    min-width: 0;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .ds-tut-skip {
+    grid-area: 1 / 4;
   }
 
   .ds-tut-card > :not(.ds-tut-card__head, .ds-tut-card__title) {
@@ -312,11 +394,11 @@
     font-size: 1.15em;
   }
 
-  /* Phone touch card: as short as the column between the sticks allows (it must end above the arm hint). */
   .ds-ui.ds-touch-on .ds-tut-card {
-    top: calc(var(--ds-safe-t) + var(--ds-tbtn) + var(--ds-tgap));
-    padding: 8px 12px 10px;
-    gap: 5px;
+    padding: 7px 12px 8px;
+    gap: 4px;
+    max-height: calc(var(--ds-tbtn) * 2 + var(--ds-tgap));
+    overflow: hidden;
   }
 
   .ds-ui.ds-touch-on .ds-tut-card__lines {
@@ -345,23 +427,24 @@
     min-height: 0;
   }
 
-  .ds-ui.ds-touch-on.ds-tut-running .ds-hint {
-    display: none;
-  }
 }
 
-/* Small phones (iPhone SE): the column between the sticks is too narrow for step · title · skip on one row. */
-@media (max-height: 460px) and (max-width: 740px) {
+/* Small phones (iPhone SE): the gap between the timer and RESET is under 230 px, so the card drops just under
+   the PAUSE · CAM · timer row and spans from the left edge to RESET (still above the resting sticks). */
+@media (max-height: 460px) and (max-width: 719px) {
+  .ds-ui.ds-touch-on .ds-tut-card {
+    top: calc(var(--ds-safe-t) + var(--ds-tbtn) + var(--ds-tgap));
+    left: var(--ds-safe-l);
+  }
+
   .ds-tut-card__step {
     white-space: nowrap;
   }
 
-  .ds-tut-card__title {
-    grid-area: 2 / 1 / 3 / -1;
-  }
-
-  .ds-ui.ds-touch-on .ds-tut-card {
-    width: calc(100% - var(--ds-tut-l) - var(--ds-tzone-r) - 2 * var(--ds-tgap));
+  /* one row per line: the card must end above the resting left stick */
+  .ds-ui.ds-touch-on .ds-tut-card__lines p:first-child {
+    -webkit-line-clamp: 1;
+    line-clamp: 1;
   }
 }
 
@@ -382,8 +465,7 @@
     border-color: var(--ds-edge-hot);
   }
 
-  .ds-tut-card__lines p + p,
-  .ds-tut-card__skiphint {
+  .ds-tut-card__lines p + p {
     color: var(--ds-text);
   }
 }

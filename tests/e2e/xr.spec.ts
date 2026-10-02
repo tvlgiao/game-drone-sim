@@ -237,6 +237,37 @@ for (const installed of [true, false]) {
   });
 }
 
+test('Quest installed app, first run: no 2D tutorial dialog over Enter VR; the headset card offers it, R-stick click replays it', async ({ browser }) => {
+  const ctx = await browser.newContext({ userAgent: QUEST_UA });
+  await ctx.addInitScript(questOwnerStub);
+  await ctx.addInitScript(() => {
+    const mm = window.matchMedia.bind(window);
+    window.matchMedia = (q: string) => (q.includes('display-mode: standalone') ? ({ ...mm(q), matches: true, media: q } as MediaQueryList) : mm(q));
+  });
+  const page = await ctx.newPage();
+  const errs: string[] = [];
+  page.on('pageerror', (e) => errs.push(e.message));
+  await page.goto('/app/?xremu=1');
+  await page.waitForFunction(() => !!(window as unknown as Partial<W>).__drone && !!(window as unknown as Partial<W>).__xrDevice, null, { timeout: 20_000 });
+  await page.waitForFunction(() => (window as unknown as W).__drone.xr.presenting, null, { timeout: 10_000 });
+  await expect(page.getByRole('dialog', { name: 'New to FPV?' })).toBeHidden();
+  await page.waitForFunction(() => (window as unknown as W).__drone.xr.panel?.title === 'NEW TO FPV?');
+  type T = { tutorial: { on: boolean; step: string; phase: string } };
+  await press(page, 'right', 'a-button');
+  await page.waitForFunction(() => ((window as unknown as { __drone: T }).__drone.tutorial.on));
+  const card = await page.evaluate(() => (window as unknown as W).__drone.xr.panel);
+  expect(card).toMatchObject({ layout: 'card', kicker: 'STEP 1 / 12', title: 'Welcome, pilot' });
+  // pause (Y) → X skips; back on the menu card R-stick click starts it again
+  await press(page, 'left', 'y-button');
+  await press(page, 'left', 'x-button');
+  await page.waitForFunction(() => (window as unknown as W).__drone.race.status === 'menu');
+  expect(await page.evaluate(() => (window as unknown as W).__drone.xr.panel?.hint)).toContain('R-stick click Tutorial');
+  await press(page, 'right', 'thumbstick');
+  await page.waitForFunction(() => ((window as unknown as { __drone: T }).__drone.tutorial.on));
+  expect(errs).toEqual([]);
+  await ctx.close();
+});
+
 test('Quest system menu / headset off: the flight pauses and the sound stops; back in view the sound returns', async ({ page }) => {
   const errs: string[] = [];
   page.on('pageerror', (e) => errs.push(e.message));

@@ -284,7 +284,7 @@ export class Hud {
     const flying = FLIGHT_STATES.has(race.status);
     if (flying !== this.wasFlying) {
       this.wasFlying = flying;
-      if (flying) this.legendOpen = this.legendStored !== 'closed';
+      if (flying) this.legendOpen = !this.tutorial && this.legendStored !== 'closed';
     }
     // the first flight shows the legend; back at the main menu it collapses for good (until toggled)
     if (race.status === 'menu' && this.legendStored === null && this.legendOpen) {
@@ -336,10 +336,21 @@ export class Hud {
     this.menus.navigate(nav, confirm);
   }
 
-  /** The tutorial is running: the pause menu offers Replay / Skip tutorial. */
+  /**
+   * The tutorial is running: the pause menu offers Replay / Skip tutorial, and its card is the only instruction
+   * surface (no amber hint, no ARMED pulse; the Controls legend folds to its chip until toggled).
+   */
   setTutorial(on: boolean): void {
+    if (on === this.tutorial) return;
     this.tutorial = on;
     this.menus.setTutorial(on);
+    if (on) this.legendOpen = false;
+    else if (this.wasFlying) this.legendOpen = this.legendStored !== 'closed';
+  }
+
+  /** The amber hint above the telemetry is showing (arm / take-off guidance). */
+  get hintOn(): boolean {
+    return this.hintHtml !== '';
   }
 
   /** Keeps the settings screen in sync when settings change outside it (e.g. Y toggles flight mode). */
@@ -358,7 +369,7 @@ export class Hud {
         break;
       case 'armed':
         // The armed chip already shows it; a centre pulse would replace the countdown digit or CRASHED.
-        if (this.status !== 'racing' && this.status !== 'freefly') break;
+        if ((this.status !== 'racing' && this.status !== 'freefly') || this.tutorial) break;
         this.centerPulse(e.armed ? 'ARMED' : 'DISARMED', e.armed ? 'is-ok' : 'is-dim', 700);
         break;
       case 'out-of-bounds':
@@ -471,7 +482,9 @@ export class Hud {
     const scheme = hintScheme(f.input.source, f.input.gamepadId);
     const thr = f.input.control.throttle;
     let html = '';
-    if (inFlight && !f.drone.armed) {
+    if (this.tutorial) {
+      // the tutorial card says it
+    } else if (inFlight && !f.drone.armed) {
       if (scheme === 'touch') {
         const side = throttleSlot(f.settings.stickMode) === 'ly' ? 'left' : 'right';
         html = thr > 0.05 ? `Pull the ${side} stick fully down, then tap ARM` : 'DISARMED — tap ARM to arm';
@@ -487,8 +500,10 @@ export class Hud {
           html = `DISARMED — press ${arm} to arm`;
         }
       }
-    } else if (inFlight && f.drone.armed && f.input.latched && scheme === 'keyboard') {
-      html = `Hold ${this.throttleUpKey(f.settings)} to take off`;
+    } else if (inFlight && f.drone.armed && f.input.latched) {
+      if (scheme === 'keyboard') html = `Hold ${this.throttleUpKey(f.settings)} to take off`;
+      else if (scheme === 'touch') html = `Push the ${throttleSlot(f.settings.stickMode) === 'ly' ? 'left' : 'right'} stick up to take off`;
+      else html = 'Push the throttle stick up to take off';
     }
     if (this.hintHtml === html) return;
     this.hintHtml = html;
@@ -527,11 +542,13 @@ export class Hud {
       return g.length ? `<span class="ds-bind" data-bind="${tag}">${glyphsHtml(g)}<span>${label}</span></span>` : '';
     };
     // under pointer lock Esc both releases the mouse and pauses: one chip says so
-    // recentring only does something in a headset; on a flat screen the legend lists it as a VR control
-    const pauseLabel = this.tutorial && scheme === 'keyboard' ? 'Skip tutorial' : ACTION_LABEL.pause;
-    let strip = bind('reset') + (lockable && locked ? bind('pause', `${pauseLabel} · free mouse`, 'mouse') : bind('pause', pauseLabel)) + (scheme === 'quest' ? bind('recenter') : '') + bind('headingArrow', 'Arrow');
+    // the tutorial card's Skip carries the Esc glyph: no second, differently worded Esc chip while it runs
+    const pauseChip = this.tutorial && scheme === 'keyboard' ? (lockable && locked ? bind('pause', 'Free mouse', 'mouse') : '') : lockable && locked ? bind('pause', `${ACTION_LABEL.pause} · free mouse`, 'mouse') : bind('pause');
+    let strip = bind('reset') + pauseChip + (scheme === 'quest' ? bind('recenter') : '') + bind('headingArrow', 'Arrow');
     if (lockable && !locked) strip += `<span class="ds-bind" data-bind="mouse">${glyphHtml({ style: 'mouse', label: '', name: 'Mouse' })}<span>Click view: fly with mouse</span></span>`;
     if (mouse && s.mouseStick === 'hold') strip += bind('mouseCentre');
+    // an open legend lists every binding: the chip row folds down to the legend toggle
+    if (this.legendOpen && scheme !== 'touch') strip = '';
     const legendG = actionGlyphs(scheme, 'legend');
     if (legendG.length) {
       strip += `<button type="button" class="ds-bind ds-bind--btn" data-legend aria-expanded="${this.legendOpen}">${glyphsHtml(legendG)}<span>${this.legendOpen ? 'Hide controls' : 'Controls'}</span></button>`;
@@ -550,11 +567,12 @@ export class Hud {
     const rows = channelHints(scheme, s, mouse)
       .map((c) => row(CH_NAME[c.channel], `${glyphsHtml(c.glyphs)}${c.note ? `<small>${c.note}</small>` : ''}`))
       .join('');
+    // recentring only does something in a headset (the quest scheme = an XR session is running)
     const actions = (['arm', 'toggleMode', 'cycleCamera', 'reset', 'pause', 'recenter', 'headingArrow'] as const)
+      .filter((a) => a !== 'recenter' || scheme === 'quest')
       .map((a) => {
         const g = actionGlyphs(scheme, a);
-        const label = a === 'recenter' && scheme !== 'quest' ? `${ACTION_LABEL[a]} (VR)` : a === 'pause' ? pauseLabel : ACTION_LABEL[a];
-        return g.length ? row(label, glyphsHtml(g)) : '';
+        return g.length ? row(ACTION_LABEL[a], glyphsHtml(g)) : '';
       })
       .join('');
     let extra = '';

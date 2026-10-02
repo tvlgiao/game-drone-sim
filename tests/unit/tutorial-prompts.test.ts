@@ -2,8 +2,9 @@ import { describe, expect, it } from 'vitest';
 import { DEFAULT_SETTINGS, type Settings } from '../../src/core/settings';
 import { TUTORIAL_STEPS, TutorialMachine, type TutorialStepId } from '../../src/game/tutorial';
 import { buttonLabel, channelDirLabel, channelSide, pressVerb } from '../../src/ui/mode-labels';
-import { promptFor, skipLabel, tutorialView, type PromptSettings } from '../../src/ui/tutorial-prompts';
-import { xrProgressBar, xrTutorialCard, xrTutorialPrompt } from '../../src/ui/xr-hud';
+import { TOKEN_CLOSE, TOKEN_OPEN, promptFor, promptRich, skipLabel, tutorialView, type PromptSettings } from '../../src/ui/tutorial-prompts';
+import { richHtml } from '../../src/ui/tutorial-ui';
+import { xrTutorialCard, xrTutorialPrompt } from '../../src/ui/xr-hud';
 import type { InputSource } from '../../src/types';
 
 const NO_INVERT = { throttle: false, yaw: false, pitch: false, roll: false };
@@ -209,31 +210,25 @@ describe('tutorialView', () => {
 });
 
 describe('xrTutorialCard', () => {
-  it('xrProgressBar: ten cells and a percentage, clamped', () => {
-    expect(xrProgressBar(0)).toBe('○○○○○○○○○○ 0%');
-    expect(xrProgressBar(0.5)).toBe('●●●●●○○○○○ 50%');
-    expect(xrProgressBar(2)).toBe('●●●●●●●●●● 100%');
-    expect(xrProgressBar(Number.NaN)).toBe('○○○○○○○○○○ 0%');
-  });
-
-  it('welcome at eye level with A start; flight steps low with progress and the pause-menu skip', () => {
+  it('one card layout facing the pilot: step label, title, instruction, drawn progress, the skip line', () => {
     const m = new TutorialMachine();
     m.start('angle');
     const w = xrTutorialCard(tutorialView(m, 'xr', s(), false));
-    expect(w).toMatchObject({ layout: 'menu', title: '1/12 · WELCOME, PILOT', sub: 'Press A to start.', hint: 'A start · Y › Skip tutorial' });
+    expect(w).toMatchObject({ layout: 'card', kicker: 'STEP 1 / 12', title: 'Welcome, pilot', hint: 'A Start · Y › Skip tutorial', progress: undefined });
     m.start('angle', 3);
     m.update({ dt: 0.1, drone: { velocity: { x: 0, y: 0, z: 0 }, orientation: { x: 0, y: 0, z: 0, w: 1 } }, agl: 0.75, armed: true, flightMode: 'angle', cameraMode: 'los', source: 'xr', ringsPassed: 0, confirm: false });
     const f = xrTutorialCard(tutorialView(m, 'xr', s(), true));
-    expect(f.layout).toBe('hud');
-    expect(f.title).toBe('3/12 · TAKE OFF');
-    expect(f.sub).toBe('Throttle up (Left stick ↑) to climb past 1.5 m.');
-    expect(f.hint).toBe('●●●●●○○○○○ 50% · Y › Skip tutorial');
+    expect(f).toMatchObject({ layout: 'card', kicker: 'STEP 3 / 12', title: 'Take off', sub: 'Throttle up (Left stick ↑) to climb past 1.5 m.', hint: 'Y › Skip tutorial' });
+    expect(f.progress).toBeCloseTo(0.5, 6);
+    // the instruction text carries no text-drawn bar any more
+    expect(`${f.sub}${f.hint}`).not.toMatch(/[●○%]/);
   });
 
-  it('a hint adds the second line and turns amber', () => {
+  it('a hint adds the second line, tags the step and turns amber', () => {
     const v = { ...tutorialView(new TutorialMachine(), 'xr', s(), true), id: 'hover' as const, hint: true, lines: ['a', 'b'] };
     const c = xrTutorialCard(v);
-    expect(c.sub).toBe('a · b');
+    expect(c.sub).toBe('a b');
+    expect(c.kicker).toContain('HINT');
     expect(c.accent).toBe('#ffc861');
     expect(c.hint).not.toMatch(/skipping|hold/i);
   });
@@ -249,6 +244,34 @@ describe('xrTutorialCard', () => {
     m.update({ ...base, ringsPassed: 0 });
     m.update({ ...base, ringsPassed: 1 });
     const c = xrTutorialCard(tutorialView(m, 'xr', s(), true));
-    expect(c).toMatchObject({ layout: 'menu', title: 'TUTORIAL COMPLETE', hint: 'A Start Training · X Menu', sub: 'You flew your first ring.' });
+    expect(c).toMatchObject({ layout: 'card', title: 'Tutorial complete', hint: 'A Start Training · X Menu', sub: 'You flew your first ring.' });
+  });
+});
+
+describe('prompt tokens (glyph chips on the DOM card)', () => {
+  const tk = (t: string): string => `${TOKEN_OPEN}${t}${TOKEN_CLOSE}`;
+  it('every key / button / stick in the copy is a token; promptFor is the same text without them', () => {
+    expect(promptRich('arm', 'keyboard', s())[0]).toBe(`Press ${tk('Space')} to arm.`);
+    expect(promptRich('throttle', 'gamepad', s(), { armed: true })[0]).toBe(`Throttle up (${tk('Left stick ↑')}) to climb past 1.5 m.`);
+    expect(promptRich('hover', 'touch', s({ touchThrottleCentre: false }), { armed: true })[1]).toBe(`Small throttle corrections (${tk('Left thumb ↑')} / ${tk('↓')}).`);
+    for (const src of ['keyboard', 'gamepad', 'touch', 'xr'] as const) {
+      for (const id of ['welcome', 'arm', 'throttle', 'hover', 'yaw', 'pitch-roll', 'land', 'disarm', 'modes', 'cameras', 'ring'] as const) {
+        const rich = promptRich(id, src, s(), { armed: false });
+        expect(rich.map((l) => l.replace(/[\uE000\uE001]/g, ''))).toEqual(promptFor(id, src, s(), { armed: false }));
+        for (const l of rich) expect(l.split(TOKEN_OPEN).length, `${id} ${src}: ${l}`).toBe(l.split(TOKEN_CLOSE).length);
+      }
+    }
+  });
+
+  it('the DOM card draws tokens as glyphs: keycaps, coloured pad faces, stick + arrow, touch buttons', () => {
+    expect(richHtml(`Press ${tk('Space')} to arm.`, 'keyboard', null)).toMatch(/^Press <kbd class="ds-g ds-g--key is-wide"[^>]*>Space<\/kbd> to arm\.$/);
+    expect(richHtml(`Press ${tk('A')} to arm.`, 'gamepad', 'Xbox Wireless Controller (045e)')).toContain('ds-g--face is-green');
+    expect(richHtml(`Press ${tk('Cross')} to arm.`, 'gamepad', 'DualSense Wireless Controller (054c)')).toContain('is-cross');
+    const stick = richHtml(`Throttle up (${tk('Left stick ↑')})`, 'gamepad', null);
+    expect(stick).toContain('ds-g--stick');
+    expect(stick).toContain('aria-label="Left stick up"');
+    expect(richHtml(`Tap ${tk('ARM')}`, 'touch', null)).toContain('ds-g--touch');
+    // copy around the tokens is escaped
+    expect(richHtml('a < b', 'keyboard', null)).toBe('a &lt; b');
   });
 });

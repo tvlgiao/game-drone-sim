@@ -83,7 +83,13 @@ test.describe('desktop (keyboard / gamepad)', () => {
     await page.setViewportSize({ width: 1440, height: 900 });
     const card = await open(page, 'step=1&source=keyboard');
     await expect(card.locator('.ds-tut-card__lines p').first()).toHaveText('Throttle W / S · Yaw A / D · Pitch ↑ / ↓ · Roll ← / →');
-    await expect(card.locator('.ds-tut-card__skiphint')).toHaveText('Esc to skip');
+    // one Skip (the header button, with its key) and the confirm key on Continue: no footer repeats
+    await expect(card.getByRole('button', { name: 'Skip tutorial (Esc)' })).toBeVisible();
+    await expect(card.locator('.ds-tut-skip .ds-g')).toHaveText('Esc');
+    await expect(card.locator('.ds-tut-continue .ds-g')).toHaveText('Enter');
+    await expect(card).not.toContainText('to skip');
+    await expect(card).not.toContainText('to start');
+    await expect(card.locator('.ds-tut-card__lines p').first().locator('.ds-g--key')).toHaveCount(8);
     await card.locator('.ds-tut-continue').click();
     await card.locator('.ds-tut-skip').click();
     expect(await page.evaluate(() => window.__tutorialPreview!.log)).toEqual(['confirm', 'skip']);
