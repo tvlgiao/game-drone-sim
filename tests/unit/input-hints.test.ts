@@ -159,6 +159,15 @@ describe('MouseStick', () => {
     expect(m.out.y).toBeGreaterThan(0); // pushed away = stick forward
   });
 
+  it("'hold': pushing past the edge does not wind up: moving back comes off the edge at once", () => {
+    const m = new MouseStick();
+    m.feed(10 * MOUSE_HOLD_TRAVEL, 0);
+    m.update(1 / 60, 'hold', MO);
+    m.feed(-MOUSE_HOLD_TRAVEL / 2, 0);
+    m.update(1 / 60, 'hold', MO);
+    expect(m.out.x).toBeCloseTo(0.5);
+  });
+
   it("'spring': deflects while moving, back at centre ~0.15 s after the mouse stops", () => {
     const m = new MouseStick();
     for (let i = 0; i < 10; i++) {
