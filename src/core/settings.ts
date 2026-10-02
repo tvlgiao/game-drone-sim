@@ -177,8 +177,17 @@ export function applyRatePreset(s: Settings, preset: RatePreset): void {
 }
 
 /**
+ * True when a rate edit would overwrite the saved Custom rates: there is a saved set, but a named preset is active,
+ * so the edit starts from that preset's values (one Custom slot only). The Rates screen warns about it.
+ */
+export function rateEditReplacesCustom(s: Readonly<Settings>): boolean {
+  return s.ratePreset !== 'custom' && s.customRates !== null;
+}
+
+/**
  * Edits one rate value (clamped). Center above max pushes max up; max below center is held at center.
- * With `linkRollPitch`, roll and pitch edits mirror each other. Any edit switches the preset to 'custom' and is kept as `customRates`.
+ * With `linkRollPitch`, roll and pitch edits mirror each other. Any edit switches the preset to 'custom' and the
+ * edited rates become `customRates` — on a named preset that replaces the saved set (see `rateEditReplacesCustom`).
  */
 export function setRateValue(s: Settings, axis: RateAxis, field: RateField, value: number): void {
   const range = rateRange(field);

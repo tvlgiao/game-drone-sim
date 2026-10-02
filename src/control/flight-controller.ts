@@ -54,6 +54,15 @@ const ALT_POS_MAX_V = 1; // m/s
 export const POS_MAX_SPEED = 4; // m/s at full stick
 const POS_KV = 1.6; // (m/s²)/(m/s) speed error → acceleration
 
+/**
+ * Throttle stick 0..1 → collective motor command 0..1 (before the u² thrust mapping).
+ * The limit scales only the part above mid, so centre stick still hovers at any limit.
+ */
+export function throttleOutput(stick: number, mid: number, expo: number, limit: number): number {
+  const curve = throttleCurve(stick, mid, expo);
+  return curve > mid ? mid + (curve - mid) * limit : curve;
+}
+
 export class FlightController {
   mode: FlightMode = 'angle';
   /** per-axis Betaflight Actual rates */
@@ -225,8 +234,7 @@ export class FlightController {
       this.pidYaw.relax(dt, I_RELAX_TAU);
     }
 
-    const curve = throttleCurve(input.throttle, this.throttleMid, this.throttleExpo);
-    const u = curve > this.throttleMid ? this.throttleMid + (curve - this.throttleMid) * this.throttleLimit : curve;
+    const u = throttleOutput(input.throttle, this.throttleMid, this.throttleExpo, this.throttleLimit);
     const idle = this.params.idle;
     const collective = this.altitudeHold ? this.altitudeCollective(dt, input.throttle, state) : u * u;
     const thrust = this.mixer.mix(collective, r, p, y, idle * idle);

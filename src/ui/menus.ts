@@ -7,6 +7,7 @@ import {
   SETTINGS_OPTIONS,
   applyRatePreset,
   cloneSettings,
+  rateEditReplacesCustom,
   rateRange,
   setRateValue,
   type RateAxis,
@@ -19,7 +20,7 @@ import type { InputFrame, NavEvents } from '../types';
 import { formatTime } from './format';
 import { controllerDiagram } from './icons';
 import { HOVER, RateCharts } from './rate-charts';
-import { CH_NAME, CH_SHORT, keyboardKeys, padControls, stickLong, stickShort, throttleControl, throttleDownHint, touchControls, xrControls } from './mode-labels';
+import { CH_NAME, CH_SHORT, effectiveFovDeg, keyboardKeys, padControls, stickLong, stickShort, throttleControl, throttleDownHint, touchControls, xrControls } from './mode-labels';
 
 /** package.json version, injected by vite.config.ts `define`. */
 declare const __APP_VERSION__: string;
@@ -102,6 +103,7 @@ const rangeRow = (id: NumKey, label: string, hint: string, fmt: (v: number) => s
   },
 });
 
+const FOV_HINT = 'FPV lens width';
 const FIELD_NAME: Record<RateField, string> = { center: 'Center sensitivity', max: 'Max rate', expo: 'Expo' };
 const rateCell = (axis: RateAxis, field: RateField): Row => ({
   id: `rate.${axis}.${field}`,
@@ -233,7 +235,7 @@ const ROW_DEFS: Row[] = [
   rangeRow('throttleLimit', 'Throttle limit', 'Scales maximum motor output', (v) => `${Math.round(v * 100)}%`),
   rangeRow('angleMaxTiltDeg', 'Max tilt angle', 'Angle mode: tilt at full stick', (v) => `${Math.round(v)}°`),
   rangeRow('cameraTiltDeg', 'Camera tilt', 'FPV camera uptilt', (v) => `${Math.round(v)}°`),
-  rangeRow('fovDeg', 'Field of view', 'FPV lens width', (v) => `${Math.round(v)}°`),
+  rangeRow('fovDeg', 'Field of view', FOV_HINT, (v) => `${Math.round(v)}°`),
   {
     id: 'quality',
     label: 'Graphics',
@@ -313,6 +315,11 @@ const ERROR_ADVICE: Record<Platform, (native: boolean) => string> = {
   desktop: () => 'Turn on hardware acceleration in your browser settings, update your graphics driver, or try a recent Chrome, Edge, Firefox or Safari.',
 };
 const REMAP_PROMPT = 'Select a stick axis, then move that stick.';
+/** Settings rows that open a screen or dialog instead of cycling a value. */
+const SETTINGS_ACTION_ROWS: { act: string; label: string; hint: string; value: string; alert?: boolean }[] = [
+  { act: 'about', label: 'About', hint: 'Version, support, privacy policy and licences', value: `v${APP_VERSION}` },
+  { act: 'confirm-reset', label: 'Reset all settings', hint: 'Controls, rates, mapping, graphics and sound back to defaults', value: 'Reset', alert: true },
+];
 /** Stick (left / right) carrying throttle for the mode, regardless of the RT option (touch and VR always use a stick). */
 const throttleSlotSide = (s: Settings): 'left' | 'right' => (throttleControl({ stickMode: s.stickMode, throttleSource: 'stick' }) === 'left' ? 'left' : 'right');
 
@@ -339,7 +346,7 @@ export class Menus {
   private ratesReturn: ScreenName = 'settings';
   private fine = false;
   private charts!: RateCharts;
-  private ratesEls!: { preset: HTMLElement; fine: HTMLElement; box: HTMLElement };
+  private ratesEls!: { preset: HTMLElement; fine: HTMLElement; box: HTMLElement; replaceHint: HTMLElement };
   private settings: Settings;
   private readonly rowEls = new Map<string, { value: HTMLElement; fill: HTMLElement | null }[]>();
   private readonly finishEls: { time: HTMLElement; best: HTMLElement; bestLabel: HTMLElement; delta: HTMLElement; badge: HTMLElement };
@@ -527,6 +534,7 @@ export class Menus {
     if (name !== 'rates') this.setFine(false);
     if (name !== 'controller') this.stopCapture('');
     if (name === 'finish' && data) this.renderFinish(data);
+    if (name === 'settings') this.renderFovHint();
     this.current = name;
     for (const [n, el] of this.screens) {
       const on = n === name;
@@ -845,7 +853,9 @@ export class Menus {
     if (this.charts) {
       this.charts.redraw(s);
       this.ratesEls.preset.textContent = s.ratePreset === 'custom' ? 'Custom' : s.ratePreset[0]!.toUpperCase() + s.ratePreset.slice(1);
+      this.ratesEls.replaceHint.hidden = !rateEditReplacesCustom(s);
     }
+    this.renderFovHint();
     if (this.altHoldNote) {
       const touchHold = this.touch && !this.padPresent && s.touchThrottleCentre;
       const vr = this.quest || this.vr;
@@ -870,6 +880,19 @@ export class Menus {
     this.renderControls();
   }
 
+  /** FOV row hint: the FPV camera caps its vertical FOV, so a narrow screen shows less than the setting. */
+  private renderFovHint(): void {
+    const list = this.rowEls.get('fovDeg');
+    if (!list) return;
+    const set = this.settings.fovDeg;
+    const eff = Math.round(effectiveFovDeg(set, window.innerWidth / window.innerHeight));
+    const text = eff < Math.round(set) ? `${FOV_HINT} · this screen shows ${eff}°` : FOV_HINT;
+    for (const els of list) {
+      const h = els.value.closest('.ds-row')?.querySelector<HTMLElement>('.ds-row__hint');
+      if (h && h.textContent !== text) h.textContent = text;
+    }
+  }
+
   private renderControls(): void {
     const s = this.settings;
     const touchFirst = this.touch && !this.padPresent;
@@ -878,17 +901,24 @@ export class Menus {
     if (key === this.controlsKey || !this.controlsBody) return;
     this.controlsKey = key;
     const touchHtml = this.touchControlsHtml(s);
-    const padHtml = this.padControlsHtml(s, xr);
+    // headset without a paired gamepad: an Xbox diagram shows the wrong controller; the table covers Touch
+    const padHtml = this.padControlsHtml(s, xr, !xr || this.padPresent);
     let html: string;
     if (touchFirst) {
-      const more = this.btn('controls-more', this.controlsMore ? 'Hide gamepad &amp; keyboard ‹' : 'Gamepad &amp; keyboard ›', false, ' ds-btn--ghost ds-btn--sm', ` aria-expanded="${this.controlsMore}"`);
-      html = `${touchHtml}<div class="ds-dialog__actions">${more}</div>${this.controlsMore ? padHtml : ''}`;
+      html = `${touchHtml}${this.controlsMore ? `<h3 class="ds-h3">Gamepad &amp; keyboard</h3>${padHtml}` : ''}`;
     } else {
       html = this.touch ? `${padHtml}<h3 class="ds-h3">Touch</h3>${touchHtml}` : padHtml;
     }
     this.controlsBody.innerHTML = html;
-    const t = this.screens.get('controls')?.querySelector('[data-f="modeTag"]');
+    const screen = this.screens.get('controls');
+    const t = screen?.querySelector('[data-f="modeTag"]');
     if (t) t.textContent = `Mode ${s.stickMode}`;
+    const more = screen?.querySelector<HTMLElement>('[data-act="controls-more"]');
+    if (more) {
+      more.hidden = !touchFirst;
+      more.setAttribute('aria-expanded', String(this.controlsMore));
+      more.firstElementChild!.textContent = this.controlsMore ? 'Hide gamepad ‹' : 'Gamepad ›';
+    }
     if (this.current === 'controls') this.refreshItems();
   }
 
@@ -919,7 +949,7 @@ export class Menus {
       <p class="ds-tip" data-f="touchTip">${where} ${thr}</p>`;
   }
 
-  private padControlsHtml(s: Settings, xr: boolean): string {
+  private padControlsHtml(s: Settings, xr: boolean, diagram: boolean): string {
     const pad = padControls(s);
     const kb = keyboardKeys(s);
     const thr = throttleControl(s);
@@ -948,7 +978,7 @@ export class Menus {
       ? `<p class="ds-tip" data-f="xrTip">VR: the Touch controller sticks spring back — the ${thrXr} stick's centre holds altitude and the other stick's centre holds position. Press A to arm, then push the ${thrXr} stick up to take off.</p>`
       : '';
     return `
-      <div class="ds-pad-wrap">${controllerDiagram({ left: stickLong(s, 'l'), right: stickLong(s, 'r'), rt: thr === 'rt' ? 'Throttle' : null, thr })}</div>
+      ${diagram ? `<div class="ds-pad-wrap">${controllerDiagram({ left: stickLong(s, 'l'), right: stickLong(s, 'r'), rt: thr === 'rt' ? 'Throttle' : null, thr })}</div>` : ''}
       <table class="ds-table" data-f="padTable">
         <thead><tr><th>Action</th>${xr ? '<th>Touch controllers</th>' : ''}<th>Xbox controller</th><th>Keyboard</th></tr></thead>
         <tbody>${rows}</tbody>
@@ -1060,6 +1090,21 @@ export class Menus {
       .join('');
   }
 
+  /** Rows styled like setting rows that open a screen; the arrow is decorative (a click anywhere activates the row). */
+  private actionRowsHtml(): string {
+    return SETTINGS_ACTION_ROWS.map(
+      (r) => `
+        <div class="ds-row" data-nav data-act="${r.act}" role="button" aria-label="${r.label}">
+          <div class="ds-row__text"><span class="ds-row__label">${r.label}</span><span class="ds-row__hint">${r.hint}</span></div>
+          <div class="ds-row__ctl">
+            <span aria-hidden="true"></span>
+            <span class="ds-row__value${r.alert ? ' is-alert' : ''}">${r.value}</span>
+            <button type="button" class="ds-arrow" aria-hidden="true" tabindex="-1">›</button>
+          </div>
+        </div>`,
+    ).join('');
+  }
+
   private registerRows(el: HTMLElement): void {
     el.querySelectorAll<HTMLElement>('[data-key]').forEach((rowEl) => {
       const id = rowEl.dataset.key!;
@@ -1086,7 +1131,7 @@ export class Menus {
           ${this.btn('settings', 'Settings')}
           ${this.btn('controls', 'Controls')}
           ${this.btn('about', 'About')}
-          ${this.btn('exit', 'Quit', false, ' ds-btn--quit')}
+          ${this.btn('exit', 'Quit', false, ' ds-btn--quit', ' style="grid-column:1/-1"')}
         </nav>
         <p class="ds-main__best" data-f="best"></p>
         <footer class="ds-foot" data-pad-only>
@@ -1104,9 +1149,8 @@ export class Menus {
       `
       <div class="ds-panel ds-glass ds-dialog ds-dialog--wide">
         <h2 class="ds-dialog__title">Settings</h2>
-        <div class="ds-rows">${this.rowsHtml(SETTINGS_ROWS)}</div>
-        <div class="ds-dialog__actions">${this.btn('about', 'About', false, ' ds-btn--ghost ds-btn--sm')}${this.btn('confirm-reset', 'Reset all settings', false, ' ds-btn--ghost ds-btn--sm ds-btn--quit')}</div>
-        <div class="ds-dialog__actions">${this.btn('fullscreen', 'Full screen', false, ' ds-btn--ghost', ' data-fs-only hidden')}${this.btn('rates', 'Rates &amp; sensitivity ›', false, ' ds-btn--ghost')}${this.btn('controller', 'Controller setup ›', false, ' ds-btn--ghost')}${this.btn('back', 'Back')}</div>
+        <div class="ds-rows">${this.rowsHtml(SETTINGS_ROWS)}${this.actionRowsHtml()}</div>
+        <div class="ds-dialog__actions">${this.btn('fullscreen', 'Full screen', false, ' ds-btn--ghost', ' data-fs-only hidden')}${this.btn('rates', 'Rates ›', false, ' ds-btn--ghost')}${this.btn('controller', 'Controller ›', false, ' ds-btn--ghost')}${this.btn('back', 'Back', true)}</div>
         <p class="ds-foot ds-foot--inline" data-pad-only><span><kbd class="ds-kbd">←</kbd><kbd class="ds-kbd">→</kbd> Change</span><span><kbd class="ds-kbd ds-kbd--b">B</kbd> Back</span></p>
       </div>`,
     );
@@ -1156,12 +1200,12 @@ export class Menus {
               <p class="ds-help" data-no-pad>Connect a Bluetooth or USB controller, then press any button on it. Its sticks, axes and remap options appear here.</p>
               <p class="ds-help" data-no-pad data-pad-only>Keyboard: WASD and the arrow keys work as the two sticks.</p>
             </div>
-            <h3 class="ds-h3">Axis mapping</h3>
-            <div class="ds-remap">${remap}${this.btn('remap-reset', 'Reset mapping', false, ' ds-btn--sm')}</div>
-            <p class="ds-remap__status" data-f="remapStatus"></p>
+            <h3 class="ds-h3" data-needs-pad hidden>Axis mapping</h3>
+            <div class="ds-remap" data-needs-pad hidden>${remap}${this.btn('remap-reset', 'Reset mapping', false, ' ds-btn--sm')}</div>
+            <p class="ds-remap__status" data-f="remapStatus" data-needs-pad hidden></p>
           </section>
         </div>
-        <div class="ds-dialog__actions">${this.btn('rates', 'Rates &amp; sensitivity ›', false, ' ds-btn--ghost')}${this.btn('back', 'Back', true)}</div>
+        <div class="ds-dialog__actions">${this.btn('rates', 'Rates ›', false, ' ds-btn--ghost')}${this.btn('back', 'Back', true)}</div>
       </div>`,
     );
     this.registerRows(el);
@@ -1195,6 +1239,7 @@ export class Menus {
               <thead><tr><th></th><th>Center <small>°/s</small></th><th>Max rate <small>°/s</small></th><th>Expo</th></tr></thead>
               <tbody>${body}</tbody>
             </table>
+            <p class="ds-tip" data-f="replaceHint" hidden>Editing a value replaces your saved Custom rates with this preset plus your change.</p>
             <p class="ds-help">Center sensitivity: rotation rate around stick centre. Max rate: rate at full stick. Expo: softens the centre.</p>
             <p class="ds-help">Roll/pitch rates apply in Acro mode; Angle mode self-levels (see Max tilt below). Yaw rate applies in both.</p>
             <p class="ds-help ds-help--fine" data-f="fine" data-pad-only>A / Enter on a rate value: fine step</p>
@@ -1222,6 +1267,7 @@ export class Menus {
       preset: el.querySelector<HTMLElement>('[data-f="preset"]')!,
       fine: el.querySelector<HTMLElement>('[data-f="fine"]')!,
       box: el.querySelector<HTMLElement>('.ds-rates')!,
+      replaceHint: el.querySelector<HTMLElement>('[data-f="replaceHint"]')!,
     };
     return el;
   }
@@ -1233,7 +1279,7 @@ export class Menus {
       <div class="ds-panel ds-glass ds-dialog ds-dialog--wide">
         <h2 class="ds-dialog__title">Controls <small data-f="modeTag">Mode 2</small></h2>
         <div data-f="body"></div>
-        <div class="ds-dialog__actions">${this.btn('controller', 'Controller setup ›', false, ' ds-btn--ghost')}${this.btn('back', 'Back', true)}</div>
+        <div class="ds-dialog__actions">${this.btn('controls-more', 'Gamepad ›', false, ' ds-btn--ghost', ' aria-expanded="false" hidden')}${this.btn('controller', 'Controller ›', false, ' ds-btn--ghost')}${this.btn('back', 'Back', true)}</div>
       </div>`,
     );
   }
@@ -1247,6 +1293,9 @@ export class Menus {
       ['three.js', 'MIT'],
       ['postprocessing', 'Zlib'],
       ['Capacitor', 'MIT'],
+      ['IWER', 'MIT'],
+      ['gl-matrix', 'MIT'],
+      ['WebXR Layers polyfill', 'Apache-2.0'],
     ];
     return this.screen(
       'about',
@@ -1326,7 +1375,7 @@ export class Menus {
       `
       <div class="ds-panel ds-glass ds-dialog">
         <h2 class="ds-dialog__title">Drone Sim closed</h2>
-        <p class="ds-dialog__text" data-f="byeText">${this.installed ? 'Sound is off. You can now close the&nbsp;app.' : 'Sound is off. You can now close this&nbsp;tab.'}</p>
+        <p class="ds-dialog__text" data-f="byeText">${this.installed || this.native ? 'Sound is off. You can now close Drone&nbsp;Sim.' : 'Sound is off. You can now close this&nbsp;tab.'}</p>
         <nav class="ds-menu">
           ${this.btn('menu', 'Back to game', true)}
         </nav>
