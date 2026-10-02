@@ -70,6 +70,7 @@ function boot(caps: EditionCaps): void {
   const params = new URLSearchParams(location.search);
   const selftest = params.get('selftest') === '1';
   const hud = new Hud(uiRoot, (a) => onAction(a));
+  bootHud = hud;
   const gpu = probeGpu();
   const resolveTier = (s: Settings): QualityTier => (s.quality === 'auto' ? pickTier(gpu, device.form) : s.quality);
   let tier = resolveTier(settings);
@@ -737,6 +738,18 @@ function boot(caps: EditionCaps): void {
   if (selftest) void import('./ui/selftest').then((m) => m.runSelfTest(hook, settings.stickMode));
 }
 
+/** the boot's HUD, once created: a later fatal error reuses it instead of stacking a second UI */
+let bootHud: Hud | null = null;
+
+/** A start-up failure (lazy import offline, ownership check, boot) ends on the error screen, never a blank page. */
+function showStartupError(err: unknown): void {
+  document.body.classList.add('is-ready');
+  const ui = document.getElementById('ui');
+  if (!ui) return;
+  const detail = err instanceof Error ? err.message : String(err);
+  (bootHud ?? new Hud(ui, () => undefined)).setError(`Drone Sim could not start (${detail}). Check your connection and reload.`);
+}
+
 /** A boot that throws must not leave the splash covering the page. */
 function safeBoot(caps: EditionCaps): void {
   try {
@@ -766,8 +779,8 @@ async function start(): Promise<void> {
   safeBoot(caps);
 }
 
-// a failed lazy import (offline, no cache) must not leave the splash up either
+// a failed lazy import (offline, no cache), ownership check or boot shows the error screen
 void start().catch((err: unknown) => {
-  document.body.classList.add('is-ready');
-  throw err;
+  console.error(err);
+  showStartupError(err);
 });

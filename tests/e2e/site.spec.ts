@@ -133,6 +133,18 @@ test.describe('/play/: free web game, never VR', () => {
 });
 
 test.describe('/app/: Meta Quest store app', () => {
+  test('a start-up failure (the gate chunk cannot load) ends on the error screen, not a blank page', async ({ page }) => {
+    const unhandled: string[] = [];
+    page.on('pageerror', (e) => unhandled.push(e.message));
+    await page.route(/store-gate-[^/]*\.js$/, (r) => r.abort());
+    await page.goto('/app/');
+    await expect(page.locator('#ui.ds-fatal')).toBeAttached({ timeout: 20_000 });
+    await expect(page.locator('.ds-screen--error')).toBeVisible();
+    await expect(page.locator('.ds-screen--error')).toContainText('could not start');
+    await expect(page.locator('#splash')).toBeHidden();
+    expect(unhandled).toEqual([]);
+  });
+
   test('without the Digital Goods API (a browser tab) shows the store gate instead of the game', async ({ page }) => {
     const errs = trackErrors(page);
     await page.goto('/app/?xremu=1');
