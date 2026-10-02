@@ -477,7 +477,7 @@ export class Hud {
     if (!up || !box.childElementCount || !center) return lane('', '');
     // the lane's width and height don't depend on top/bottom, so it is measured where it currently sits
     const hud = box.offsetParent as HTMLElement | null;
-    if (!hud) return;
+    if (!hud) return lane('', '');
     const host = hud.getBoundingClientRect();
     // Big digits overflow their line-height:1 box (and pop in scaled up): measure the glyphs too.
     const glyphs = document.createRange();
