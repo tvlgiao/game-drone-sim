@@ -2,7 +2,7 @@
  * Single source of truth for the loft level: physics colliders and render meshes are both
  * built from this data, so what the pilot sees is exactly what the drone can hit.
  */
-import type { Collider, LevelDef, PropDef, RingDef } from '../types';
+import type { Collider, PropDef, RingDef, RoomLevelData } from '../types';
 
 type V3 = [number, number, number];
 
@@ -111,7 +111,7 @@ const rings: RingDef[] = [
   ring(11, [-6.5, 1.4, 4.6], [1, 0, 0]),
 ];
 
-export const LOFT_LEVEL: LevelDef = {
+export const LOFT_LEVEL: RoomLevelData = {
   name: 'Night Loft',
   room: {
     size: [24, ROOM_H, 14],
@@ -129,7 +129,7 @@ export const LOFT_LEVEL: LevelDef = {
 };
 
 /** Ring colliders (rims) so the frame of a gate is solid, like a real race gate. */
-export function ringColliders(level: LevelDef): Collider[] {
+export function ringColliders(level: { rings: readonly RingDef[] }): Collider[] {
   return level.rings.map((r) => ({
     id: r.id,
     restitution: 0.3,
@@ -137,7 +137,7 @@ export function ringColliders(level: LevelDef): Collider[] {
   }));
 }
 
-/** All static + kinematic colliders of a level (room shell planes are handled by PhysicsWorld). */
-export function levelColliders(level: LevelDef): Collider[] {
-  return [...level.props.flatMap((p) => p.colliders), ...ringColliders(level)];
+/** All static + kinematic colliders of a level (room shell planes / ground are handled by PhysicsWorld). */
+export function levelColliders(level: { props: readonly PropDef[]; rings: readonly RingDef[]; statics?: readonly Collider[] }): Collider[] {
+  return [...level.props.flatMap((p) => p.colliders), ...(level.statics ?? []), ...ringColliders(level)];
 }

@@ -16,8 +16,9 @@ import {
 } from '../core/settings';
 import { isQuestBrowser } from '../core/xr';
 import { AxisCapture, MODE_TABLE, STICK_SLOTS, type Channel, type StickSlot } from '../input/stick';
-import type { InputFrame, NavEvents } from '../types';
+import type { InputFrame, LevelId, NavEvents } from '../types';
 import { formatTime } from './format';
+import { drawThumbs, levelAct, levelCardsHtml, parseLevelAct, type LevelCard, type LevelMode } from './level-select';
 import { controllerDiagram } from './icons';
 import { HOVER, RateCharts } from './rate-charts';
 import { CH_NAME, CH_SHORT, effectiveFovDeg, keyboardKeys, padControls, stickLong, stickShort, throttleControl, throttleDownHint, touchControls, xrControls } from './mode-labels';
@@ -32,6 +33,7 @@ const SITE_URL = 'https://dronesim.coworkgamestudio.com/';
 
 export type ScreenName =
   | 'main'
+  | 'levels'
   | 'settings'
   | 'controller'
   | 'rates'
@@ -48,6 +50,8 @@ export type ScreenName =
 export type UiAction =
   | { type: 'race' }
   | { type: 'freefly' }
+  /** level picker: switch to that level (if needed) and start a run */
+  | { type: 'level'; id: LevelId; mode: LevelMode }
   | { type: 'resume' }
   | { type: 'menu' }
   | { type: 'retry' }
@@ -373,6 +377,11 @@ export class Menus {
   private controlsMore = false;
   /** best lap last shown on the main menu or finish screen: the "previous best" of the next new record */
   private knownBest: number | null = null;
+  private levelCards: readonly LevelCard[] = [];
+  private currentLevel: LevelId | null = null;
+  private levelsKey = '';
+  private readonly levelsBox: HTMLElement;
+  private menuBestValue: number | null = null;
   private readonly platform: Platform;
   /** installed app (Capacitor shell or home-screen / Quest app) rather than a browser tab */
   private readonly installed: boolean;
@@ -391,6 +400,7 @@ export class Menus {
     this.installed = dev.standalone;
     this.native = dev.native !== null;
     this.screens.set('main', this.buildMain());
+    this.screens.set('levels', this.buildLevels());
     this.screens.set('settings', this.buildSettings());
     const ctl = this.buildController();
     this.screens.set('controller', ctl);
@@ -417,6 +427,7 @@ export class Menus {
     this.errorMsg = q(err, '[data-f="msg"]');
     this.altHoldNote = q(this.screens.get('rates')!, '[data-f="altHold"]');
     this.menuBest = q(this.screens.get('main')!, '[data-f="best"]');
+    this.levelsBox = q(this.screens.get('levels')!, '[data-f="levelCards"]');
     this.controlsBody = q(controls, '[data-f="body"]');
     const well = (side: 'l' | 'r') => ({
       well: q(ctl, `[data-w="${side}"]`),
@@ -515,8 +526,58 @@ export class Menus {
   setMenuBest(best: number | null): void {
     // a stored best never goes away: null only means "not known here" (e.g. the menu before any race)
     if (best !== null) this.knownBest = best;
-    const text = best === null ? '' : `Best lap ${formatTime(best)}`;
+    this.menuBestValue = best;
+    this.renderMenuBest();
+  }
+
+  /** Main-menu line under the buttons: the selected level and its best lap. */
+  private renderMenuBest(): void {
+    const name = this.levelCards.find((c) => c.id === this.currentLevel)?.name ?? '';
+    const best = this.menuBestValue === null ? '' : `Best lap ${formatTime(this.menuBestValue)}`;
+    const text = name && best ? `${name} · ${best}` : name || best;
     if (this.menuBest.textContent !== text) this.menuBest.textContent = text;
+  }
+
+  /** Level picker contents: one card per playable level; `current` is the level loaded now. */
+  setLevels(cards: readonly LevelCard[], current: LevelId): void {
+    if (current !== this.currentLevel) {
+      // the finish screen's "previous best" belongs to one level only
+      this.knownBest = null;
+      this.menuBestValue = null;
+    }
+    this.levelCards = cards;
+    this.currentLevel = current;
+    this.renderMenuBest();
+    const key = JSON.stringify([cards, current]);
+    if (key === this.levelsKey) return;
+    this.levelsKey = key;
+    const focusedAct = this.current === 'levels' ? (this.items[this.focus]?.el.dataset.act ?? null) : null;
+    this.levelsBox.innerHTML = levelCardsHtml(cards, current);
+    drawThumbs(this.levelsBox);
+    if (this.current !== 'levels') return;
+    this.refreshItems();
+    const i = focusedAct ? this.items.findIndex((it) => it.el.dataset.act === focusedAct) : -1;
+    if (i >= 0) this.setFocus(i, false);
+  }
+
+  /** Open the picker focused on the current level's Race or Free Fly button. */
+  private openLevels(mode: LevelMode): void {
+    this.show('levels');
+    const act = this.currentLevel ? levelAct(mode, this.currentLevel) : null;
+    const i = act ? this.items.findIndex((it) => it.el.dataset.act === act) : -1;
+    this.setFocus(Math.max(0, i), false);
+  }
+
+  /** Left / right on a card button: the same button on the neighbouring card. */
+  private moveCard(el: HTMLElement, dir: -1 | 1): void {
+    const parsed = parseLevelAct(el.dataset.act ?? '');
+    if (!parsed) return;
+    const ids = this.levelCards.map((c) => c.id);
+    const k = ids.indexOf(parsed.id as LevelId);
+    if (k < 0 || ids.length < 2) return;
+    const target = levelAct(parsed.mode, ids[(k + dir + ids.length) % ids.length]!);
+    const i = this.items.findIndex((it) => it.el.dataset.act === target);
+    if (i >= 0) this.setFocus(i);
   }
 
   /** Fatal start-up error: friendly, platform-specific advice; `msg` goes under "Technical details". */
@@ -614,6 +675,9 @@ export class Menus {
         break;
       case 'confirm-reset':
         this.show('settings');
+        break;
+      case 'levels':
+        this.show('main');
         break;
       case 'settings':
       case 'controls':
@@ -721,6 +785,7 @@ export class Menus {
         item.activate = screen === this.screens.get('rates') && key.startsWith('rate.') ? () => this.setFine(!this.fine) : () => this.adjust(key, 1);
       } else if (act) {
         item.activate = () => this.act(act);
+        if (parseLevelAct(act)) item.adjust = (dir) => this.moveCard(el, dir);
       } else if (el instanceof HTMLAnchorElement) {
         item.activate = () => el.click();
       }
@@ -730,7 +795,19 @@ export class Menus {
   }
 
   private act(act: string): void {
+    const lvl = parseLevelAct(act);
+    if (lvl) {
+      const card = this.levelCards.find((c) => c.id === lvl.id);
+      if (card) this.onAction({ type: 'level', id: card.id, mode: lvl.mode });
+      return;
+    }
     switch (act) {
+      case 'levels-race':
+        this.openLevels('race');
+        break;
+      case 'levels-freefly':
+        this.openLevels('freefly');
+        break;
       case 'race':
       case 'freefly':
       case 'resume':
@@ -1123,12 +1200,12 @@ export class Menus {
         <header class="ds-logo">
           <div class="ds-logo__ring" aria-hidden="true"><i></i><i></i></div>
           <h1 class="ds-logo__title" data-text="DRONE SIM">DRONE SIM</h1>
-          <p class="ds-logo__sub">FPV Racing · Night Loft</p>
+          <p class="ds-logo__sub">FPV Racing Simulator</p>
         </header>
         <nav class="ds-menu" aria-label="Main menu">
           ${this.btn('enter-vr', 'Enter VR', false, '', ' data-vr-only hidden')}
-          ${this.btn('race', 'Race', true)}
-          ${this.btn('freefly', 'Free Fly')}
+          ${this.btn('levels-race', 'Race', true)}
+          ${this.btn('levels-freefly', 'Free Fly')}
           ${this.btn('settings', 'Settings')}
           ${this.btn('controls', 'Controls')}
           ${this.btn('about', 'About')}
@@ -1140,6 +1217,21 @@ export class Menus {
           <span><kbd class="ds-kbd ds-kbd--b">B</kbd><kbd class="ds-kbd">Esc</kbd> Back</span>
           <span><kbd class="ds-kbd">D-pad</kbd><kbd class="ds-kbd">↑↓</kbd> Move</span>
         </footer>
+      </div>`,
+    );
+  }
+
+  private buildLevels(): HTMLElement {
+    return this.screen(
+      'levels',
+      `
+      <div class="ds-panel ds-glass ds-dialog ds-dialog--xwide ds-levels">
+        <h2 class="ds-dialog__title">Choose a level</h2>
+        <div class="ds-levels__grid" data-f="levelCards"></div>
+        <div class="ds-dialog__actions">
+          <p class="ds-foot ds-levels__foot" data-pad-only><span><kbd class="ds-kbd">←</kbd><kbd class="ds-kbd">→</kbd> Level</span><span><kbd class="ds-kbd">↑</kbd><kbd class="ds-kbd">↓</kbd> Race / Free Fly</span></p>
+          ${this.btn('back', 'Back', true)}
+        </div>
       </div>`,
     );
   }

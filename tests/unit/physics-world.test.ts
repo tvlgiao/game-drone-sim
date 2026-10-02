@@ -11,7 +11,7 @@ import {
   type DroneParams,
 } from '../../src/physics/drone-params';
 import { LOFT_LEVEL } from '../../src/game/level-data';
-import type { Contact, LevelDef } from '../../src/types';
+import type { Contact, RoomLevelData } from '../../src/types';
 import { EMPTY_LEVEL, energy, tiltDeg } from './physics-helpers';
 
 const DT = 0.001;
@@ -153,7 +153,7 @@ describe('rigid body truths', () => {
   });
 
   it('ground effect also applies above the top of a box below the rotor', () => {
-    const level: LevelDef = {
+    const level: RoomLevelData = {
       ...EMPTY_LEVEL,
       props: [
         {
@@ -311,14 +311,14 @@ describe('collision response', () => {
     expect(decel).toBeLessThanOrEqual(0.5 * GRAVITY * 1.01);
   });
 
-  const shapes: [string, LevelDef['props'][number]['colliders'][number]['shape'], Vector3, Vector3][] = [
+  const shapes: [string, RoomLevelData['props'][number]['colliders'][number]['shape'], Vector3, Vector3][] = [
     ['box', { kind: 'box', center: [0, 2, -2], half: [1, 1, 0.5], yaw: 0.3 }, new Vector3(0, 2, 0), new Vector3(0, 0, -4)],
     ['cylinder', { kind: 'cylinder', center: [0, 3, -2], radius: 0.25, halfHeight: 3 }, new Vector3(0, 2, 0), new Vector3(0, 0, -4)],
     ['torus', { kind: 'torus', center: [0, 2, -2], normal: [0, 0, 1], majorRadius: 0.82, tubeRadius: 0.07 }, new Vector3(0.8, 2, 0), new Vector3(0, 0, -4)],
   ];
   for (const [name, shape, start, vel] of shapes) {
     it(`fly into a ${name}: reported impact speed, no tunnelling, closing speed removed`, () => {
-      const level: LevelDef = {
+      const level: RoomLevelData = {
         ...EMPTY_LEVEL,
         props: [{ id: name, kind: 'crate', position: [0, 0, 0], size: [1, 1, 1], colliders: [{ id: name, shape }] }],
       };

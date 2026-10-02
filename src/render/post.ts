@@ -28,6 +28,8 @@ export class PostFX {
   private ca: ChromaticAberrationEffect | null = null;
   private effects: Effect[] = [];
   private caOn = false;
+  /** luminance where bloom starts: the night loft glows from 0.85, a sunlit field must not bloom its grass */
+  private bloomThreshold = 0.85;
   private readonly caOffset = new THREE.Vector2();
 
   constructor(
@@ -48,7 +50,7 @@ export class PostFX {
     if (p.bloom) {
       this.bloom = new BloomEffect({
         mipmapBlur: true,
-        luminanceThreshold: 0.85,
+        luminanceThreshold: this.bloomThreshold,
         luminanceSmoothing: 0.25,
         intensity: 1.15,
         radius: 0.72,
@@ -93,6 +95,11 @@ export class PostFX {
       this.caOn = on;
       this.applyScreenTarget();
     }
+  }
+
+  setBloomThreshold(v: number): void {
+    this.bloomThreshold = v;
+    if (this.bloom) this.bloom.luminanceMaterial.threshold = v;
   }
 
   setBloomBoost(k: number): void {

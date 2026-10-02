@@ -9,8 +9,8 @@ import { detectDevice, exitFullscreen, needsRotate, requestFullscreen, toggleFul
 import { DynamicResolution, pickTier, probeGpu, targetFps } from './core/quality';
 import { loadSettings, saveSettings, type Settings } from './core/settings';
 import { hoverThrottle } from './physics/drone-params';
-import { LOFT_LEVEL } from './game/level-data';
-import { RaceController } from './game/race';
+import { RaceController, migrateBestTimes, readBestTime } from './game/race';
+import { LEVELS, buildLevel, levelEntry, loadLastLevel, nextLevel, saveLastLevel, type LevelRuntime } from './levels/registry';
 import { InputManager } from './input/input-manager';
 import { Simulation } from './physics/simulation';
 import { GameView } from './render/game-view';
@@ -25,7 +25,7 @@ import { detectEdition, editionCaps, type EditionCaps } from './core/edition';
 import { checkThisDevice, type OwnershipResult } from './core/ownership';
 import { XR_APP_EXIT_HINT, XR_EXIT_HINT, xrHudContent } from './ui/xr-hud';
 import { TouchControls } from './ui/touch-controls';
-import type { ButtonEvents, CameraMode, ControlInput, DroneState, GameEvent, InputFrame, QualityTier } from './types';
+import type { ButtonEvents, CameraMode, ControlInput, DroneState, GameEvent, InputFrame, LevelId, QualityTier } from './types';
 
 const PHYSICS_DT = 1 / 1000;
 const CAMERA_CYCLE: CameraMode[] = ['los', 'fpv', 'chase'];
@@ -74,18 +74,20 @@ function boot(caps: EditionCaps): void {
   const gpu = probeGpu();
   const resolveTier = (s: Settings): QualityTier => (s.quality === 'auto' ? pickTier(gpu, device.form) : s.quality);
   let tier = resolveTier(settings);
+  migrateBestTimes(storage);
+  let level: LevelRuntime = buildLevel(loadLastLevel(storage));
 
   let view: GameView;
   try {
     const xrCapable = caps.vr && 'xr' in navigator;
-    view = new GameView(canvas, LOFT_LEVEL, tier, device.form, { xr: xrCapable, antialias: isQuestBrowser(navigator.userAgent) });
+    view = new GameView(canvas, level, tier, device.form, { xr: xrCapable, antialias: isQuestBrowser(navigator.userAgent) });
   } catch (err) {
     hud.setError(`WebGL2 is not available on this device/browser (${(err as Error).message}). Enable hardware acceleration or try a recent Chrome, Edge, Firefox or Safari.`);
     return;
   }
 
-  const sim = new Simulation(LOFT_LEVEL);
-  const race = new RaceController(LOFT_LEVEL, storage);
+  const sim = new Simulation(level);
+  const race = new RaceController(level, storage);
   const input = new InputManager(window, settings, device.touch);
   const audio = new GameAudio();
   const loop = new FixedLoop(PHYSICS_DT, 250);
@@ -155,7 +157,6 @@ function boot(caps: EditionCaps): void {
     if (!selftest) shell.showGate();
   }
 
-  const spawnPos = new Vector3(...LOFT_LEVEL.spawn.position);
   const prevPos = new Vector3();
   const renderState = cloneState(sim.world.state);
   const zeroThrottle: ControlInput = { throttle: 0, yaw: 0, pitch: 0, roll: 0 };
@@ -189,6 +190,7 @@ function boot(caps: EditionCaps): void {
   }
   applySettings(settings);
   hud.setSettings(settings);
+  publishLevels();
   input.onConnection = (c) => {
     toast(c.connected ? `Controller connected: ${c.name}` : `Controller disconnected: ${c.name}`);
     // the pilot just lost their sticks mid-flight; during a crash, pause once the respawn is done
@@ -215,8 +217,46 @@ function boot(caps: EditionCaps): void {
     input.latchTakeoff();
   }
 
+  function toSpawn(): void {
+    const s = level.def.spawn;
+    placeDrone(new Vector3(s.position[0], s.position[1], s.position[2]), s.yaw);
+  }
+
+  /** Level cards for the picker: name, blurb and the stored best lap of each playable level. */
+  function publishLevels(): void {
+    hud.setLevels(
+      LEVELS.map((l) => ({ id: l.id, name: l.name, blurb: l.blurb, best: readBestTime(storage, l.id) })),
+      level.def.id,
+    );
+  }
+
+  /** bumps on every switch request: a slower build that resolves after a newer request is dropped */
+  let levelSeq = 0;
+
+  /**
+   * Swap the level in view, physics, race and camera rig (the old level's GPU resources are freed),
+   * remember it, and park the drone on its spawn. Resolves false when superseded by a newer request.
+   */
+  async function startLevel(id: LevelId): Promise<boolean> {
+    const seq = ++levelSeq;
+    if (id === level.def.id) return true;
+    if (!levelEntry(id)) return false;
+    const next = buildLevel(id);
+    await next.ready;
+    if (seq !== levelSeq) return false;
+    level = next;
+    view.loadLevel(next);
+    sim.world.setLevel(next);
+    race.setLevel(next);
+    saveLastLevel(storage, id);
+    toSpawn();
+    publishLevels();
+    menuRenders = 0; // the new scenery must show behind the menu
+    return true;
+  }
+
   function newSession(kind: 'race' | 'freefly'): void {
-    placeDrone(spawnPos, LOFT_LEVEL.spawn.yaw);
+    toSpawn();
     // A fresh flight starts with the touch throttle at the bottom (or centre when it auto-centres).
     input.touch.sticks.releaseAll();
     input.touch.sticks.setThrottle(settings.touchThrottleCentre ? 0.5 : 0);
@@ -237,6 +277,13 @@ function boot(caps: EditionCaps): void {
       case 'freefly':
         newSession('freefly');
         break;
+      case 'level': {
+        const mode = a.mode;
+        void startLevel(a.id).then((ok) => {
+          if (ok) newSession(mode);
+        });
+        break;
+      }
       case 'resume':
         race.resume();
         hud.showScreen('none');
@@ -252,7 +299,7 @@ function boot(caps: EditionCaps): void {
       case 'menu':
         exited = false;
         race.toMenu();
-        placeDrone(spawnPos, LOFT_LEVEL.spawn.yaw);
+        toSpawn();
         hud.showScreen('main');
         break;
       case 'settings':
@@ -311,7 +358,7 @@ function boot(caps: EditionCaps): void {
       // The installed app only flies in VR: back on its 2D panel, offer the way straight back in.
       exited = false;
       race.toMenu();
-      placeDrone(spawnPos, LOFT_LEVEL.spawn.yaw);
+      toSpawn();
       hud.showScreen('main');
       uiRoot.querySelector<HTMLElement>('[data-act="enter-vr"]')?.focus({ preventScroll: true });
       toast('Press Enter VR to fly');
@@ -335,7 +382,7 @@ function boot(caps: EditionCaps): void {
     }
   }
 
-  /** VR menu screens on the XR card: A = primary, X = secondary, B = leave VR. */
+  /** VR menu screens on the XR card: A = primary, X = secondary, B = leave VR; Y on the main card = next level. */
   function handleXrMenu(status: string, b: NonNullable<InputFrame['xr']>): void {
     if (b.b) {
       // a second B before 'sessionend' finds the session already ending: InvalidStateError
@@ -345,6 +392,7 @@ function boot(caps: EditionCaps): void {
     if (status === 'menu') {
       if (b.a) onAction({ type: 'race' });
       else if (b.x) onAction({ type: 'freefly' });
+      else if (b.y) void startLevel(nextLevel(level.def.id));
     } else if (status === 'paused') {
       if (b.a || b.y) onAction({ type: 'resume' });
       else if (b.x) onAction({ type: 'menu' });
@@ -376,6 +424,15 @@ function boot(caps: EditionCaps): void {
       case 'race-finish':
         sim.setArmed(false, zeroThrottle);
         hud.showScreen('finish', { time: e.time, best: race.snapshot().bestTime, newBest: e.best });
+        if (e.best) publishLevels();
+        break;
+      // the DOM HUD shows its own centre warning; the VR card has no centre title, so it gets the toast line
+      case 'out-of-bounds':
+        xrToast = `Out of bounds · respawn in ${e.seconds} s`;
+        xrToastUntil = performance.now() + 1200;
+        break;
+      case 'in-bounds':
+        xrToast = '';
         break;
       default:
         break;
@@ -429,7 +486,7 @@ function boot(caps: EditionCaps): void {
   function exitGame(): void {
     exited = true;
     race.toMenu();
-    placeDrone(spawnPos, LOFT_LEVEL.spawn.yaw);
+    toSpawn();
     void audio.suspend();
     if (device.native === 'android') {
       // if the shell cannot close, fall back to the "closed" screen like the web build
@@ -470,7 +527,7 @@ function boot(caps: EditionCaps): void {
   checkOrientation();
 
   hud.showScreen('main');
-  placeDrone(spawnPos, LOFT_LEVEL.spawn.yaw);
+  toSpawn();
 
   let last = performance.now();
   let time = 0;
@@ -555,6 +612,9 @@ function boot(caps: EditionCaps): void {
       overlayTime = time;
     }
     wasOverlay = overlay;
+    // A frozen view's frame time says nothing about the GPU, so dynamic resolution only adapts while rendering.
+    // Resize before drawing: resizing the canvas clears it, and after the draw the cleared buffer would be shown.
+    if (settings.quality === 'auto' && !inVr && !overlay) view.setRenderScale(dynRes.update(fpsMeter.frameMs));
     const renderNow = !overlay || menuRenders < MENU_SETTLE_FRAMES;
     if (renderNow) {
       if (overlay) menuRenders++;
@@ -576,8 +636,6 @@ function boot(caps: EditionCaps): void {
       if (view.frames === 1) document.body.classList.add('is-ready');
     }
 
-    // a frozen view's frame time says nothing about the GPU, so dynamic resolution only adapts while rendering
-    if (settings.quality === 'auto' && !inVr && !overlay) view.setRenderScale(dynRes.update(fpsMeter.frameMs));
     if (inVr) {
       // the take-off prompt is stale as soon as the throttle leaves the latch
       if (xrToast && (performance.now() > xrToastUntil || (xrToast.startsWith('Armed') && !input.takeoffLatched))) xrToast = '';
@@ -595,6 +653,7 @@ function boot(caps: EditionCaps): void {
             speed,
             toast: xrToast,
             exitHint: questApp ? XR_APP_EXIT_HINT : XR_EXIT_HINT,
+            level: levelEntry(level.def.id)?.name,
           }),
         );
       }
@@ -669,6 +728,12 @@ function boot(caps: EditionCaps): void {
       };
     },
     stats: () => view.stats(),
+    /** loaded level id */
+    get level() {
+      return level.def.id;
+    },
+    /** switch level without starting a run (resolves false when superseded) */
+    startLevel: (id: LevelId) => startLevel(id),
     /** camera the view is rendering (menus show LOS; pause keeps the flight camera) */
     get renderedCamera() {
       return view.renderedCamera;

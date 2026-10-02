@@ -1,7 +1,8 @@
 /** Race state machine: countdown, ordered ring passes, crash/respawn, timing and best-time persistence. DOM-free. */
 import { Vector3 } from 'three';
-import type { Contact, DroneState, GameEvent, LevelDef, RaceSnapshot, RaceStatus } from '../types';
-import { buildSurfaces, surfaceBelow, type TopSurface } from './surfaces';
+import type { Contact, DroneState, GameEvent, RaceSnapshot, RaceStatus, RingDef, RoomLevelData, WorldBounds } from '../types';
+import { isRuntime, type LevelRuntime } from '../levels/runtime';
+import { createSurfaces, type SurfaceProvider } from './surfaces';
 
 export const COUNTDOWN_SECONDS = 3;
 export const CRASH_SPEED = 5;
@@ -12,11 +13,80 @@ export const UPSIDE_DOWN_DOT = -0.5;
 export const UPSIDE_DOWN_HEIGHT = 0.3;
 export const UPSIDE_DOWN_TIME = 1;
 export const RESPAWN_OFFSET = 1.2;
+/** Seconds outside the level bounds (or above its ceiling) before the drone is respawned. */
+export const OUT_OF_BOUNDS_RESPAWN = 5;
 /** A step moving further than this is a teleport (respawn), never a ring pass. */
 const MAX_STEP_TRAVEL = 1;
 
-export const bestTimeKey = (levelName: string): string => `drone-sim.best.${levelName}`;
-export const bestSplitsKey = (levelName: string): string => `drone-sim.splits.${levelName}`;
+/** Storage keys of a level's best lap / splits: its LevelId (raw room data: its name). */
+export const bestTimeKey = (levelKey: string): string => `drone-sim.best.${levelKey}`;
+export const bestSplitsKey = (levelKey: string): string => `drone-sim.splits.${levelKey}`;
+/** Builds before the level registry keyed the loft by its display name. */
+const LEGACY_KEYS: readonly (readonly [string, string])[] = [['Night Loft', 'night-loft']];
+
+/** A level as the race sees it: a LevelRuntime, or raw room data (tests, previews). */
+export type RaceLevel = LevelRuntime | RoomLevelData;
+
+/**
+ * One-time move of best laps stored under a display name to the LevelId key. An existing id key wins
+ * (it can only have been written later); the old keys are removed either way so the move never repeats.
+ */
+export function migrateBestTimes(storage: Storage | null): void {
+  if (!storage) return;
+  try {
+    for (const [from, to] of LEGACY_KEYS) {
+      for (const key of [bestTimeKey, bestSplitsKey]) {
+        const old = storage.getItem(key(from));
+        if (old === null) continue;
+        if (storage.getItem(key(to)) === null) storage.setItem(key(to), old);
+        storage.removeItem(key(from));
+      }
+    }
+  } catch {
+    /* quota / privacy mode: the old keys stay and the next boot retries */
+  }
+}
+
+/** Stored best lap of a level (seconds); null when there is none or it is unreadable. */
+export function readBestTime(storage: Storage | null, levelKey: string): number | null {
+  let v: string | null = null;
+  try {
+    v = storage?.getItem(bestTimeKey(levelKey)) ?? null;
+  } catch {
+    return null;
+  }
+  const n = v === null ? NaN : Number(v);
+  return Number.isFinite(n) && n > 0 ? n : null;
+}
+
+/** Outside the bounds' footprint or above its ceiling; `ground` = ground height under the drone. */
+export function outOfBounds(b: WorldBounds, x: number, y: number, z: number, ground = 0): boolean {
+  if (b.kind === 'room') return false;
+  if (y - ground > b.maxAgl) return true;
+  if (b.kind !== 'rect' || !b.min || !b.max) return false;
+  return x < b.min[0] || x > b.max[0] || z < b.min[1] || z > b.max[1];
+}
+
+interface RaceCourse {
+  rings: readonly RingDef[];
+  spawn: RoomLevelData['spawn'];
+  /** persistence key */
+  key: string;
+  bounds: WorldBounds;
+  surfaces: SurfaceProvider;
+  ground: (x: number, z: number) => number;
+}
+
+const FLAT = (): number => 0;
+
+function courseOf(level: RaceLevel): RaceCourse {
+  if (!isRuntime(level)) {
+    return { rings: level.rings, spawn: level.spawn, key: level.name, bounds: { kind: 'room', maxAgl: level.room.size[1] }, surfaces: createSurfaces(level.props), ground: FLAT };
+  }
+  const d = level.def;
+  const t = level.terrain;
+  return { rings: d.rings, spawn: d.spawn, key: d.id, bounds: d.bounds, surfaces: level.surfaces, ground: t ? (x, z) => t.heightAt(x, z) : FLAT };
+}
 
 type Mode = 'race' | 'freefly' | null;
 
@@ -82,18 +152,25 @@ export class RaceController {
   private skipRingCheck = false;
   private readonly pending: GameEvent[] = [];
   private readonly events: GameEvent[] = [];
+  private outTimer = 0;
+  private outShown = 0;
   private readonly hit = new Vector3();
   private readonly storage: Storage | null;
-  private readonly surfaces: TopSurface[];
+  private level: RaceCourse;
 
-  constructor(
-    private readonly level: LevelDef,
-    storage: Storage | null = defaultStorage(),
-  ) {
+  constructor(level: RaceLevel, storage: Storage | null = defaultStorage()) {
     this.storage = storage;
-    this.surfaces = buildSurfaces(level);
+    this.level = courseOf(level);
     this.bestTime = this.readBest();
     this.bestSplits = this.readSplits();
+  }
+
+  /** Switches course: back to the menu state, with that level's best lap. */
+  setLevel(level: RaceLevel): void {
+    this.level = courseOf(level);
+    this.bestTime = this.readBest();
+    this.bestSplits = this.readSplits();
+    this.toMenu();
   }
 
   snapshot(): RaceSnapshot {
@@ -169,6 +246,7 @@ export class RaceController {
         }
         this.checkRings(prevPos, state.position);
         if (this.status === 'racing' || this.status === 'freefly') this.checkCrash(dt, state, contacts);
+        if (this.status === 'racing' || this.status === 'freefly') this.checkBounds(dt, state);
         break;
       case 'crashed':
         if (this.mode === 'race' && this.clockStarted) this.time += dt;
@@ -199,7 +277,7 @@ export class RaceController {
     const x = r.position[0] + r.direction[0] * RESPAWN_OFFSET;
     const z = r.position[2] + r.direction[2] * RESPAWN_OFFSET;
     const air = r.position[1] + r.direction[1] * RESPAWN_OFFSET;
-    const pos = new Vector3(x, surfaceBelow(this.surfaces, x, air, z) + this.level.spawn.position[1], z);
+    const pos = new Vector3(x, this.level.surfaces.topBelow(x, air, z) + this.level.spawn.position[1], z);
     const next = rings[this.lastPassed + 1];
     let yaw: number;
     if (next) {
@@ -228,6 +306,8 @@ export class RaceController {
     this.upsideTimer = 0;
     this.collisionCooldown = 0;
     this.skipRingCheck = true;
+    this.outTimer = 0;
+    this.outShown = 0;
     this.pending.length = 0;
   }
 
@@ -281,8 +361,8 @@ export class RaceController {
     if (newBest) {
       this.bestTime = this.time;
       this.bestSplits = this.splits.slice();
-      this.write(bestTimeKey(this.level.name), String(this.time));
-      this.write(bestSplitsKey(this.level.name), JSON.stringify(this.bestSplits));
+      this.write(bestTimeKey(this.level.key), String(this.time));
+      this.write(bestSplitsKey(this.level.key), JSON.stringify(this.bestSplits));
     }
     this.events.push({ type: 'race-finish', time: this.time, best: newBest });
   }
@@ -298,11 +378,33 @@ export class RaceController {
       this.collisionCooldown = COLLISION_COOLDOWN;
       this.events.push({ type: 'collision', contact: worst });
     }
-    if (bodyUpDot(state.orientation) < UPSIDE_DOWN_DOT && state.position.y < UPSIDE_DOWN_HEIGHT) {
+    const agl = state.position.y - this.level.ground(state.position.x, state.position.z);
+    if (bodyUpDot(state.orientation) < UPSIDE_DOWN_DOT && agl < UPSIDE_DOWN_HEIGHT) {
       this.upsideTimer += dt;
       if (this.upsideTimer > UPSIDE_DOWN_TIME) this.crash(state, 0);
     } else {
       this.upsideTimer = 0;
+    }
+  }
+
+  /** Soft bounds: a countdown while outside, then a respawn; flying back in cancels it. */
+  private checkBounds(dt: number, state: DroneState): void {
+    const p = state.position;
+    if (!outOfBounds(this.level.bounds, p.x, p.y, p.z, this.level.ground(p.x, p.z))) {
+      if (this.outTimer > 0) this.events.push({ type: 'in-bounds' });
+      this.outTimer = 0;
+      this.outShown = 0;
+      return;
+    }
+    this.outTimer += dt;
+    if (this.outTimer >= OUT_OF_BOUNDS_RESPAWN) {
+      this.respawn();
+      return;
+    }
+    const left = Math.ceil(OUT_OF_BOUNDS_RESPAWN - this.outTimer);
+    if (left !== this.outShown) {
+      this.outShown = left;
+      this.events.push({ type: 'out-of-bounds', seconds: left });
     }
   }
 
@@ -317,18 +419,18 @@ export class RaceController {
     this.status = this.mode === 'race' ? (this.status === 'countdown' ? 'countdown' : 'racing') : 'freefly';
     this.crashTimer = 0;
     this.upsideTimer = 0;
+    this.outTimer = 0;
+    this.outShown = 0;
     this.skipRingCheck = true;
     this.pending.push({ type: 'respawn' });
   }
 
   private readBest(): number | null {
-    const v = this.read(bestTimeKey(this.level.name));
-    const n = v === null ? NaN : Number(v);
-    return Number.isFinite(n) && n > 0 ? n : null;
+    return readBestTime(this.storage, this.level.key);
   }
 
   private readSplits(): number[] | null {
-    const v = this.read(bestSplitsKey(this.level.name));
+    const v = this.read(bestSplitsKey(this.level.key));
     if (!v) return null;
     try {
       const a: unknown = JSON.parse(v);
