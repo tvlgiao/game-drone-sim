@@ -1,3 +1,4 @@
+import * as THREE from 'three';
 import { describe, expect, it } from 'vitest';
 import {
   HINT_AFTER,
@@ -98,6 +99,16 @@ describe('tutorial helpers', () => {
     expect(headingOf(yawQuat(90))).toBeCloseTo(Math.PI / 2, 9);
     expect(headingOf(yawQuat(-45))).toBeCloseTo(-Math.PI / 4, 9);
     expect(Math.abs(headingOf(yawQuat(180))!)).toBeCloseTo(Math.PI, 9);
+  });
+
+  it('headingOf: + is a right turn in three.js terms (nose swings toward +X, the camera-right side)', () => {
+    // a right turn seen from above is a negative rotation about +Y; the nose (−Z) then points toward +X
+    const q = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), -Math.PI / 2);
+    const nose = new THREE.Vector3(0, 0, -1).applyQuaternion(q);
+    expect(nose.x).toBeCloseTo(1, 9);
+    expect(headingOf({ x: q.x, y: q.y, z: q.z, w: q.w })).toBeCloseTo(Math.PI / 2, 9);
+    const left = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), Math.PI / 4);
+    expect(headingOf({ x: left.x, y: left.y, z: left.z, w: left.w })).toBeCloseTo(-Math.PI / 4, 9);
   });
 
   it('headingOf ignores pitch (nose 30° down still reads the yaw) and is null for a vertical nose', () => {
