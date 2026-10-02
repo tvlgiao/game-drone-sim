@@ -3,6 +3,9 @@ import * as THREE from 'three';
 import type { CameraMode, DroneState } from '../types';
 import { CAMERA_PIVOT, LENS_OFFSET } from './drone-model';
 
+/** Vertical FPV FOV clamp (deg): the horizontal FOV setting is converted per aspect, then held in this range. */
+export const FPV_FOV_V_RANGE = { min: 35, max: 110 } as const;
+
 const CHASE_BACK = 1.0;
 const CHASE_UP = 0.35;
 const CHASE_OMEGA = 9;
@@ -190,7 +193,7 @@ export class CameraRig {
       outQuat.copy(f.drone.orientation).multiply(_qt.setFromAxisAngle(_x, tilt));
       // settings FOV is horizontal-ish (like a real FPV camera); convert to vertical for three.
       const h = THREE.MathUtils.degToRad(THREE.MathUtils.clamp(f.fovDeg, 60, 150));
-      this.fovV = THREE.MathUtils.clamp(THREE.MathUtils.radToDeg(2 * Math.atan(Math.tan(h / 2) / aspect)), 35, 110);
+      this.fovV = THREE.MathUtils.clamp(THREE.MathUtils.radToDeg(2 * Math.atan(Math.tan(h / 2) / aspect)), FPV_FOV_V_RANGE.min, FPV_FOV_V_RANGE.max);
     } else if (mode === 'chase') {
       outPos.copy(this.chasePos);
       lookQuat(outPos, this.chaseLook, outQuat);

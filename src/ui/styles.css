@@ -844,6 +844,7 @@
   grid-template-columns: 1fr 1fr;
 }
 
+a.ds-btn { text-decoration: none; }
 .ds-btn {
   position: relative;
   display: flex;
