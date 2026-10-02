@@ -207,7 +207,7 @@
 }
 
 .ds-tbtn small {
-  font-size: 9px;
+  font-size: 10px;
   font-weight: 700;
   letter-spacing: 0.16em;
   color: var(--ds-muted);
@@ -257,6 +257,13 @@
   border-color: rgba(255, 90, 120, 0.8);
   background: radial-gradient(circle at 50% 35%, rgba(90, 14, 30, 0.7), rgba(26, 4, 10, 0.78));
   box-shadow: 0 0 22px rgba(255, 70, 97, 0.25), 0 4px 14px rgba(0, 0, 0, 0.4);
+}
+
+/* Bye / fatal error end the session: no sticks or ARM over them, even if the frame loop has stopped. */
+.ds-ui.ds-fatal .ds-touch,
+.ds-ui:has(.ds-screen--bye.is-open) .ds-touch,
+.ds-ui:has(.ds-screen--error.is-open) .ds-touch {
+  display: none;
 }
 
 /* ---------- HUD in the touch layout (flight, and dimmed behind pause / finish menus) ---------- */
@@ -325,17 +332,26 @@
   text-wrap: balance;
 }
 
-/* Between the top-left and top-right button groups, below the top row. */
+/*
+ * Centred under the RESET / MODE / ARM group, as wide as the gap between the PAUSE · CAM zones
+ * on either side allows: the right group sits lower than the left one, so the row beside it is off-centre.
+ */
 .ds-ui.ds-touch-on .ds-toasts {
-  top: calc(var(--ds-safe-t) + var(--ds-tchip) + 8px + var(--ds-tarm) + var(--ds-tgap));
-  left: var(--ds-tzone-l);
-  right: var(--ds-tzone-r);
-  width: auto;
-  transform: none;
+  top: calc(var(--ds-safe-t) + var(--ds-tchip) + 8px + var(--ds-tarm) + 12px);
+  left: 50%;
+  right: auto;
+  width: min(440px, calc(100% - 2 * var(--ds-tzone-l)));
+  transform: translateX(-50%);
 }
 
 .ds-ui.ds-touch-on .ds-toast {
   max-width: 100%;
+}
+
+/* HUD micro labels (ALT, BAT, km/h, gate count) never shrink below legible size. */
+.ds-ui.ds-touch-on .ds-hud .ds-label,
+.ds-ui.ds-touch-on .ds-hud .ds-unit {
+  font-size: max(9.5px, 0.72em);
 }
 
 /* Countdown digits and GO: big, white and outlined so they read over any part of the scene. */
@@ -383,9 +399,15 @@
   .ds-ui.ds-touch-on .ds-gates .ds-label { display: none; }
   .ds-ui.ds-touch-on .ds-gates__num { font-size: 18px; }
 
-  /* Toasts take the row under PAUSE · CAM, left of RESET / MODE / ARM. */
-  .ds-ui.ds-touch-on .ds-toasts { top: calc(var(--ds-safe-t) + var(--ds-tbtn) + var(--ds-tgap)); }
   .ds-ui.ds-touch-on .ds-toast { padding: 7px 12px; font-size: 12px; }
+
+  /* CRASHED is wider than the gap between the button groups: start it below the RESET / MODE row. */
+  .ds-ui.ds-touch-on .ds-center.is-crash {
+    top: calc(var(--ds-safe-t) + var(--ds-tchip) + 8px + var(--ds-tbtn) + 14px);
+    transform: none;
+  }
+  /* compact title stack: the toast lane under it must still clear the telemetry panel */
+  .ds-ui.ds-touch-on .ds-center__sub { margin-top: 6px; padding-block: 4px; }
 
   .ds-ui.ds-touch-on .ds-center__big.is-ok,
   .ds-ui.ds-touch-on .ds-center__big.is-dim { font-size: 22px; }
@@ -407,6 +429,24 @@
 
 .ds-ui.is-touch .ds-row__ctl {
   grid-template-columns: 44px minmax(0, 1fr) 44px;
+}
+
+/* Hints have room to wrap on tablets; one clipped line hid most of the Touch throttle explanation. */
+@media (min-width: 641px) and (min-height: 641px) {
+  .ds-ui.is-touch .ds-row__hint {
+    display: -webkit-box;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 2;
+    line-clamp: 2;
+    white-space: normal;
+  }
+}
+
+/* One footer row (Full screen · Rates · Controller · Back) on touch tablets: the desktop tracking is too wide. */
+.ds-ui.is-touch .ds-dialog__actions .ds-btn:not(.ds-btn--sm) {
+  min-width: 0;
+  padding: 0 calc(16 * var(--ds-u));
+  letter-spacing: 0.12em;
 }
 
 /* Wide enough screens: fixed value column so the arrows line up row to row. */
@@ -460,7 +500,8 @@
   .ds-ui.is-touch .ds-screen--pause,
   .ds-ui.is-touch .ds-screen--confirm-quit,
   .ds-ui.is-touch .ds-screen--finish,
-  .ds-ui.is-touch .ds-screen--bye { place-items: center; }
+  .ds-ui.is-touch .ds-screen--bye,
+  .ds-ui.is-touch .ds-screen--error { place-items: center; }
   .ds-ui.is-touch .ds-screen--pause .ds-menu {
     display: grid;
     grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -690,8 +731,14 @@
 }
 
 /* ---------- rates table on touch: 44 px steppers that fit their cell ---------- */
+/* The stepper table needs ≈ 500 px; below that per column the charts move under it instead of being overlapped. */
+.ds-ui.is-touch .ds-rates .ds-ctl__grid {
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 504px), 1fr));
+}
+
 .ds-ui.is-touch .ds-cell {
-  grid-template-columns: 44px minmax(3.2em, 1fr) 44px;
+  grid-template-columns: 44px minmax(3.2em, 8em) 44px;
+  justify-content: center;
   column-gap: 4px;
 }
 
