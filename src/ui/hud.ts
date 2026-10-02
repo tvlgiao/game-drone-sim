@@ -135,6 +135,7 @@ export class Hud {
   private throttle = 9;
   private lastUpdate = -Infinity;
   private goTimer: ReturnType<typeof setTimeout> | null = null;
+  private free: boolean | null = null;
 
   constructor(root: HTMLElement, onAction: (a: UiAction) => void) {
     this.root = root;
@@ -177,11 +178,16 @@ export class Hud {
     if (race.status === 'menu') this.menus.setMenuBest(race.bestTime);
     this.updateRings(race, now);
     this.updateCountdown(race);
+    const free = race.nextRing < 0;
+    if (free !== this.free) {
+      this.free = free;
+      r.gates.hidden = free;
+      r.bestRow.hidden = free;
+    }
 
     const textDue = now - this.lastText >= TEXT_INTERVAL;
     if (textDue) {
       this.lastText = now;
-      const free = race.status === 'freefly' || (race.status === 'paused' && race.nextRing < 0);
       this.text(r.timeLabel, free ? 'Free fly' : 'Time');
       this.text(r.time, free ? '∞' : formatTime(race.time));
       this.text(r.best, formatTime(race.bestTime));
@@ -209,6 +215,7 @@ export class Hud {
 
   showScreen(s: 'main' | 'pause' | 'finish' | 'none' | 'settings' | 'controls' | 'controller' | 'rates' | 'confirm-quit' | 'bye', data?: FinishData & { best?: number | null }): void {
     if (s === 'main' && data && 'best' in data) this.menus.setMenuBest(data.best ?? null);
+    if (s === 'bye') this.clearToasts();
     this.menus.show(s as ScreenName, data);
   }
 
@@ -252,6 +259,8 @@ export class Hud {
         this.flash('is-crash');
         break;
       case 'armed':
+        // The armed chip already shows it; a centre pulse would replace the countdown digit or CRASHED.
+        if (this.status !== 'racing' && this.status !== 'freefly') break;
         this.centerPulse(e.armed ? 'ARMED' : 'DISARMED', e.armed ? 'is-ok' : 'is-dim', 700);
         break;
       default:
@@ -273,25 +282,28 @@ export class Hud {
   }
 
   setError(msg: string): void {
+    this.clearToasts();
     this.root.classList.add('ds-fatal');
     this.menus.setError(msg);
+  }
+
+  private clearToasts(): void {
+    this.refs.toasts.textContent = '';
   }
 
   private setStatus(s: RaceStatus): void {
     const prev = this.status;
     this.status = s;
     this.root.dataset.status = s;
-    const r = this.refs;
     if (s === 'crashed') {
       this.setCenter('CRASHED', 'is-crash', 'Respawning…');
+      this.popIn();
     } else if (s === 'racing' && prev === 'countdown') {
       this.centerPulse('GO!', 'is-go', 900);
     } else if (s !== 'countdown' && s !== 'paused') {
       this.setCenter('', '', '');
     }
     if (s === 'menu') this.countdown = -1;
-    r.gates.hidden = s === 'freefly';
-    r.bestRow.hidden = s === 'freefly';
   }
 
   private updateRings(race: RaceSnapshot, now: number): void {
@@ -338,7 +350,10 @@ export class Hud {
     if (race.status !== 'countdown') return;
     if (race.countdown === this.countdown) return;
     this.countdown = race.countdown;
-    if (race.countdown > 0) this.centerPulse(String(race.countdown), 'is-count', 950);
+    if (race.countdown > 0) {
+      this.setCenter(String(race.countdown), 'is-count', '');
+      this.popIn();
+    }
   }
 
   private updateHint(f: HudFrame): void {
@@ -421,11 +436,26 @@ export class Hud {
       this.goTimer = null;
     }
     const r = this.refs;
+    // A finished pulse is held by fill:'forwards' at opacity 0; it would hide whatever is shown next.
+    r.center.getAnimations?.().forEach((a) => a.cancel());
     this.text(r.center, big);
     r.center.className = `ds-center__big ${kind}`;
+    r.center.parentElement!.className = `ds-center ${kind}`;
     this.text(r.centerSub, sub);
   }
 
+  /** Entrance only: the text stays fully visible until the next setCenter (countdown digit, CRASHED). */
+  private popIn(): void {
+    this.refs.center.animate?.(
+      [
+        { opacity: 0, transform: 'scale(1.5)', filter: 'blur(6px)' },
+        { opacity: 1, transform: 'scale(1)', filter: 'blur(0)' },
+      ],
+      { duration: 220, easing: 'cubic-bezier(.2,.8,.2,1)' },
+    );
+  }
+
+  /** Transient message (GO!, ARMED) that fades out and clears itself. */
   private centerPulse(big: string, kind: string, ms: number): void {
     this.setCenter(big, kind, '');
     this.refs.center.animate?.(

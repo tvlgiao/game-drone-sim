@@ -30,6 +30,68 @@
       #app { position: fixed; inset: 0; overflow: hidden; }
       #game { display: block; width: 100%; height: 100%; outline: none; touch-action: none; }
       #ui { position: absolute; inset: 0; pointer-events: none; }
+      /* Boot splash: painted with the first HTML byte, faded once the first 3D frame is up (see script below). */
+      #splash {
+        position: fixed;
+        inset: 0;
+        z-index: 100;
+        display: grid;
+        place-content: center;
+        justify-items: center;
+        gap: clamp(14px, 2.4vh, 30px);
+        background:
+          radial-gradient(ellipse at 20% 10%, rgba(255, 61, 232, 0.14), transparent 50%),
+          radial-gradient(ellipse at 85% 90%, rgba(40, 231, 255, 0.14), transparent 55%),
+          #05070d;
+        color: #f4fbff;
+        font-family: 'SF Pro Display', 'Segoe UI Variable Display', 'Segoe UI', system-ui, -apple-system, 'Helvetica Neue', Arial, sans-serif;
+        transition: opacity 0.45s ease, visibility 0s linear 0.45s;
+      }
+      #splash .sp-title {
+        margin: 0;
+        font-size: clamp(36px, min(7vw, 9vh), 120px);
+        font-weight: 900;
+        font-style: italic;
+        letter-spacing: 0.06em;
+        line-height: 1;
+        white-space: nowrap;
+        text-shadow: 0 0 10px rgba(40, 231, 255, 0.9), 0 0 40px rgba(40, 231, 255, 0.5), 0 0 90px rgba(255, 61, 232, 0.3);
+      }
+      #splash .sp-sub {
+        margin: 0;
+        padding-left: 0.5em;
+        font-size: clamp(11px, min(1vw, 1.6vh), 18px);
+        font-weight: 700;
+        letter-spacing: 0.5em;
+        text-transform: uppercase;
+        color: rgba(200, 225, 245, 0.62);
+      }
+      #splash .sp-bar {
+        position: relative;
+        width: clamp(140px, 16vw, 280px);
+        height: 3px;
+        border-radius: 3px;
+        overflow: hidden;
+        background: rgba(255, 255, 255, 0.1);
+      }
+      #splash .sp-bar::after {
+        content: '';
+        position: absolute;
+        inset: 0;
+        width: 40%;
+        border-radius: inherit;
+        background: linear-gradient(90deg, transparent, #28e7ff, #ff3de8, transparent);
+        animation: sp-slide 1.3s ease-in-out infinite;
+      }
+      @keyframes sp-slide {
+        from { transform: translateX(-100%); }
+        to { transform: translateX(250%); }
+      }
+      @media (prefers-reduced-motion: reduce) {
+        #splash .sp-bar::after { animation: none; width: 100%; opacity: 0.6; }
+      }
+      body.is-ready #splash { opacity: 0; visibility: hidden; pointer-events: none; }
+      .sp-sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
     </style>
   </head>
   <body>
@@ -37,6 +99,33 @@
       <canvas id="game" tabindex="0" aria-label="Drone simulator 3D view"></canvas>
       <div id="ui"></div>
     </div>
+    <div id="splash" role="status" aria-live="polite">
+      <p class="sp-title" aria-hidden="true">DRONE SIM</p>
+      <p class="sp-sub" aria-hidden="true">FPV Racing · Night Loft</p>
+      <div class="sp-bar" aria-hidden="true"></div>
+      <span class="sp-sr">Loading Drone Sim…</span>
+    </div>
+    <script>
+      // Fades the splash after the first rendered frame: main.ts may add body.is-ready itself; otherwise
+      // window.__drone (set right after the render loop starts) plus two frames, or a fatal-error screen.
+      (function () {
+        var b = document.body;
+        var t0 = Date.now();
+        function done() {
+          b.classList.add('is-ready');
+          setTimeout(function () {
+            var el = document.getElementById('splash');
+            if (el) el.remove();
+          }, 600);
+        }
+        (function poll() {
+          if (b.classList.contains('is-ready')) return done();
+          if (document.querySelector('#ui.ds-fatal') || Date.now() - t0 > 20000) return done();
+          if (window.__drone) return requestAnimationFrame(function () { requestAnimationFrame(done); });
+          setTimeout(poll, 50);
+        })();
+      })();
+    </script>
     <script type="module" src="/src/main.ts"></script>
   </body>
 </html>
