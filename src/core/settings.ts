@@ -35,6 +35,8 @@ export interface Settings {
   ratePreset: RatePreset;
   /** per-axis Betaflight Actual rates (source of truth; presets just fill these) */
   rates: AxisRates;
+  /** the pilot's own rates, restored when cycling back to 'custom' (null = never edited) */
+  customRates: AxisRates | null;
   /** editing roll also sets pitch (UI convenience, persisted) */
   linkRollPitch: boolean;
   /** throttle stick centre → motor command; null = auto (hover throttle) */
@@ -71,6 +73,7 @@ export const DEFAULT_SETTINGS: Readonly<Settings> = Object.freeze({
   flightMode: 'angle',
   ratePreset: 'freestyle',
   rates: Object.freeze(axisRatesFrom(RATE_PRESETS.freestyle)) as AxisRates,
+  customRates: null,
   linkRollPitch: true,
   throttleMid: null,
   throttleExpo: 0.3,
@@ -151,25 +154,30 @@ export function clampRate(raw: unknown, fallback: Readonly<RateProfile>): RatePr
   return { center, max: Math.max(max, center), expo: num(r.expo, rateRange('expo'), fallback.expo) };
 }
 
+const copyRates = (r: Readonly<AxisRates>): AxisRates => ({ roll: { ...r.roll }, pitch: { ...r.pitch }, yaw: { ...r.yaw } });
+
 /** Deep copy (nested objects are never shared between Settings values). */
 export function cloneSettings(s: Readonly<Settings>): Settings {
   return {
     ...s,
     invert: { ...s.invert },
     axisMap: { ...s.axisMap },
-    rates: { roll: { ...s.rates.roll }, pitch: { ...s.rates.pitch }, yaw: { ...s.rates.yaw } },
+    rates: copyRates(s.rates),
+    customRates: s.customRates ? copyRates(s.customRates) : null,
   };
 }
 
-/** Selects a rate preset: a named preset copies its values into all three axes; 'custom' keeps them. */
+/** Selects a rate preset: a named preset copies its values into all three axes; 'custom' restores the pilot's own rates. */
 export function applyRatePreset(s: Settings, preset: RatePreset): void {
+  if (s.ratePreset === 'custom') s.customRates = copyRates(s.rates);
   s.ratePreset = preset;
   if (preset !== 'custom') s.rates = axisRatesFrom(RATE_PRESETS[preset]);
+  else if (s.customRates) s.rates = copyRates(s.customRates);
 }
 
 /**
  * Edits one rate value (clamped). Center above max pushes max up; max below center is held at center.
- * With `linkRollPitch`, roll and pitch edits mirror each other. Any edit switches the preset to 'custom'.
+ * With `linkRollPitch`, roll and pitch edits mirror each other. Any edit switches the preset to 'custom' and is kept as `customRates`.
  */
 export function setRateValue(s: Settings, axis: RateAxis, field: RateField, value: number): void {
   const range = rateRange(field);
@@ -188,6 +196,7 @@ export function setRateValue(s: Settings, axis: RateAxis, field: RateField, valu
     s.rates = { ...s.rates, [a]: r };
   }
   s.ratePreset = 'custom';
+  s.customRates = copyRates(s.rates);
 }
 
 /** Coerces arbitrary data into valid Settings: unknown enum values fall back, numbers clamp, old values migrate. */
@@ -203,6 +212,8 @@ export function validateSettings(raw: unknown): Settings {
   // Old saves have only a preset name: its values become the per-axis rates.
   const base = axisRatesFrom(RATE_PRESETS[preset === 'custom' ? 'freestyle' : preset]);
   const rr = obj(r.rates);
+  const rates: AxisRates = { roll: clampRate(rr.roll, base.roll), pitch: clampRate(rr.pitch, base.pitch), yaw: clampRate(rr.yaw, base.yaw) };
+  const cr = r.customRates !== null && typeof r.customRates === 'object' && !Array.isArray(r.customRates) ? obj(r.customRates) : null;
   return {
     stickMode: mode === 1 || mode === 2 || mode === 3 || mode === 4 ? mode : d.stickMode,
     throttleSource: pick(ts, o.throttleSource, d.throttleSource),
@@ -221,11 +232,13 @@ export function validateSettings(raw: unknown): Settings {
     },
     flightMode: pick(r.flightMode, o.flightMode, d.flightMode),
     ratePreset: preset,
-    rates: {
-      roll: clampRate(rr.roll, base.roll),
-      pitch: clampRate(rr.pitch, base.pitch),
-      yaw: clampRate(rr.yaw, base.yaw),
-    },
+    rates,
+    // Saves from before customRates: a custom preset's values are the pilot's own.
+    customRates: cr
+      ? { roll: clampRate(cr.roll, rates.roll), pitch: clampRate(cr.pitch, rates.pitch), yaw: clampRate(cr.yaw, rates.yaw) }
+      : preset === 'custom'
+        ? copyRates(rates)
+        : null,
     linkRollPitch: bool(r.linkRollPitch, d.linkRollPitch),
     throttleMid: typeof r.throttleMid === 'number' && Number.isFinite(r.throttleMid) ? num(r.throttleMid, o.throttleMid, 0.5) : null,
     throttleExpo: num(r.throttleExpo, o.throttleExpo, d.throttleExpo),
