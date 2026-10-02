@@ -266,11 +266,26 @@ function boot(caps: EditionCaps): void {
     const seq = ++levelSeq;
     if (id === level.def.id) return true;
     if (!levelEntry(id)) return false;
-    const next = buildLevel(id);
-    await next.ready;
+    let next: ReturnType<typeof buildLevel>;
+    try {
+      next = buildLevel(id);
+      await next.ready;
+    } catch (err) {
+      // building failed (e.g. GPU context lost): keep the current level, tell the pilot, never reject
+      console.error('Level failed to load', id, err);
+      if (seq === levelSeq) toast("Couldn't load that level — staying here");
+      return false;
+    }
     if (seq !== levelSeq) return false;
+    try {
+      view.loadLevel(next);
+    } catch (err) {
+      // the old scenery may already be gone: the only safe way back is a reload
+      console.error('Level failed to load', id, err);
+      hud.setError(`The level couldn't be loaded (${err instanceof Error ? err.message : String(err)}). Reload to continue.`);
+      return false;
+    }
     level = next;
-    view.loadLevel(next);
     sim.world.setLevel(next);
     race.setLevel(next);
     saveLastLevel(storage, id);
