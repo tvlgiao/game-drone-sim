@@ -80,7 +80,7 @@ export const DEFAULT_SETTINGS: Readonly<Settings> = Object.freeze({
   fovDeg: 110,
   quality: 'auto',
   volume: 0.7,
-  showFps: true,
+  showFps: false,
   headingArrow: true,
   deadzone: 0.05,
   touchThrottleCentre: true,
@@ -98,7 +98,8 @@ export const SETTINGS_OPTIONS = {
   rateExpo: { min: 0, max: 1, step: 0.01 },
   throttleMid: { min: 0.25, max: 0.75, step: 0.01 },
   throttleExpo: { min: 0, max: 1, step: 0.01 },
-  throttleLimit: { min: 0.25, max: 1, step: 0.01 },
+  /** below ~0.5 a drained pack could no longer climb at full stick (the limit only scales above mid) */
+  throttleLimit: { min: 0.5, max: 1, step: 0.01 },
   angleMaxTiltDeg: { min: 20, max: 80, step: 1 },
   quality: ['auto', 'ultra', 'high', 'medium', 'low'] as const,
   cameraTiltDeg: { min: 0, max: 45, step: 5 },
@@ -252,18 +253,21 @@ export function defaultStorage(): Storage | null {
   }
 }
 
-/** Loads persisted settings; bad JSON / missing storage yield defaults. `undefined` = localStorage. */
 /** Bumped when a default changes in a way stored settings must not override. */
-const SETTINGS_VERSION = 2;
+const SETTINGS_VERSION = 3;
 
+/** Loads persisted settings; bad JSON / missing storage yield defaults. `undefined` = localStorage. */
 export function loadSettings(storage: Storage | null = defaultStorage()): Settings {
   if (!storage) return cloneSettings(DEFAULT_SETTINGS);
   try {
     const text = storage.getItem(SETTINGS_KEY);
     if (!text) return cloneSettings(DEFAULT_SETTINGS);
     const raw = JSON.parse(text) as Record<string, unknown>;
+    const v = raw && typeof raw.v === 'number' ? raw.v : 1;
     // v2: touch throttle auto-centres by default (MOBA-style); drop the old stored default.
-    if (raw && raw.v !== SETTINGS_VERSION) delete raw.touchThrottleCentre;
+    if (raw && v < 2) delete raw.touchThrottleCentre;
+    // v3: the FPS chip is off by default; every older save stored the old `true` default.
+    if (raw && v < 3) delete raw.showFps;
     return validateSettings(raw);
   } catch {
     return cloneSettings(DEFAULT_SETTINGS);

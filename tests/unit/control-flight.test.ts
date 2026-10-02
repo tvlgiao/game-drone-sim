@@ -5,6 +5,8 @@ import { actualRate } from '../../src/control/rates';
 import { ANGLE_MAX_TILT_DEG } from '../../src/control/flight-controller';
 import { LOFT_LEVEL } from '../../src/game/level-data';
 import type { ControlInput } from '../../src/types';
+import { DEFAULT_DRONE } from '../../src/physics/drone-params';
+import { SETTINGS_OPTIONS } from '../../src/core/settings';
 import { EMPTY_LEVEL, input, tiltDeg } from './physics-helpers';
 
 const DT = 0.001;
@@ -275,8 +277,26 @@ describe('pilot-tunable FC parameters (Rates & Sensitivity)', () => {
     run(full, 0.3, input(1));
     run(limited, 0.3, input(1));
     const avg = (s: Simulation) => s.world.state.motors.reduce((a, b) => a + b, 0) / 4;
-    expect(avg(limited)).toBeLessThan(avg(full) * 0.7);
-    expect(avg(limited)).toBeGreaterThan(avg(full) * 0.5);
+    expect(avg(limited)).toBeLessThan(avg(full) * 0.85);
+    expect(avg(limited)).toBeGreaterThan(avg(full) * 0.65);
+  });
+
+  it('at the minimum throttle limit centre stick still hovers and full stick still climbs, even on a drained pack', () => {
+    const limit = SETTINGS_OPTIONS.throttleLimit.min;
+    const vy = (s: Simulation) => s.world.state.velocity.y;
+    const unlimited = airborne('angle');
+    const centre = airborne('angle');
+    centre.fc.throttleLimit = limit;
+    run(unlimited, 1, input(0.5));
+    run(centre, 1, input(0.5));
+    expect(vy(centre)).toBeCloseTo(vy(unlimited), 6);
+    for (const drained of [false, true]) {
+      const sim = airborne('angle');
+      sim.fc.throttleLimit = limit;
+      if (drained) sim.world.consumed = DEFAULT_DRONE.battery.capacityS;
+      run(sim, 1.5, input(1));
+      expect(vy(sim), drained ? 'drained pack' : 'full pack').toBeGreaterThan(1);
+    }
   });
 
   it('throttle expo 0.3 vs 0.8: higher expo = finer control near mid, same end points', () => {
@@ -376,5 +396,31 @@ describe('position hold fine control (no deadband stacked on the XR stick shapin
     sim.fc.positionHold = true;
     run(sim, 4, input(0.5, 0, 0.03, 0));
     expect(-sim.world.state.velocity.z).toBeGreaterThan(0.05);
+  });
+});
+
+describe('battery over a long flight', () => {
+  /** HUD thresholds (src/ui/hud.ts): amber below 3.55 V/cell, red below 3.3 V/cell on the 4S pack */
+  const CELLS = 4;
+  const WARN = 3.55;
+  const CRIT = 3.3;
+
+  it('a continuous hover reaches the low-battery warning, then critical, and can still hold altitude', () => {
+    const sim = airborne('angle', 1, 50);
+    sim.fc.altitudeHold = true;
+    let warnAt = -1;
+    let critAt = -1;
+    const seconds = 380;
+    const n = Math.round(seconds / DT);
+    for (let i = 0; i < n; i++) {
+      sim.step(DT, input(0.5));
+      const cell = sim.world.state.batteryVoltage / CELLS;
+      if (warnAt < 0 && cell < WARN) warnAt = i * DT;
+      if (critAt < 0 && cell < CRIT) critAt = i * DT;
+    }
+    expect(warnAt).toBeGreaterThan(180);
+    expect(critAt).toBeGreaterThan(warnAt + 20);
+    expect(critAt).toBeLessThan(seconds);
+    expect(Math.abs(sim.world.state.position.y - 50)).toBeLessThan(1);
   });
 });

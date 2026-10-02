@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   DEFAULT_SETTINGS,
   SETTINGS_KEY,
+  SETTINGS_OPTIONS,
   applyRatePreset,
   cloneSettings,
   loadSettings,
@@ -45,7 +46,7 @@ describe('settings', () => {
       fovDeg: 110,
       quality: 'auto',
       volume: 0.7,
-      showFps: true,
+      showFps: false,
       headingArrow: true,
       deadzone: 0.05,
       touchThrottleCentre: true,
@@ -115,7 +116,7 @@ describe('settings', () => {
       fovDeg: 80,
       quality: 'low',
       volume: 0,
-      showFps: true,
+      showFps: false,
       headingArrow: true,
       deadzone: 0.05,
       touchThrottleCentre: true,
@@ -133,7 +134,7 @@ describe('settings', () => {
       invert: { throttle: false, yaw: true, pitch: false, roll: true },
       axisMap: { lx: 0, ly: 1, rx: 3, ry: 4 },
       fovDeg: 120,
-      showFps: false,
+      showFps: true,
       headingArrow: false,
     };
     saveSettings(custom, st);
@@ -181,7 +182,7 @@ describe('settings', () => {
     expect(s.rates.roll).toEqual({ center: 20, max: 1800, expo: 1 });
     expect(s.rates.pitch).toEqual({ center: 500, max: 500, expo: 0 });
     expect(s.rates.yaw).toEqual(RATE_PRESETS.freestyle);
-    expect(s).toMatchObject({ throttleMid: 0.75, throttleExpo: 1, throttleLimit: 0.25, angleMaxTiltDeg: 80 });
+    expect(s).toMatchObject({ throttleMid: 0.75, throttleExpo: 1, throttleLimit: 0.5, angleMaxTiltDeg: 80 });
     expect(validateSettings({ throttleMid: 0.1 }).throttleMid).toBe(0.25);
     expect(validateSettings({ throttleMid: 'auto' }).throttleMid).toBeNull();
     expect(validateSettings({ throttleMid: null }).throttleMid).toBeNull();
@@ -241,5 +242,34 @@ describe('settings v2 migration', () => {
     expect(loadSettings(storage).touchThrottleCentre).toBe(true);
     saveSettings({ ...loadSettings(storage), touchThrottleCentre: false }, storage);
     expect(loadSettings(storage).touchThrottleCentre).toBe(false);
+  });
+});
+
+describe('settings v3 migration', () => {
+  const memStore = (): { store: Map<string, string>; storage: Storage } => {
+    const store = new Map<string, string>();
+    return { store, storage: { getItem: (k: string) => store.get(k) ?? null, setItem: (k: string, v: string) => void store.set(k, v) } as unknown as Storage };
+  };
+
+  it('the FPS chip is off by default and an older save (which stored the old default) does not turn it back on', () => {
+    expect(DEFAULT_SETTINGS.showFps).toBe(false);
+    const { store, storage } = memStore();
+    store.set(SETTINGS_KEY, JSON.stringify({ ...DEFAULT_SETTINGS, showFps: true, v: 2 }));
+    expect(loadSettings(storage).showFps).toBe(false);
+  });
+
+  it('a pilot who turns the FPS chip on keeps it, and a v2 save keeps its touch throttle choice', () => {
+    const { store, storage } = memStore();
+    saveSettings({ ...loadSettings(storage), showFps: true }, storage);
+    expect(loadSettings(storage).showFps).toBe(true);
+    store.set(SETTINGS_KEY, JSON.stringify({ ...DEFAULT_SETTINGS, touchThrottleCentre: false, v: 2 }));
+    expect(loadSettings(storage).touchThrottleCentre).toBe(false);
+  });
+
+  it('a stored throttle limit below the new minimum is raised to it', () => {
+    const { store, storage } = memStore();
+    store.set(SETTINGS_KEY, JSON.stringify({ throttleLimit: 0.3, v: 2 }));
+    expect(loadSettings(storage).throttleLimit).toBe(SETTINGS_OPTIONS.throttleLimit.min);
+    expect(SETTINGS_OPTIONS.throttleLimit.min).toBeGreaterThanOrEqual(0.5);
   });
 });

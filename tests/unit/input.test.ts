@@ -147,3 +147,55 @@ describe('InputManager (gamepad, Mode 2)', () => {
     expect(f.control).toEqual({ throttle: 0, yaw: 0, pitch: 0, roll: 0 });
   });
 });
+
+describe('InputManager throttle reset and pad disconnects', () => {
+  const keyWin = () => {
+    const win = fakeWindow([]);
+    const key = (type: string, code: string) => win.dispatchEvent(Object.assign(new Event(type), { code }));
+    return { win, key };
+  };
+
+  it('latchTakeoff (respawn / disarm) drops the held keyboard throttle to zero', () => {
+    const { win, key } = keyWin();
+    const im = new InputManager(win, { ...DEFAULT_SETTINGS });
+    key('keydown', 'KeyW');
+    let f = im.poll(0.01);
+    for (let i = 0; i < 99; i++) f = im.poll(0.01);
+    key('keyup', 'KeyW');
+    f = im.poll(0.01);
+    expect(f.source).toBe('keyboard');
+    expect(f.control.throttle).toBeGreaterThan(0.5);
+    im.latchTakeoff();
+    expect(im.poll(0.01).control.throttle).toBe(0);
+    im.dispose();
+  });
+
+  const disconnect = (win: Window, pad: Gamepad) => win.dispatchEvent(Object.assign(new Event('gamepaddisconnected'), { gamepad: pad }));
+
+  it('flags the disconnect of the pad that was flying', () => {
+    const pad = fakePad([0, 0.5, 0, 0]);
+    const pads: (Gamepad | null)[] = [pad];
+    const win = fakeWindow(pads);
+    const im = new InputManager(win, { ...DEFAULT_SETTINGS });
+    const events: { connected: boolean; wasActive: boolean }[] = [];
+    im.onConnection = (e) => events.push(e);
+    expect(im.poll(1 / 60).source).toBe('gamepad');
+    pads.length = 0;
+    disconnect(win, pad);
+    expect(events).toEqual([expect.objectContaining({ connected: false, wasActive: true })]);
+  });
+
+  it('does not flag a pad that was not the active source', () => {
+    const pad = fakePad([0, 0, 0, 0]);
+    const { win, key } = keyWin();
+    (win as unknown as { navigator: { getGamepads: () => Gamepad[] } }).navigator.getGamepads = () => [pad];
+    const im = new InputManager(win, { ...DEFAULT_SETTINGS });
+    const events: { wasActive: boolean }[] = [];
+    im.onConnection = (e) => events.push(e);
+    key('keydown', 'KeyW');
+    expect(im.poll(1 / 60).source).toBe('keyboard');
+    disconnect(win, pad);
+    expect(events).toEqual([expect.objectContaining({ wasActive: false })]);
+    im.dispose();
+  });
+});
