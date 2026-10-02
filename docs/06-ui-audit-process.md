@@ -64,4 +64,16 @@ deploy → spot-check the live domain.
 
 | Round | Date | Shots | Findings (P0/P1/P2/P3) | Fixed | Notes |
 |---|---|---|---|---|---|
-| 1 | 2026-10-02 | 382 on 14 configs, 0 errors | pending | | first full capture |
+| 1 | 2026-10-02 | 382 on 14 configs, 0 errors | phones 24 (3/9/9/3), tablets 18, desktop+Quest+VR 19 (2 P0), functional 13 (+ per-setting table), commercial 25 (8 P0) | in progress | P0 found and fixed by the orchestrator: light-shaft shader NaN blacked out blocks of the frame at 2560×1440 (bloom spread it). Harness fix: desktop flights now hover (0.48) instead of climbing into the ceiling. |
+
+### Round 1 triage → fixers (parallel worktrees, disjoint files)
+
+| Fixer | Owns | Scope |
+|---|---|---|
+| F1 touch HUD | mobile.css, touch-controls.ts, mobile-shell.ts, input/touch.ts | chip/button/toast/timer overlaps on phones, rates cells, opaque gate + rotate overlay, countdown size, CAM width, touch layout behind menus, iPad wording of the home-screen sheet, touch re-latch |
+| F2 menus | menus.ts, mode-labels.ts, icons.ts, rate-charts.ts, version define | Flight-mode label, context-aware Controls (touch / Quest Touch / gamepad), controller empty state, Rates help + custom-rates preservation + fine step, confirm-quit focus, bye/error copy, new-best delta, **About screen** (version, support, privacy, licences), reset to defaults |
+| F3 settings/input/VR | main.ts, settings defaults, input, control, xr, camera rig | FPS chip off by default, throttle-limit floor, keyboard throttle reset, battery critical reachable, XR pause on visibilitychange + pad disconnect, 72 Hz + foveation, Quest-app Exit VR dead end, VR card legibility/placement/hints/km/h, chase/FPV at the ceiling |
+| F4 desktop visuals | styles.css, hud.ts, index.html | fluid UI scale up to 2560, countdown/CRASHED titles, RESPAWNING contrast, free-fly HUD state, glass opacity, hover vs focus, ghost buttons, dialog text/titles, loading splash, toasts behind full-screen menus |
+
+Backlog (needs a product decision, accounts or a later round): monetisation + entitlement (free + Full Game IAP), first-run tutorial, settings inside VR, VR comfort options (vignette), colour-blind nav palette / UI scale / reduced motion, separate audio buses, more tracks and quads, local medals/ghost, i18n, iOS PrivacyInfo.xcprivacy (needs an Xcode project resource entry).
+

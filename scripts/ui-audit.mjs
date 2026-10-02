@@ -110,7 +110,8 @@ async function run() {
         window.__drone.press('arm');
       });
       await sleep(120);
-      await h(() => window.__drone.setControl({ throttle: 0.55, yaw: 0, pitch: 0.12, roll: 0 }));
+      // near hover: desktop/gamepad has no altitude hold, so 0.55 climbed into the ceiling (black FPV shots)
+      await h(() => window.__drone.setControl({ throttle: 0.48, yaw: 0, pitch: 0.12, roll: 0 }));
       await sleep(1600);
       for (const cam of ['los', 'fpv', 'chase']) {
         for (let i = 0; i < 3 && (await h(() => window.__drone.camera)) !== cam; i++) {
