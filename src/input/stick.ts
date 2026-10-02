@@ -52,7 +52,7 @@ export function triggerToThrottle(value: number, lowDeadzone = THROTTLE_LOW_DEAD
   return throttleEnds(clamp(value, 0, 1), lowDeadzone);
 }
 
-export const KEY_THROTTLE_RATE = 0.6;
+/** Linear rise / fall time (s) of a keyboard axis between centre and full deflection. */
 export const KEY_AXIS_RISE_TIME = 0.12;
 
 /** Moves `v` toward `target` by at most `maxStep`. */
@@ -194,33 +194,37 @@ export interface VirtualKeys {
 }
 
 /**
- * Keys → stick positions (−1..1, Y +up). The throttle axis of the mode ramps at KEY_THROTTLE_RATE
- * (throttle units/s) and holds where released, starting at the bottom; the other axes slew toward
- * ±1 / 0 with a linear rise/fall time of KEY_AXIS_RISE_TIME (self-centering).
+ * Keys → stick positions (−1..1, Y +up). Every axis, throttle included, slews toward ±1 while its key is
+ * held and springs back to centre on release (KEY_AXIS_RISE_TIME per unit), like a self-centring joystick:
+ * the keyboard throttle is flown with altitude hold, so centre = hover.
+ * Take-off latch: while `latched`, the throttle axis reads fully down (idle on the ground, the FC can arm)
+ * until the throttle-up key is pressed; latchTakeoff() re-arms it.
  */
 export class VirtualSticks {
+  /** output positions (latch applied) */
   readonly pos: Record<StickSlot, number> = { lx: 0, ly: -1, rx: 0, ry: 0 };
+  latched = true;
+  private readonly raw: Record<StickSlot, number> = { lx: 0, ly: -1, rx: 0, ry: 0 };
   private hold: 'ly' | 'ry' = 'ly';
 
-  constructor(
-    public throttleRate = KEY_THROTTLE_RATE,
-    public riseTime = KEY_AXIS_RISE_TIME,
-  ) {}
+  constructor(public riseTime = KEY_AXIS_RISE_TIME) {}
 
   /** Throttle-axis value as throttle 0..1. */
   get throttle(): number {
     return (this.pos[this.hold] + 1) / 2;
   }
 
-  setThrottle(v: number): void {
-    this.pos[this.hold] = clamp(v, 0, 1) * 2 - 1;
+  latchTakeoff(): void {
+    this.latched = true;
+    this.raw[this.hold] = -1;
+    this.pos[this.hold] = -1;
   }
 
   update(dt: number, k: VirtualKeys, hold: 'ly' | 'ry'): void {
     if (hold !== this.hold) {
-      this.pos[this.hold] = 0;
+      this.raw[this.hold] = 0;
       this.hold = hold;
-      this.pos[hold] = -1;
+      this.raw[hold] = this.latched ? -1 : 0;
     }
     const step = this.riseTime > 0 ? dt / this.riseTime : 1;
     const target: Record<StickSlot, number> = {
@@ -229,16 +233,12 @@ export class VirtualSticks {
       rx: (k.rRight ? 1 : 0) - (k.rLeft ? 1 : 0),
       ry: (k.rUp ? 1 : 0) - (k.rDown ? 1 : 0),
     };
+    if (this.latched && target[hold] > 0) this.latched = false;
     for (const s of STICK_SLOTS) {
-      if (s === hold) this.pos[s] = clamp(this.pos[s] + target[s] * 2 * this.throttleRate * dt, -1, 1);
-      else this.pos[s] = slew(this.pos[s], target[s], step);
+      if (s === hold && this.latched) this.raw[s] = -1;
+      else this.raw[s] = slew(this.raw[s], target[s], step);
+      this.pos[s] = this.raw[s];
     }
-  }
-
-  reset(): void {
-    this.pos.lx = this.pos.rx = 0;
-    this.pos.ly = this.pos.ry = 0;
-    this.pos[this.hold] = -1;
   }
 }
 

@@ -9,6 +9,8 @@ export const GAME_KEYS: ReadonlySet<string> = new Set([
   'KeyM',
   'KeyC',
   'KeyR',
+  'KeyH',
+  'KeyZ',
   'Space',
   'ArrowUp',
   'ArrowDown',

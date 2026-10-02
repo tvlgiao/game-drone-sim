@@ -276,7 +276,7 @@ test('keyboard throttle does not survive a reset or a disarm (the respawned quad
   await page.waitForTimeout(1200);
   await page.keyboard.up('KeyW');
   await page.waitForTimeout(300);
-  expect(await throttle()).toBeGreaterThan(0.5);
+  expect(await throttle()).toBe(0.5); // sprang back to hover
   await page.keyboard.press('KeyR');
   await page.waitForTimeout(400);
   expect(await throttle()).toBe(0);

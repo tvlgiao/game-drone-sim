@@ -521,7 +521,7 @@ function boot(caps: EditionCaps): void {
     if (flying) {
       // Touch auto-centre sticks fly DJI-style: centre holds altitude (barometer hold), like 'A/Atti' mode.
       // Quest thumbsticks always spring back to centre, so VR flies with altitude hold too.
-      sim.fc.altitudeHold = (inp.source === 'touch' && settings.touchThrottleCentre) || inp.source === 'xr';
+      sim.fc.altitudeHold = input.altitudeHold(settings);
       // …and the right thumbstick flies speed, braking to a stop when released (Angle mode).
       sim.fc.positionHold = inp.source === 'xr';
       const control = status === 'countdown' ? { ...inp.control, throttle: 0 } : inp.control;

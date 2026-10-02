@@ -53,6 +53,12 @@ describe('settings', () => {
       deadzone: 0.05,
       touchThrottleCentre: true,
       touchSticksFixed: false,
+      mouseSensitivity: 1,
+      mouseInvertY: false,
+      mouseXAxis: 'roll',
+      mouseStick: 'auto',
+      mouseExpo: 0.2,
+      mouseDeadzone: 0.03,
     });
   });
 
@@ -99,6 +105,12 @@ describe('settings', () => {
       deadzone: Number.NaN,
       touchThrottleCentre: 'on',
       touchSticksFixed: true,
+      mouseSensitivity: 9,
+      mouseInvertY: 'yes',
+      mouseXAxis: 'pitch',
+      mouseStick: 'springy',
+      mouseExpo: -1,
+      mouseDeadzone: '0.1',
     });
     expect(s).toEqual({
       stickMode: 2,
@@ -124,6 +136,12 @@ describe('settings', () => {
       deadzone: 0.05,
       touchThrottleCentre: true,
       touchSticksFixed: true,
+      mouseSensitivity: 3,
+      mouseInvertY: false,
+      mouseXAxis: 'roll',
+      mouseStick: 'auto',
+      mouseExpo: 0,
+      mouseDeadzone: 0.03,
     });
   });
 
@@ -142,6 +160,15 @@ describe('settings', () => {
     };
     saveSettings(custom, st);
     expect(loadSettings(st)).toEqual(custom);
+  });
+
+  it('mouse flight settings round-trip, and saves from before them get the defaults', () => {
+    const st = mem();
+    const custom = { ...DEFAULT_SETTINGS, mouseSensitivity: 2.5, mouseInvertY: true, mouseXAxis: 'yaw' as const, mouseStick: 'spring' as const, mouseExpo: 0.5, mouseDeadzone: 0.1 };
+    saveSettings(custom, st);
+    expect(loadSettings(st)).toEqual(custom);
+    const old = loadSettings(mem({ [SETTINGS_KEY]: JSON.stringify({ v: 3, fovDeg: 120 }) }));
+    expect(old).toMatchObject({ fovDeg: 120, mouseSensitivity: 1, mouseInvertY: false, mouseXAxis: 'roll', mouseStick: 'auto', mouseExpo: 0.2, mouseDeadzone: 0.03 });
   });
 
   it('migrates old throttleSource values and keeps other old fields', () => {
