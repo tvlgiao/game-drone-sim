@@ -64,7 +64,8 @@ deploy → spot-check the live domain.
 
 | Round | Date | Shots | Findings (P0/P1/P2/P3) | Fixed | Notes |
 |---|---|---|---|---|---|
-| 1 | 2026-10-02 | 382 on 14 configs, 0 errors | phones 24 (3/9/9/3), tablets 18, desktop+Quest+VR 19 (2 P0), functional 13 (+ per-setting table), commercial 25 (8 P0) | in progress | P0 found and fixed by the orchestrator: light-shaft shader NaN blacked out blocks of the frame at 2560×1440 (bloom spread it). Harness fix: desktop flights now hover (0.48) instead of climbing into the ceiling. |
+| 1 | 2026-10-02 | 382 on 14 configs, 0 errors | phones 24 (3/9/9/3), tablets 18, desktop+Quest+VR 19 (2 P0), functional 13 (+ per-setting table), commercial 25 (8 P0) | 46 fixed by F1–F4 (all with mutation-checked tests) | P0 found and fixed by the orchestrator: light-shaft shader NaN blacked out blocks of the frame at 2560×1440 (bloom spread it). Harness fix: desktop flights now hover (0.48) instead of climbing into the ceiling. |
+| 2 | 2026-10-02 | 445 on 14 configs, 0 errors | phones 13 (0/1/4/8), tablets 11 (0/1/6/4), desktop+Quest+VR 13 (0/0/5/8), functional 4 (0/0/1/3; every setting measured OK except the throttle chart) | in progress (G1–G4) | Regressions from round-1 fixes: toast now collides with the visible CRASHED title; 44 px touch steppers widen the Rates column on iPad mini. Harness fix: the 1920 run loaded `?xremu=1` up front, so desktop shots showed Quest copy — the emulator now loads only for the VR states. |
 
 ### Round 1 triage → fixers (parallel worktrees, disjoint files)
 
@@ -74,6 +75,17 @@ deploy → spot-check the live domain.
 | F2 menus | menus.ts, mode-labels.ts, icons.ts, rate-charts.ts, version define | Flight-mode label, context-aware Controls (touch / Quest Touch / gamepad), controller empty state, Rates help + custom-rates preservation + fine step, confirm-quit focus, bye/error copy, new-best delta, **About screen** (version, support, privacy, licences), reset to defaults |
 | F3 settings/input/VR | main.ts, settings defaults, input, control, xr, camera rig | FPS chip off by default, throttle-limit floor, keyboard throttle reset, battery critical reachable, XR pause on visibilitychange + pad disconnect, 72 Hz + foveation, Quest-app Exit VR dead end, VR card legibility/placement/hints/km/h, chase/FPV at the ceiling |
 | F4 desktop visuals | styles.css, hud.ts, index.html | fluid UI scale up to 2560, countdown/CRASHED titles, RESPAWNING contrast, free-fly HUD state, glass opacity, hover vs focus, ghost buttons, dialog text/titles, loading splash, toasts behind full-screen menus |
+
+### Round 2 triage → fixers
+
+| Fixer | Owns | Scope |
+|---|---|---|
+| G1 touch | mobile.css, mobile-shell.ts, touch-controls.ts, input/touch.ts | iPad mini Rates column overlap, wrapping row hints on tablets, one-row footer on Galaxy Tab, HUD micro-label minimum size, SE clearances, tablet gate copy, toast centring |
+| G2 shared styles + HUD | styles.css, hud.ts, index.html | toast lane vs centre title, one dialog-title style, one secondary-button style, About spacing, hide HUD banners behind bye/error, error dialog centring, logo vs subtitle, finish delta colours, chip/label polish, free-fly card, throttle number label |
+| G3 menus + numbers | menus.ts, rate-charts.ts, settings.ts, licenses.txt | throttle chart shares the FC's output function, custom-rate overwrite, installed-app bye copy, settings/controls footer structure, Quest controls without Xbox diagram, controller empty state, chart label, main-menu grid, IWER licence, clamped FOV hint |
+| G4 VR | xr-panel.ts, xr-hud.ts | smaller flight card, wrapped pause hint, consistent hint punctuation, no squashed canvas text |
+
+Lesson: a fix that makes something visible (CRASHED) can create a collision with something else (toasts) — always re-capture after every fix round, never trust per-fix screenshots alone.
 
 Backlog (needs a product decision, accounts or a later round): monetisation + entitlement (free + Full Game IAP), first-run tutorial, settings inside VR, VR comfort options (vignette), colour-blind nav palette / UI scale / reduced motion, separate audio buses, more tracks and quads, local medals/ghost, i18n, iOS PrivacyInfo.xcprivacy (needs an Xcode project resource entry).
 
