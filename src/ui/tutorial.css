@@ -1,0 +1,281 @@
+/* Tutorial overlay: step card, hint glow on the HUD / touch controls, first-run and completion dialogs.
+   Sizes follow the game's --ds-u scale and tokens (styles.css, tokens.css, mobile.css). */
+
+.ds-tut-card {
+  --ds-tut-accent: var(--ds-cyan);
+  position: absolute;
+  z-index: 15;
+  top: calc(var(--ds-gap) + calc(104 * var(--ds-u)));
+  left: max(var(--ds-gap), env(safe-area-inset-left));
+  width: min(calc(400 * var(--ds-u)), 44vw);
+  padding: calc(14 * var(--ds-u)) calc(18 * var(--ds-u)) calc(16 * var(--ds-u));
+  display: grid;
+  gap: calc(8 * var(--ds-u));
+  pointer-events: none;
+  background: var(--ds-panel-solid);
+  transition: border-color 0.25s ease, box-shadow 0.25s ease;
+}
+
+/* Touch layout: under the PAUSE · CAM · timer row, clear of the right-hand button column. */
+.ds-ui.ds-touch-on .ds-tut-card {
+  top: calc(var(--ds-safe-t) + var(--ds-tbtn) + var(--ds-tgap));
+  left: var(--ds-safe-l);
+  width: min(360px, calc(100% - var(--ds-safe-l) - var(--ds-tzone-r)));
+}
+
+.ds-tut-card[hidden] {
+  display: none;
+}
+
+.ds-tut-card__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: calc(10 * var(--ds-u));
+}
+
+.ds-tut-card__step {
+  font-size: 0.72em;
+  font-weight: 700;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--ds-tut-accent);
+}
+
+.ds-tut-card__title {
+  margin: 0;
+  font-size: 1.3em;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  line-height: 1.15;
+}
+
+.ds-tut-card__lines {
+  display: grid;
+  gap: calc(4 * var(--ds-u));
+}
+
+.ds-tut-card__lines p {
+  margin: 0;
+  line-height: 1.35;
+}
+
+.ds-tut-card__lines p + p {
+  color: var(--ds-muted);
+  font-size: 0.92em;
+}
+
+.ds-tut-parts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: calc(6 * var(--ds-u));
+}
+
+.ds-tut-parts[hidden] {
+  display: none;
+}
+
+.ds-tut-part {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  min-height: calc(24 * var(--ds-u));
+  padding: 0 calc(10 * var(--ds-u));
+  overflow: hidden;
+  font-size: 0.78em;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--ds-muted);
+  border: 1px solid var(--ds-edge);
+  border-radius: calc(999 * var(--ds-u));
+}
+
+.ds-tut-part i {
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 100%;
+  transform-origin: left center;
+  transform: scaleX(var(--v, 0));
+  background: rgba(40, 231, 255, 0.18);
+}
+
+.ds-tut-part span {
+  position: relative;
+}
+
+.ds-tut-part.is-done {
+  color: var(--ds-green);
+  border-color: rgba(61, 255, 160, 0.55);
+}
+
+.ds-tut-part.is-done i {
+  background: rgba(61, 255, 160, 0.14);
+}
+
+.ds-tut-bar {
+  height: calc(6 * var(--ds-u));
+  min-height: 4px;
+  border-radius: calc(999 * var(--ds-u));
+  background: rgba(255, 255, 255, 0.08);
+  overflow: hidden;
+}
+
+.ds-tut-bar i {
+  display: block;
+  height: 100%;
+  width: 100%;
+  transform-origin: left center;
+  transform: scaleX(var(--v, 0));
+  background: linear-gradient(90deg, var(--ds-cyan), var(--ds-green));
+  transition: transform 0.15s linear;
+}
+
+.ds-tut-card__foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: calc(10 * var(--ds-u));
+  min-height: calc(28 * var(--ds-u));
+}
+
+.ds-tut-card__skiphint {
+  font-size: 0.78em;
+  color: var(--ds-muted);
+  letter-spacing: 0.06em;
+}
+
+.ds-tut-card .ds-btn {
+  pointer-events: auto;
+  width: auto;
+}
+
+.ds-tut-skip {
+  pointer-events: auto;
+  min-width: 44px;
+  min-height: 44px;
+  margin: calc(-10 * var(--ds-u)) calc(-8 * var(--ds-u)) calc(-10 * var(--ds-u)) 0;
+  padding: 0 calc(12 * var(--ds-u));
+  font: inherit;
+  font-size: 0.78em;
+  font-weight: 700;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--ds-muted);
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: calc(10 * var(--ds-u));
+  cursor: pointer;
+}
+
+.ds-tut-skip:hover,
+.ds-tut-skip:focus-visible {
+  color: var(--ds-text);
+  border-color: var(--ds-edge);
+  outline: none;
+}
+
+.ds-tut-skip:focus-visible {
+  outline: 2px solid var(--ds-edge-hot);
+  outline-offset: 2px;
+}
+
+.ds-tut-continue {
+  min-height: 44px;
+}
+
+/* Hint after 20 s without progress: the card and the control to use glow amber. */
+.ds-tut-card.is-hint {
+  --ds-tut-accent: var(--ds-amber);
+  border-color: rgba(255, 197, 61, 0.7);
+  box-shadow:
+    0 0 0 1px rgba(255, 197, 61, 0.35),
+    0 0 calc(28 * var(--ds-u)) rgba(255, 197, 61, 0.25);
+  animation: ds-tut-breathe 1.8s ease-in-out infinite;
+}
+
+.ds-ui .ds-tut-glow {
+  outline: calc(3 * var(--ds-u)) solid var(--ds-amber);
+  outline-offset: calc(3 * var(--ds-u));
+  box-shadow: 0 0 calc(24 * var(--ds-u)) rgba(255, 197, 61, 0.55);
+  animation: ds-tut-breathe 1.8s ease-in-out infinite;
+}
+
+/* the touch stick base is round: a round glow reads as "this stick" */
+.ds-ui .ds-tstick__base.ds-tut-glow,
+.ds-ui .ds-well.ds-tut-glow {
+  border-radius: 50%;
+}
+
+@keyframes ds-tut-breathe {
+  0%,
+  100% {
+    box-shadow: 0 0 calc(10 * var(--ds-u)) rgba(255, 197, 61, 0.25);
+  }
+  50% {
+    box-shadow: 0 0 calc(30 * var(--ds-u)) rgba(255, 197, 61, 0.6);
+  }
+}
+
+/* Dialogs reuse .ds-screen / .ds-dialog; above the step card and the touch layer. */
+.ds-tut-screen {
+  z-index: 25;
+}
+
+.ds-tut-dialog__lead {
+  margin: 0 0 calc(8 * var(--ds-u));
+  font-size: 1.05em;
+  line-height: 1.4;
+}
+
+.ds-tut-dialog__text {
+  margin: 0;
+  color: var(--ds-muted);
+  line-height: 1.45;
+}
+
+.ds-tut-dialog__keys {
+  margin: calc(12 * var(--ds-u)) 0 0;
+  font-size: 0.8em;
+  color: var(--ds-muted);
+}
+
+@media (max-width: 640px) {
+  .ds-tut-card {
+    width: calc(100% - 2 * var(--ds-gap));
+  }
+}
+
+@media (max-height: 460px) {
+  .ds-tut-card {
+    gap: 6px;
+    padding: 10px 14px 12px;
+  }
+
+  .ds-tut-card__title {
+    font-size: 1.15em;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ds-tut-card.is-hint,
+  .ds-ui .ds-tut-glow {
+    animation: none;
+  }
+
+  .ds-tut-bar i {
+    transition: none;
+  }
+}
+
+@media (prefers-contrast: more) {
+  .ds-tut-card {
+    background: rgba(2, 4, 10, 0.97);
+    border-color: var(--ds-edge-hot);
+  }
+
+  .ds-tut-card__lines p + p,
+  .ds-tut-card__skiphint {
+    color: var(--ds-text);
+  }
+}
