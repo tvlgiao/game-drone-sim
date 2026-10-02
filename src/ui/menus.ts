@@ -572,6 +572,9 @@ export class Menus {
     F.bestLabel.textContent = label;
     F.best.textContent = best === null ? '—' : formatTime(best);
     F.delta.textContent = delta === null ? '' : `${DELTA_FMT.format(delta).replace('-', '−')} s`;
+    // signed like the shown text: a delta that rounds to 0.00 s is neither faster nor slower
+    const shown = delta === null ? 0 : Math.round(delta * 100);
+    F.delta.dataset.sign = shown < 0 ? 'faster' : shown > 0 ? 'slower' : '';
     F.delta.hidden = delta === null;
     F.bestLabel.parentElement!.hidden = data.newBest === true && best === null;
     if (data.best !== undefined) this.knownBest = data.best ?? null;
@@ -1305,7 +1308,7 @@ export class Menus {
         <table class="ds-table">
           <tbody>
             <tr><th scope="row">App</th><td>Drone Sim</td></tr>
-            <tr><th scope="row">Version</th><td class="ds-num" data-f="version">${APP_VERSION}</td></tr>
+            <tr><th scope="row">Version</th><td data-f="version">${APP_VERSION}</td></tr>
             <tr><th scope="row">Developer</th><td>COWORK Game Studio</td></tr>
             <tr><th scope="row">Support</th><td>${SUPPORT_EMAIL}</td></tr>
           </tbody>
