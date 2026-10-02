@@ -34,8 +34,13 @@ export interface InputExtras {
 export type HintedInputFrame = InputFrame & InputExtras;
 
 const FLICK = 0.6;
-/** An Escape tap this close to a lost pointer lock is the same keystroke: one pause, not pause + resume. */
+/** An Escape tap this close BEFORE a lost pointer lock caused it: that unlock is the Escape's own pause. */
 const ESC_UNLOCK_MS = 500;
+/**
+ * An Escape keydown delivered this soon AFTER the unlock pause is the same keystroke (browsers fire the
+ * lock change before the key event); anything later is the pilot pressing Esc again on purpose.
+ */
+const ESC_TRAIL_MS = 120;
 
 export type ButtonName = 'arm' | 'toggleMode' | 'cycleCamera' | 'reset' | 'pause' | 'confirm' | 'back' | 'headingArrow' | 'recenter';
 export const PAD_BUTTON: Readonly<Record<ButtonName, number>> = {
@@ -317,7 +322,7 @@ export class InputManager {
     if (mouse.takeUnlockPause() && now - this.escAt > ESC_UNLOCK_MS) {
       b.pause = true;
       this.unlockPauseAt = now;
-    } else if (now - this.unlockPauseAt < ESC_UNLOCK_MS && KEY_BUTTON.pause.some((k) => kb.wasPressed(k))) {
+    } else if (now - this.unlockPauseAt < ESC_TRAIL_MS && KEY_BUTTON.pause.some((k) => kb.wasPressed(k))) {
       // the Escape that broke the lock arrived after its pause: it must not resume the flight
       b.pause = false;
       back = false;

@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { Vector3 } from 'three';
 import { DEFAULT_SETTINGS, cloneSettings, type Settings } from '../../src/core/settings';
 import { InputManager, KEY_BUTTON, KEY_STICKS, LEGEND_KEY, LEGEND_PAD_BUTTON, PAD_BUTTON, holdsAltitude, type HintedInputFrame } from '../../src/input/input-manager';
@@ -352,6 +352,22 @@ describe('InputManager: keyboard + mouse', () => {
     const f = e.polls(1);
     expect(f.buttons.pause).toBe(false);
     expect(f.nav.back).toBe(false);
+  });
+
+  it('a deliberate Escape pressed after the unlock pause still works (resume / skip)', () => {
+    vi.useFakeTimers({ toFake: ['performance'] });
+    try {
+      const e = env();
+      e.lock();
+      e.polls(1);
+      e.loseLock();
+      expect(e.polls(1).buttons.pause).toBe(true);
+      vi.advanceTimersByTime(300); // a second, intentional press
+      e.tap('Escape');
+      expect(e.polls(1).buttons.pause).toBe(true);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('an Escape tapped just before the unlock is the pause itself: one pause edge', () => {
