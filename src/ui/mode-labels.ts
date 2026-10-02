@@ -1,4 +1,5 @@
 /** Human labels for the RC stick mode / throttle source (HUD, controls help, controller setup). */
+import { FPV_FOV_V_RANGE } from '../core/camera-limits';
 import type { Settings } from '../core/settings';
 import { MODE_TABLE, throttleSlot, type Channel } from '../input/stick';
 
@@ -53,10 +54,42 @@ export function padControls(s: ModeSettings): Record<Channel, string> {
   return out;
 }
 
+/** Touch thumb per channel for the selected mode (left / right half of the screen). */
+export function touchControls(s: Pick<Settings, 'stickMode'>): Record<Channel, string> {
+  const t = MODE_TABLE[s.stickMode];
+  const names: Record<string, string> = { lx: 'Left thumb ↔', ly: 'Left thumb ↕', rx: 'Right thumb ↔', ry: 'Right thumb ↕' };
+  const out = {} as Record<Channel, string>;
+  for (const slot of ['lx', 'ly', 'rx', 'ry'] as const) out[t[slot]] = names[slot]!;
+  return out;
+}
+
+/** Quest Touch thumbstick per channel: both spring back, so the throttle stick holds altitude and the other holds position. */
+export function xrControls(s: Pick<Settings, 'stickMode'>): Record<Channel, string> {
+  const t = MODE_TABLE[s.stickMode];
+  const names: Record<string, string> = { lx: 'Left stick ↔', ly: 'Left stick ↕', rx: 'Right stick ↔', ry: 'Right stick ↕' };
+  const out = {} as Record<Channel, string>;
+  for (const slot of ['lx', 'ly', 'rx', 'ry'] as const) out[t[slot]] = names[slot]!;
+  out.throttle += ' (centre holds altitude)';
+  return out;
+}
+
 /** Disarmed hint: how to bring throttle to zero. */
 export function throttleDownHint(s: ModeSettings, keyboard: boolean): string {
   const slot = throttleSlot(s.stickMode);
   if (keyboard) return slot === 'ly' ? 'Hold S' : 'Hold ↓';
   const c = throttleControl(s);
   return c === 'rt' ? 'Release RT' : `${c === 'left' ? 'Left' : 'Right'} stick fully down`;
+}
+
+const RAD = Math.PI / 180;
+
+/**
+ * Horizontal FOV the FPV camera really shows for a settings FOV at a viewport aspect (w / h).
+ * Differs from `fovDeg` only when the rig's vertical clamp kicks in (wide FOV on a narrow screen).
+ */
+export function effectiveFovDeg(fovDeg: number, aspect: number): number {
+  if (!(aspect > 0)) return fovDeg;
+  const v = 2 * Math.atan(Math.tan((fovDeg * RAD) / 2) / aspect) / RAD;
+  const vc = Math.min(FPV_FOV_V_RANGE.max, Math.max(FPV_FOV_V_RANGE.min, v));
+  return vc === v ? fovDeg : (2 * Math.atan(Math.tan((vc * RAD) / 2) * aspect)) / RAD;
 }

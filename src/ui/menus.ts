@@ -1,24 +1,49 @@
-/** Menu screens (main, settings, controller setup, rates, controls, pause, finish, error) with mouse / keyboard / gamepad focus. */
+/** Menu screens (main, settings, controller setup, rates, controls, about, pause, finish, error) with mouse / keyboard / gamepad focus. */
+import { detectDevice } from '../core/device';
 import {
   DEFAULT_AXIS_MAP,
+  DEFAULT_SETTINGS,
   RATE_AXES,
   SETTINGS_OPTIONS,
   applyRatePreset,
   cloneSettings,
+  rateEditReplacesCustom,
   rateRange,
   setRateValue,
   type RateAxis,
   type RateField,
   type Settings,
 } from '../core/settings';
+import { isQuestBrowser } from '../core/xr';
 import { AxisCapture, MODE_TABLE, STICK_SLOTS, type Channel, type StickSlot } from '../input/stick';
 import type { InputFrame, NavEvents } from '../types';
 import { formatTime } from './format';
 import { controllerDiagram } from './icons';
 import { HOVER, RateCharts } from './rate-charts';
-import { CH_NAME, CH_SHORT, keyboardKeys, padControls, stickLong, stickShort, throttleControl } from './mode-labels';
+import { CH_NAME, CH_SHORT, effectiveFovDeg, keyboardKeys, padControls, stickLong, stickShort, throttleControl, throttleDownHint, touchControls, xrControls } from './mode-labels';
 
-export type ScreenName = 'main' | 'settings' | 'controller' | 'rates' | 'controls' | 'pause' | 'finish' | 'error' | 'confirm-quit' | 'bye' | 'none';
+/** package.json version, injected by vite.config.ts `define`. */
+declare const __APP_VERSION__: string;
+
+export const APP_VERSION = __APP_VERSION__;
+export const SUPPORT_EMAIL = 'support@coworkgamestudio.com';
+/** The bundled copy inside the iOS / Android shells cannot open in the system browser: link the hosted one there. */
+const SITE_URL = 'https://dronesim.coworkgamestudio.com/';
+
+export type ScreenName =
+  | 'main'
+  | 'settings'
+  | 'controller'
+  | 'rates'
+  | 'controls'
+  | 'about'
+  | 'pause'
+  | 'finish'
+  | 'error'
+  | 'confirm-quit'
+  | 'confirm-reset'
+  | 'bye'
+  | 'none';
 
 export type UiAction =
   | { type: 'race' }
@@ -40,7 +65,12 @@ export interface FinishData {
   time?: number;
   best?: number | null;
   newBest?: boolean;
+  /** best time before this run; when omitted the last best the menus were shown is used */
+  prevBest?: number | null;
 }
+
+/** Where the game runs: decides platform-specific copy (quit, error advice, links). */
+type Platform = 'ios' | 'android' | 'quest' | 'desktop';
 
 interface Item {
   el: HTMLElement;
@@ -73,6 +103,7 @@ const rangeRow = (id: NumKey, label: string, hint: string, fmt: (v: number) => s
   },
 });
 
+const FOV_HINT = 'FPV lens width';
 const FIELD_NAME: Record<RateField, string> = { center: 'Center sensitivity', max: 'Max rate', expo: 'Expo' };
 const rateCell = (axis: RateAxis, field: RateField): Row => ({
   id: `rate.${axis}.${field}`,
@@ -80,7 +111,8 @@ const rateCell = (axis: RateAxis, field: RateField): Row => ({
   hint: '',
   kind: 'range',
   range: rateRange(field),
-  fmt: (v) => (field === 'expo' ? v.toFixed(2) : String(Math.round(v))),
+  // fine steps land between the 0.01 expo grid: show the third decimal only then, so the cell matches the stored value
+  fmt: (v) => (field === 'expo' ? v.toFixed(Math.abs(v * 100 - Math.round(v * 100)) > 1e-6 ? 3 : 2) : String(Math.round(v))),
   get: (s) => s.rates[axis][field],
   set: (s, v) => setRateValue(s, axis, field, v),
 });
@@ -151,11 +183,11 @@ const ROW_DEFS: Row[] = [
   {
     id: 'flightMode',
     label: 'Flight mode',
-    hint: 'Angle levels itself (DJI "A"/Atti) · Acro holds attitude',
+    hint: 'Angle self-levels (like DJI "A"/Atti) · Acro holds attitude (rate mode)',
     kind: 'enum',
     options: [
-      { value: 'angle', label: "Angle (self-level · 'A/Atti')" },
-      { value: 'acro', label: 'Acro (rate)' },
+      { value: 'angle', label: 'Angle' },
+      { value: 'acro', label: 'Acro' },
     ],
     get: (s) => s.flightMode,
     set: (s, v) => {
@@ -200,10 +232,10 @@ const ROW_DEFS: Row[] = [
     },
   },
   rangeRow('throttleExpo', 'Throttle expo', 'Flattens the curve around mid', (v) => v.toFixed(2)),
-  rangeRow('throttleLimit', 'Throttle limit', 'Scales maximum motor output', (v) => `${Math.round(v * 100)}%`),
+  rangeRow('throttleLimit', 'Throttle limit', 'Caps full-stick output; centre stick still hovers', (v) => `${Math.round(v * 100)}%`),
   rangeRow('angleMaxTiltDeg', 'Max tilt angle', 'Angle mode: tilt at full stick', (v) => `${Math.round(v)}°`),
   rangeRow('cameraTiltDeg', 'Camera tilt', 'FPV camera uptilt', (v) => `${Math.round(v)}°`),
-  rangeRow('fovDeg', 'Field of view', 'FPV lens width', (v) => `${Math.round(v)}°`),
+  rangeRow('fovDeg', 'Field of view', FOV_HINT, (v) => `${Math.round(v)}°`),
   {
     id: 'quality',
     label: 'Graphics',
@@ -270,7 +302,26 @@ const CONTROLLER_ROWS = ['stickMode', 'throttleSource', 'squareGate', 'invert.th
 const CHANNELS: readonly Channel[] = ['throttle', 'yaw', 'pitch', 'roll'];
 const SLOT_NAME: Record<StickSlot, string> = { lx: 'LX', ly: 'LY', rx: 'RX', ry: 'RY' };
 const LIVE_TEXT_MS = 50;
+const DELTA_FMT = new Intl.NumberFormat('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2, signDisplay: 'exceptZero' });
 const MAX_AXIS_ROWS = 12;
+const ERROR_ADVICE: Record<Platform, (native: boolean) => string> = {
+  ios: (native) =>
+    `Update iOS in Settings › General › Software Update, then ${native ? 'reopen the app' : 'reload this page'}.${native ? '' : ' Every browser on iPhone and iPad uses Apple’s WebKit engine, so a different browser won’t help.'}`,
+  android: (native) =>
+    native
+      ? 'Update Android System WebView and Chrome from Google Play, then reopen the app.'
+      : 'Update Chrome (or your browser) from Google Play, then reload this page.',
+  quest: () => 'Close and reopen Meta Quest Browser, or update the headset in Settings › System › Software Update.',
+  desktop: () => 'Turn on hardware acceleration in your browser settings, update your graphics driver, or try a recent Chrome, Edge, Firefox or Safari.',
+};
+const REMAP_PROMPT = 'Select a stick axis, then move that stick.';
+/** Settings rows that open a screen or dialog instead of cycling a value. */
+const SETTINGS_ACTION_ROWS: { act: string; label: string; hint: string; danger?: boolean }[] = [
+  { act: 'about', label: 'About', hint: `Version ${APP_VERSION}, support, privacy policy and licences` },
+  { act: 'confirm-reset', label: 'Reset all settings', hint: 'Controls, rates, mapping, graphics and sound back to defaults', danger: true },
+];
+/** Stick (left / right) carrying throttle for the mode, regardless of the RT option (touch and VR always use a stick). */
+const throttleSlotSide = (s: Settings): 'left' | 'right' => (throttleControl({ stickMode: s.stickMode, throttleSource: 'stick' }) === 'left' ? 'left' : 'right');
 
 interface LiveEls {
   wells: Record<'l' | 'r', { dot: HTMLElement; well: HTMLElement; v: HTMLElement; h: HTMLElement }>;
@@ -295,11 +346,12 @@ export class Menus {
   private ratesReturn: ScreenName = 'settings';
   private fine = false;
   private charts!: RateCharts;
-  private ratesEls!: { preset: HTMLElement; fine: HTMLElement; box: HTMLElement };
+  private ratesEls!: { preset: HTMLElement; fine: HTMLElement; box: HTMLElement; replaceHint: HTMLElement };
   private settings: Settings;
   private readonly rowEls = new Map<string, { value: HTMLElement; fill: HTMLElement | null }[]>();
-  private readonly finishEls: { time: HTMLElement; best: HTMLElement; badge: HTMLElement };
+  private readonly finishEls: { time: HTMLElement; best: HTMLElement; bestLabel: HTMLElement; delta: HTMLElement; badge: HTMLElement };
   private readonly errorMsg: HTMLElement;
+  private readonly altHoldNote: HTMLElement;
   private readonly menuBest: HTMLElement;
   private readonly controlsBody: HTMLElement;
   private readonly live: LiveEls;
@@ -310,6 +362,22 @@ export class Menus {
   private readonly capture = new AxisCapture();
   private captureSlot: StickSlot | null = null;
   private controlsKey = '';
+  private aboutReturn: ScreenName = 'main';
+  /** touch device (set by enableTouch) */
+  private touch = false;
+  /** immersive VR available (set by enableVr) */
+  private vr = false;
+  /** a gamepad is connected (live, from updateLive) */
+  private padPresent = false;
+  /** Controls screen: gamepad / keyboard section expanded on a touch device */
+  private controlsMore = false;
+  /** best lap last shown on the main menu or finish screen: the "previous best" of the next new record */
+  private knownBest: number | null = null;
+  private readonly platform: Platform;
+  /** installed app (Capacitor shell or home-screen / Quest app) rather than a browser tab */
+  private readonly installed: boolean;
+  private readonly native: boolean;
+  private readonly quest: boolean;
 
   constructor(
     private readonly root: HTMLElement,
@@ -317,6 +385,11 @@ export class Menus {
     settings: Settings,
   ) {
     this.settings = cloneSettings(settings);
+    const dev = detectDevice(window);
+    this.quest = isQuestBrowser(navigator.userAgent) && 'xr' in navigator;
+    this.platform = dev.ios ? 'ios' : this.quest ? 'quest' : /Android/i.test(navigator.userAgent) || dev.native === 'android' ? 'android' : 'desktop';
+    this.installed = dev.standalone;
+    this.native = dev.native !== null;
     this.screens.set('main', this.buildMain());
     this.screens.set('settings', this.buildSettings());
     const ctl = this.buildController();
@@ -324,16 +397,25 @@ export class Menus {
     this.screens.set('rates', this.buildRates());
     const controls = this.buildControls();
     this.screens.set('controls', controls);
+    this.screens.set('about', this.buildAbout());
     this.screens.set('pause', this.buildPause());
     this.screens.set('confirm-quit', this.buildConfirmQuit());
+    this.screens.set('confirm-reset', this.buildConfirmReset());
     this.screens.set('bye', this.buildBye());
     const fin = this.buildFinish();
     this.screens.set('finish', fin);
     const err = this.buildError();
     this.screens.set('error', err);
     const q = <T extends HTMLElement = HTMLElement>(el: HTMLElement, sel: string): T => el.querySelector<T>(sel)!;
-    this.finishEls = { time: q(fin, '[data-f="time"]'), best: q(fin, '[data-f="best"]'), badge: q(fin, '[data-f="badge"]') };
+    this.finishEls = {
+      time: q(fin, '[data-f="time"]'),
+      best: q(fin, '[data-f="best"]'),
+      bestLabel: q(fin, '[data-f="bestLabel"]'),
+      delta: q(fin, '[data-f="delta"]'),
+      badge: q(fin, '[data-f="badge"]'),
+    };
     this.errorMsg = q(err, '[data-f="msg"]');
+    this.altHoldNote = q(this.screens.get('rates')!, '[data-f="altHold"]');
     this.menuBest = q(this.screens.get('main')!, '[data-f="best"]');
     this.controlsBody = q(controls, '[data-f="body"]');
     const well = (side: 'l' | 'r') => ({
@@ -356,6 +438,7 @@ export class Menus {
       title: q(ctl, '[data-f="modeTitle"]'),
     };
     for (const el of this.screens.values()) root.appendChild(el);
+    this.applyGates();
     this.renderSettings();
   }
 
@@ -366,6 +449,7 @@ export class Menus {
 
   /** Touch device: reveal touch-only rows/tips; `fullscreen` also shows the Full screen button. */
   enableTouch(fullscreen: boolean): void {
+    this.touch = true;
     for (const el of this.screens.values()) {
       el.querySelectorAll<HTMLElement>('[data-touch-only]').forEach((x) => {
         x.hidden = false;
@@ -376,7 +460,9 @@ export class Menus {
         });
       }
     }
-    if (this.current !== 'none') this.items = this.collectItems(this.screens.get(this.current)!);
+    this.applyGates();
+    this.renderSettings();
+    this.refreshItems();
   }
 
   /** iOS app: no Quit (apps must not close themselves); the menu stays as the home screen. */
@@ -386,24 +472,54 @@ export class Menus {
         x.hidden = true;
       });
     }
-    if (this.current !== 'none') this.items = this.collectItems(this.screens.get(this.current)!);
+    this.refreshItems();
   }
 
   /** WebXR headset (immersive-vr supported): reveal the Enter VR button. */
   enableVr(): void {
+    this.vr = true;
     for (const el of this.screens.values()) {
       el.querySelectorAll<HTMLElement>('[data-vr-only]').forEach((x) => {
         x.hidden = false;
       });
     }
-    if (this.current !== 'none') this.items = this.collectItems(this.screens.get(this.current)!);
+    this.renderSettings();
+    this.refreshItems();
+  }
+
+  /** Re-reads the focusable items of the open screen after elements were shown / hidden, keeping the focused one. */
+  private refreshItems(): void {
+    if (this.current === 'none') return;
+    const was = this.items[this.focus]?.el ?? null;
+    was?.classList.remove('is-focused');
+    this.items = this.collectItems(this.screens.get(this.current)!);
+    const i = was ? this.items.findIndex((it) => it.el === was) : -1;
+    this.setFocus(i >= 0 ? i : Math.max(0, Math.min(this.focus, this.items.length - 1)), false);
+  }
+
+  /** Shows gamepad / keyboard-only hints unless this is a touch device without a pad; pad-only controls need a pad. */
+  private applyGates(): void {
+    const padUi = !this.touch || this.padPresent;
+    const pad = this.padPresent;
+    for (const el of this.screens.values()) {
+      el.querySelectorAll<HTMLElement>('[data-pad-only],[data-needs-pad],[data-no-pad]').forEach((x) => {
+        x.hidden = (x.hasAttribute('data-pad-only') && !padUi) || (x.hasAttribute('data-needs-pad') && !pad) || (x.hasAttribute('data-no-pad') && pad);
+      });
+    }
+    if (this.live && !this.capture.active) {
+      const idle = pad ? REMAP_PROMPT : '';
+      if (this.live.remapStatus.textContent !== idle) this.stopCapture(idle);
+    }
   }
 
   setMenuBest(best: number | null): void {
+    // a stored best never goes away: null only means "not known here" (e.g. the menu before any race)
+    if (best !== null) this.knownBest = best;
     const text = best === null ? '' : `Best lap ${formatTime(best)}`;
     if (this.menuBest.textContent !== text) this.menuBest.textContent = text;
   }
 
+  /** Fatal start-up error: friendly, platform-specific advice; `msg` goes under "Technical details". */
   setError(msg: string): void {
     this.errorMsg.textContent = msg;
     this.show('error');
@@ -414,13 +530,11 @@ export class Menus {
     if ((name === 'settings' || name === 'controls') && (this.current === 'main' || this.current === 'pause')) this.returnTo = this.current;
     if (name === 'controller' && (this.current === 'settings' || this.current === 'controls')) this.controllerReturn = this.current;
     if (name === 'rates' && (this.current === 'settings' || this.current === 'controller')) this.ratesReturn = this.current;
+    if (name === 'about' && (this.current === 'main' || this.current === 'settings')) this.aboutReturn = this.current;
     if (name !== 'rates') this.setFine(false);
     if (name !== 'controller') this.stopCapture('');
-    if (name === 'finish' && data) {
-      this.finishEls.time.textContent = formatTime(data.time ?? null);
-      this.finishEls.best.textContent = formatTime(data.best ?? null);
-      this.finishEls.badge.hidden = !data.newBest;
-    }
+    if (name === 'finish' && data) this.renderFinish(data);
+    if (name === 'settings') this.renderFovHint();
     this.current = name;
     for (const [n, el] of this.screens) {
       const on = n === name;
@@ -430,14 +544,45 @@ export class Menus {
     }
     this.root.classList.toggle('has-screen', name !== 'none');
     const el = this.screens.get(name);
+    // unmark the old item before the list changes, or the old index would unmark the wrong element
+    this.items[this.focus]?.el.classList.remove('is-focused');
     this.items = el ? this.collectItems(el) : [];
     if (el) el.scrollTop = 0;
-    this.setFocus(0, false);
+    // Dialogs with a destructive choice start on the safe one (data-autofocus).
+    this.setFocus(Math.max(0, this.items.findIndex((it) => it.el.hasAttribute('data-autofocus'))), false);
+  }
+
+  private renderFinish(data: FinishData): void {
+    const F = this.finishEls;
+    const time = data.time ?? null;
+    const prev = data.prevBest !== undefined ? data.prevBest : this.knownBest;
+    F.time.textContent = formatTime(time);
+    F.badge.hidden = !data.newBest;
+    let label = 'Best';
+    let best = data.best ?? null;
+    let delta: number | null = null;
+    if (data.newBest) {
+      // a new record would only repeat the big time as "best": compare with the record it beat
+      label = 'Previous best';
+      best = prev !== null && prev !== time ? prev : null;
+      if (best !== null && time !== null) delta = time - best;
+    } else if (best !== null && time !== null) {
+      delta = time - best;
+    }
+    F.bestLabel.textContent = label;
+    F.best.textContent = best === null ? '—' : formatTime(best);
+    F.delta.textContent = delta === null ? '' : `${DELTA_FMT.format(delta).replace('-', '−')} s`;
+    // signed like the shown text: a delta that rounds to 0.00 s is neither faster nor slower
+    const shown = delta === null ? 0 : Math.round(delta * 100);
+    F.delta.dataset.sign = shown < 0 ? 'faster' : shown > 0 ? 'slower' : '';
+    F.delta.hidden = delta === null;
+    F.bestLabel.parentElement!.hidden = data.newBest === true && best === null;
+    if (data.best !== undefined) this.knownBest = data.best ?? null;
   }
 
   /** Gamepad / keyboard menu navigation. */
   navigate(nav: NavEvents, confirm: boolean): void {
-    if (this.current === 'none' || this.current === 'error') return;
+    if (this.current === 'none') return;
     if (nav.back) {
       this.back();
       return;
@@ -464,6 +609,12 @@ export class Menus {
       case 'rates':
         this.show(this.ratesReturn);
         break;
+      case 'about':
+        this.show(this.aboutReturn);
+        break;
+      case 'confirm-reset':
+        this.show('settings');
+        break;
       case 'settings':
       case 'controls':
         this.show(this.returnTo);
@@ -483,6 +634,12 @@ export class Menus {
   /** Live data for the controller setup screen; call every frame while it is open. */
   updateLive(input: InputFrame, dt: number, now: number): void {
     this.lastInput = input;
+    if (!!input.pad !== this.padPresent) {
+      this.padPresent = !!input.pad;
+      this.applyGates();
+      this.renderSettings();
+      this.refreshItems();
+    }
     if (this.current === 'rates') this.charts.updateLive(input.control, now);
     if (this.current !== 'controller') return;
     const L = this.live;
@@ -561,9 +718,11 @@ export class Menus {
       const key = el.dataset.key;
       if (key) {
         item.adjust = (dir) => this.adjust(key, dir);
-        item.activate = screen === this.screens.get('rates') && ROWS.get(key)?.kind === 'range' ? () => this.setFine(!this.fine) : () => this.adjust(key, 1);
+        item.activate = screen === this.screens.get('rates') && key.startsWith('rate.') ? () => this.setFine(!this.fine) : () => this.adjust(key, 1);
       } else if (act) {
         item.activate = () => this.act(act);
+      } else if (el instanceof HTMLAnchorElement) {
+        item.activate = () => el.click();
       }
       list.push(item);
     });
@@ -585,7 +744,18 @@ export class Menus {
       case 'controls':
       case 'controller':
       case 'rates':
+      case 'about':
+      case 'confirm-reset':
         this.show(act);
+        break;
+      case 'reset-all':
+        this.settings = cloneSettings(DEFAULT_SETTINGS);
+        this.emitSettings();
+        this.show('settings');
+        break;
+      case 'controls-more':
+        this.controlsMore = !this.controlsMore;
+        this.renderControls();
         break;
       case 'back':
         this.back();
@@ -641,7 +811,7 @@ export class Menus {
       row.set(s, row.options[(Math.max(0, idx) + dir + n) % n]!.value);
     } else if (row.kind === 'range') {
       const { min, max } = row.range;
-      const step = this.fine && this.current === 'rates' ? row.range.step / 5 : row.range.step;
+      const step = this.fine && this.current === 'rates' && id.startsWith('rate.') ? row.range.step / 5 : row.range.step;
       const v = Math.round((row.get(s) + dir * step) / step) * step;
       row.set(s, Math.min(max, Math.max(min, Number(v.toFixed(4)))));
     } else {
@@ -686,6 +856,16 @@ export class Menus {
     if (this.charts) {
       this.charts.redraw(s);
       this.ratesEls.preset.textContent = s.ratePreset === 'custom' ? 'Custom' : s.ratePreset[0]!.toUpperCase() + s.ratePreset.slice(1);
+      this.ratesEls.replaceHint.hidden = !rateEditReplacesCustom(s);
+    }
+    this.renderFovHint();
+    if (this.altHoldNote) {
+      const touchHold = this.touch && !this.padPresent && s.touchThrottleCentre;
+      const vr = this.quest || this.vr;
+      const who = touchHold && vr ? 'With touch auto-centre and in VR' : touchHold ? 'With touch auto-centre' : 'In VR';
+      const text = touchHold || vr ? `${who} the throttle stick holds altitude at centre, so throttle mid, expo and limit don't apply there.` : '';
+      if (this.altHoldNote.textContent !== text) this.altHoldNote.textContent = text;
+      this.altHoldNote.hidden = !text;
     }
     if (!this.live) return;
     // Controller screen: mode-dependent labels.
@@ -703,39 +883,112 @@ export class Menus {
     this.renderControls();
   }
 
+  /** FOV row hint: the FPV camera caps its vertical FOV, so a narrow screen shows less than the setting. */
+  private renderFovHint(): void {
+    const list = this.rowEls.get('fovDeg');
+    if (!list) return;
+    const set = this.settings.fovDeg;
+    const eff = Math.round(effectiveFovDeg(set, window.innerWidth / window.innerHeight));
+    const text = eff < Math.round(set) ? `${FOV_HINT} · this screen shows ${eff}°` : FOV_HINT;
+    for (const els of list) {
+      const h = els.value.closest('.ds-row')?.querySelector<HTMLElement>('.ds-row__hint');
+      if (h && h.textContent !== text) h.textContent = text;
+    }
+  }
+
   private renderControls(): void {
     const s = this.settings;
-    const key = `${s.stickMode}|${s.throttleSource}`;
+    const touchFirst = this.touch && !this.padPresent;
+    const xr = this.quest || this.vr;
+    const key = `${s.stickMode}|${s.throttleSource}|${s.touchThrottleCentre}|${s.touchSticksFixed}|${this.touch}|${this.padPresent}|${xr}|${this.controlsMore}`;
     if (key === this.controlsKey || !this.controlsBody) return;
     this.controlsKey = key;
+    const touchHtml = this.touchControlsHtml(s);
+    // headset without a paired gamepad: an Xbox diagram shows the wrong controller; the table covers Touch
+    const padHtml = this.padControlsHtml(s, xr, !xr || this.padPresent);
+    let html: string;
+    if (touchFirst) {
+      html = `${touchHtml}${this.controlsMore ? `<h3 class="ds-h3">Gamepad &amp; keyboard</h3>${padHtml}` : ''}`;
+    } else {
+      html = this.touch ? `${padHtml}<h3 class="ds-h3">Touch</h3>${touchHtml}` : padHtml;
+    }
+    this.controlsBody.innerHTML = html;
+    const screen = this.screens.get('controls');
+    const t = screen?.querySelector('[data-f="modeTag"]');
+    if (t) t.textContent = `Mode ${s.stickMode}`;
+    const more = screen?.querySelector<HTMLElement>('[data-act="controls-more"]');
+    if (more) {
+      more.hidden = !touchFirst;
+      more.setAttribute('aria-expanded', String(this.controlsMore));
+      more.firstElementChild!.textContent = this.controlsMore ? 'Hide gamepad ‹' : 'Gamepad ›';
+    }
+    if (this.current === 'controls') this.refreshItems();
+  }
+
+  private touchControlsHtml(s: Settings): string {
+    const t = touchControls(s);
+    const rows: [string, string][] = [
+      ['Throttle', t.throttle],
+      ['Yaw', t.yaw],
+      ['Pitch', t.pitch],
+      ['Roll', t.roll],
+      ['Arm / disarm', 'ARM'],
+      ['Flight mode (Angle / Acro)', 'MODE'],
+      ['Camera', 'CAM'],
+      ['Reset to checkpoint', 'RESET ↺'],
+      ['Pause', 'Pause ❚❚ (top left)'],
+    ];
+    const where = s.touchSticksFixed
+      ? 'Use the two sticks in the bottom corners.'
+      : 'Put a thumb anywhere on the left or right half — the stick appears under it.';
+    const thr = s.touchThrottleCentre
+      ? 'The throttle stick (magenta) springs back to centre, and centre holds altitude. Tap ARM, then push the throttle up to take off.'
+      : 'The throttle stick (magenta) holds where you let go, like a real radio. Pull it fully down, then tap ARM.';
+    return `
+      <table class="ds-table" data-f="touchTable">
+        <thead><tr><th>Action</th><th>Touch</th></tr></thead>
+        <tbody>${rows.map(([a, x]) => `<tr><th scope="row">${a}</th><td>${x}</td></tr>`).join('')}</tbody>
+      </table>
+      <p class="ds-tip" data-f="touchTip">${where} ${thr}</p>`;
+  }
+
+  private padControlsHtml(s: Settings, xr: boolean, diagram: boolean): string {
     const pad = padControls(s);
     const kb = keyboardKeys(s);
     const thr = throttleControl(s);
-    const map: [string, string, string][] = [
-      ['Throttle', pad.throttle, kb.throttle],
-      ['Yaw', pad.yaw, kb.yaw],
-      ['Pitch', pad.pitch, kb.pitch],
-      ['Roll', pad.roll, kb.roll],
-      ['Arm / disarm', 'A', 'Space'],
-      ['Flight mode', 'Y', 'M'],
-      ['Camera', 'RB', 'C'],
-      ['Reset to checkpoint', 'B', 'R'],
-      ['Pause', 'Menu (☰)', 'Esc'],
+    const vr = xr ? xrControls(s) : null;
+    const map: [string, string, string, string][] = [
+      ['Throttle', vr?.throttle ?? '', pad.throttle, kb.throttle],
+      ['Yaw', vr?.yaw ?? '', pad.yaw, kb.yaw],
+      ['Pitch', vr?.pitch ?? '', pad.pitch, kb.pitch],
+      ['Roll', vr?.roll ?? '', pad.roll, kb.roll],
+      ['Arm / disarm', 'A', 'A', 'Space'],
+      ['Flight mode', 'B', 'Y', 'M'],
+      ['Camera', 'Right stick click', 'RB', 'C'],
+      ['Reset to checkpoint', 'X', 'B', 'R'],
+      ['Pause', 'Y', 'Menu (☰)', 'Esc'],
     ];
-    const rows = map.map(([a, x, k]) => `<tr><th scope="row">${a}</th><td>${x}</td><td><kbd class="ds-kbd">${k}</kbd></td></tr>`).join('');
-    const tip =
+    if (xr) map.push(['Recentre view', 'Left stick click', '—', '—'], ['Heading arrow', 'Left trigger', '—', '—']);
+    const rows = map
+      .map(([a, v, x, k]) => `<tr><th scope="row">${a}</th>${xr ? `<td>${v}</td>` : ''}<td>${x}</td><td>${k === '—' ? k : `<kbd class="ds-kbd">${k}</kbd>`}</td></tr>`)
+      .join('');
+    const padTip =
       thr === 'rt'
-        ? 'Arming needs throttle at zero: release RT, then press A.'
-        : `Arming needs throttle at zero: hold the ${thr} stick fully down, then press A. The throttle axis does not re-centre in the sim — like a real radio.`;
-    this.controlsBody.innerHTML = `
-      <div class="ds-pad-wrap">${controllerDiagram({ left: stickLong(s, 'l'), right: stickLong(s, 'r'), rt: thr === 'rt' ? 'Throttle' : '—', thr })}</div>
-      <table class="ds-table">
-        <thead><tr><th>Action</th><th>Xbox controller</th><th>Keyboard</th></tr></thead>
+        ? 'Arming needs throttle at zero: release RT, then press A (keyboard: Space).'
+        : `Arming needs throttle at zero: hold the ${thr} stick fully down (keyboard: ${throttleDownHint(s, true).replace(/^Hold/, 'hold')}), then press A (Space). The throttle does not re-centre — like a real radio.`;
+    // next to the VR note the two would contradict (Touch sticks spring back, a gamepad throttle does not)
+    const tip = xr ? `Gamepad / keyboard: ${padTip.charAt(0).toLowerCase()}${padTip.slice(1)}` : padTip;
+    const thrXr = throttleSlotSide(s);
+    const xrTip = xr
+      ? `<p class="ds-tip" data-f="xrTip">VR: the Touch controller sticks spring back — the ${thrXr} stick's centre holds altitude and the other stick's centre holds position. Press A to arm, then push the ${thrXr} stick up to take off.</p>`
+      : '';
+    return `
+      ${diagram ? `<div class="ds-pad-wrap">${controllerDiagram({ left: stickLong(s, 'l'), right: stickLong(s, 'r'), rt: thr === 'rt' ? 'Throttle' : null, thr })}</div>` : ''}
+      <table class="ds-table" data-f="padTable">
+        <thead><tr><th>Action</th>${xr ? '<th>Touch controllers</th>' : ''}<th>Xbox controller</th><th>Keyboard</th></tr></thead>
         <tbody>${rows}</tbody>
       </table>
-      <p class="ds-tip">${tip}</p>`;
-    const t = this.screens.get('controls')?.querySelector('[data-f="modeTag"]');
-    if (t) t.textContent = `Mode ${s.stickMode}`;
+      ${this.quest ? xrTip : ''}<p class="ds-tip" data-f="padTip">${tip}</p>${this.quest ? '' : xrTip}`;
   }
 
   private buildAxisRows(n: number): void {
@@ -782,6 +1035,7 @@ export class Menus {
       if (!navEl) return;
       const idx = this.items.findIndex((i) => i.el === navEl);
       if (idx >= 0) this.setFocus(idx);
+      if (navEl instanceof HTMLAnchorElement) return; // the link opens natively
       this.items[idx]?.activate?.();
     });
     el.addEventListener('pointerdown', (e) => {
@@ -841,6 +1095,17 @@ export class Menus {
       .join('');
   }
 
+  /** Link rows that open a screen: label + chevron, no value cell, so they never read as a stepper. */
+  private actionRowsHtml(): string {
+    return SETTINGS_ACTION_ROWS.map(
+      (r) => `
+        <div class="ds-row ds-row--link${r.danger ? ' ds-row--danger' : ''}" data-nav data-act="${r.act}" role="button" aria-label="${r.label}">
+          <div class="ds-row__text"><span class="ds-row__label">${r.label}</span><span class="ds-row__hint">${r.hint}</span></div>
+          <span class="ds-row__chev" aria-hidden="true">›</span>
+        </div>`,
+    ).join('');
+  }
+
   private registerRows(el: HTMLElement): void {
     el.querySelectorAll<HTMLElement>('[data-key]').forEach((rowEl) => {
       const id = rowEl.dataset.key!;
@@ -866,10 +1131,11 @@ export class Menus {
           ${this.btn('freefly', 'Free Fly')}
           ${this.btn('settings', 'Settings')}
           ${this.btn('controls', 'Controls')}
-          ${this.btn('exit', 'Quit', false, ' ds-btn--quit')}
+          ${this.btn('about', 'About')}
+          ${this.btn('exit', 'Quit', false, ' ds-btn--quit', ' style="grid-column:1/-1"')}
         </nav>
         <p class="ds-main__best" data-f="best"></p>
-        <footer class="ds-foot">
+        <footer class="ds-foot" data-pad-only>
           <span><kbd class="ds-kbd ds-kbd--a">A</kbd><kbd class="ds-kbd">Enter</kbd> Select</span>
           <span><kbd class="ds-kbd ds-kbd--b">B</kbd><kbd class="ds-kbd">Esc</kbd> Back</span>
           <span><kbd class="ds-kbd">D-pad</kbd><kbd class="ds-kbd">↑↓</kbd> Move</span>
@@ -884,9 +1150,9 @@ export class Menus {
       `
       <div class="ds-panel ds-glass ds-dialog ds-dialog--wide">
         <h2 class="ds-dialog__title">Settings</h2>
-        <div class="ds-rows">${this.rowsHtml(SETTINGS_ROWS)}</div>
-        <div class="ds-dialog__actions">${this.btn('fullscreen', 'Full screen', false, ' ds-btn--ghost', ' data-fs-only hidden')}${this.btn('rates', 'Rates &amp; sensitivity ›', false, ' ds-btn--ghost')}${this.btn('controller', 'Controller setup ›', false, ' ds-btn--ghost')}${this.btn('back', 'Back')}</div>
-        <p class="ds-foot ds-foot--inline"><span><kbd class="ds-kbd">←</kbd><kbd class="ds-kbd">→</kbd> Change</span><span><kbd class="ds-kbd ds-kbd--b">B</kbd> Back</span></p>
+        <div class="ds-rows">${this.rowsHtml(SETTINGS_ROWS)}${this.actionRowsHtml()}</div>
+        <div class="ds-dialog__actions">${this.btn('fullscreen', 'Full screen', false, ' ds-btn--ghost', ' data-fs-only hidden')}${this.btn('rates', 'Rates ›', false, ' ds-btn--ghost')}${this.btn('controller', 'Controller ›', false, ' ds-btn--ghost')}${this.btn('back', 'Back', true)}</div>
+        <p class="ds-foot ds-foot--inline" data-pad-only><span><kbd class="ds-kbd">←</kbd><kbd class="ds-kbd">→</kbd> Change</span><span><kbd class="ds-kbd ds-kbd--b">B</kbd> Back</span></p>
       </div>`,
     );
     this.registerRows(el);
@@ -910,7 +1176,7 @@ export class Menus {
           <span class="ds-num ds-chan__pct" data-f="pct">0%</span>
         </div>`,
     ).join('');
-    const remap = STICK_SLOTS.map((s) => this.btn(`remap-${s}`, SLOT_NAME[s], false, ' ds-btn--sm')).join('');
+    const remap = STICK_SLOTS.map((s) => this.btn(`remap-${s}`, SLOT_NAME[s], false, ' ds-btn--sm', ' data-needs-pad hidden')).join('');
     const el = this.screen(
       'controller',
       `
@@ -926,18 +1192,25 @@ export class Menus {
             <div class="ds-chans">${chans}</div>
             <h3 class="ds-h3">Device</h3>
             <div class="ds-dev">
-              <p class="ds-dev__name" data-f="devName">—</p>
-              <p class="ds-dev__meta"><span class="ds-label">Mapping</span> <span class="ds-dev__map" data-f="devMap">—</span>
+              <p class="ds-dev__name" data-f="devName" data-needs-pad hidden>—</p>
+              <p class="ds-dev__meta" data-needs-pad hidden><span class="ds-label">Mapping</span> <span class="ds-dev__map" data-f="devMap">—</span>
                 <span class="ds-label">Buttons</span> <span class="ds-num" data-f="buttons">—</span></p>
               <p class="ds-dev__warn" data-f="devWarn" hidden>Non-standard mapping — sticks may be on other axes. Use Remap below.</p>
-              <div class="ds-axes" data-f="axes">—</div>
+              <div class="ds-axes" data-f="axes" data-needs-pad hidden></div>
+              <p class="ds-dev__name" data-no-pad data-f="devEmpty">${this.quest ? 'No gamepad connected' : 'No controller connected'}</p>
+              ${
+                this.quest
+                  ? '<p class="ds-help" data-no-pad>In VR you fly with the Touch controllers — no gamepad needed. To use one, pair a Bluetooth gamepad with the headset and press any button on it; its sticks, axes and remap options appear here.</p>'
+                  : `<p class="ds-help" data-no-pad>Connect a Bluetooth or USB controller, then press any button on it. Its sticks, axes and remap options appear here.</p>
+              <p class="ds-help" data-no-pad data-pad-only>Keyboard: WASD and the arrow keys work as the two sticks.</p>`
+              }
             </div>
-            <h3 class="ds-h3">Axis mapping</h3>
-            <div class="ds-remap">${remap}${this.btn('remap-reset', 'Reset mapping', false, ' ds-btn--sm')}</div>
-            <p class="ds-remap__status" data-f="remapStatus">Select a stick axis, then move that stick.</p>
+            <h3 class="ds-h3" data-needs-pad hidden>Axis mapping</h3>
+            <div class="ds-remap" data-needs-pad hidden>${remap}${this.btn('remap-reset', 'Reset mapping', false, ' ds-btn--sm')}</div>
+            <p class="ds-remap__status" data-f="remapStatus" data-needs-pad hidden></p>
           </section>
         </div>
-        <div class="ds-dialog__actions">${this.btn('rates', 'Rates &amp; sensitivity ›', false, ' ds-btn--ghost')}${this.btn('back', 'Back', true)}</div>
+        <div class="ds-dialog__actions">${this.btn('rates', 'Rates ›', false, ' ds-btn--ghost')}${this.btn('back', 'Back', true)}</div>
       </div>`,
     );
     this.registerRows(el);
@@ -948,7 +1221,7 @@ export class Menus {
     this.fine = on;
     if (!this.ratesEls) return;
     this.ratesEls.box.classList.toggle('is-fine', on);
-    this.ratesEls.fine.textContent = on ? 'Fine step ON · A to toggle' : 'A / Enter on a value: fine step';
+    this.ratesEls.fine.textContent = on ? 'Fine step ON · A / Enter to toggle' : 'A / Enter on a rate value: fine step';
   }
 
   private buildRates(): HTMLElement {
@@ -971,11 +1244,14 @@ export class Menus {
               <thead><tr><th></th><th>Center <small>°/s</small></th><th>Max rate <small>°/s</small></th><th>Expo</th></tr></thead>
               <tbody>${body}</tbody>
             </table>
+            <p class="ds-tip" data-f="replaceHint" hidden>Editing a value replaces your saved Custom rates with this preset plus your change.</p>
             <p class="ds-help">Center sensitivity: rotation rate around stick centre. Max rate: rate at full stick. Expo: softens the centre.</p>
-            <p class="ds-help ds-help--fine" data-f="fine">A / Enter on a value: fine step</p>
+            <p class="ds-help">Roll/pitch rates apply in Acro mode; Angle mode self-levels (see Max tilt below). Yaw rate applies in both.</p>
+            <p class="ds-help ds-help--fine" data-f="fine" data-pad-only>A / Enter on a rate value: fine step</p>
             <h3 class="ds-h3">Throttle</h3>
             <div class="ds-rows">${this.rowsHtml(['throttleMid', 'throttleExpo', 'throttleLimit'])}</div>
             <p class="ds-help">Mid: output at stick centre (Auto = hover). Expo: finer control around mid. Limit: caps full throttle.</p>
+            <p class="ds-tip" data-f="altHold" hidden></p>
             <h3 class="ds-h3">Angle mode &amp; sticks</h3>
             <div class="ds-rows">${this.rowsHtml(['angleMaxTiltDeg', 'deadzone'])}</div>
             <p class="ds-help">Max tilt: how far Angle mode leans at full stick. Deadzone: ignored stick travel at centre.</p>
@@ -996,6 +1272,7 @@ export class Menus {
       preset: el.querySelector<HTMLElement>('[data-f="preset"]')!,
       fine: el.querySelector<HTMLElement>('[data-f="fine"]')!,
       box: el.querySelector<HTMLElement>('.ds-rates')!,
+      replaceHint: el.querySelector<HTMLElement>('[data-f="replaceHint"]')!,
     };
     return el;
   }
@@ -1006,9 +1283,61 @@ export class Menus {
       `
       <div class="ds-panel ds-glass ds-dialog ds-dialog--wide">
         <h2 class="ds-dialog__title">Controls <small data-f="modeTag">Mode 2</small></h2>
-        <p class="ds-tip" data-touch-only hidden>Touch: put a thumb anywhere on the left or right half — the stick appears under it. The throttle stick (magenta) holds where you let go, like a real radio. Pull it fully down, then tap ARM. Buttons: ARM, MODE (Angle/Acro), CAM, RESET, pause.</p>
         <div data-f="body"></div>
-        <div class="ds-dialog__actions">${this.btn('controller', 'Controller setup ›', false, ' ds-btn--ghost')}${this.btn('back', 'Back', true)}</div>
+        <div class="ds-dialog__actions">${this.btn('controls-more', 'Gamepad ›', false, ' ds-btn--ghost', ' aria-expanded="false" hidden')}${this.btn('controller', 'Controller ›', false, ' ds-btn--ghost')}${this.btn('back', 'Back', true)}</div>
+      </div>`,
+    );
+  }
+
+  private buildAbout(): HTMLElement {
+    const base = this.native ? SITE_URL : './';
+    // Inline style: links styled as buttons must not show the anchor underline (no CSS rule in this module's scope).
+    const link = (href: string, label: string, ext: boolean): string =>
+      `<a class="ds-btn ds-btn--sm ds-btn--ghost" data-nav href="${href}"${ext ? ' target="_blank" rel="noopener"' : ''}><span>${label}</span></a>`;
+    const oss: [string, string][] = [
+      ['three.js', 'MIT'],
+      ['postprocessing', 'Zlib'],
+      ['Capacitor', 'MIT'],
+      ['IWER', 'MIT'],
+      ['gl-matrix', 'MIT'],
+      ['WebXR Layers polyfill', 'Apache-2.0'],
+    ];
+    return this.screen(
+      'about',
+      `
+      <div class="ds-panel ds-glass ds-dialog ds-dialog--wide">
+        <h2 class="ds-dialog__title">About</h2>
+        <table class="ds-table">
+          <tbody>
+            <tr><th scope="row">App</th><td>Drone Sim</td></tr>
+            <tr><th scope="row">Version</th><td data-f="version">${APP_VERSION}</td></tr>
+            <tr><th scope="row">Developer</th><td>COWORK Game Studio</td></tr>
+            <tr><th scope="row">Support</th><td>${SUPPORT_EMAIL}</td></tr>
+          </tbody>
+        </table>
+        <h3 class="ds-h3">Open-source software</h3>
+        <p class="ds-help">${oss.map(([n, l]) => `${n} (${l})`).join(' · ')}. Full licence texts are included with the app.</p>
+        <div class="ds-dialog__actions ds-about__links">
+          ${link(`mailto:${SUPPORT_EMAIL}?subject=${encodeURIComponent(`Drone Sim ${APP_VERSION}`)}`, 'Email support', false)}
+          ${link(`${base}privacy/`, 'Privacy policy ↗', true)}
+          ${link(`${base}licenses.txt`, 'Licences ↗', true)}
+        </div>
+        <div class="ds-dialog__actions">${this.btn('back', 'Back', true)}</div>
+      </div>`,
+    );
+  }
+
+  private buildConfirmReset(): HTMLElement {
+    return this.screen(
+      'confirm-reset',
+      `
+      <div class="ds-panel ds-glass ds-dialog">
+        <h2 class="ds-dialog__title">Reset settings?</h2>
+        <p class="ds-dialog__text">Every setting — controls, rates, controller mapping, graphics and sound — goes back to its default. Best times are&nbsp;kept.</p>
+        <nav class="ds-menu">
+          ${this.btn('reset-all', 'Reset all', false, ' ds-btn--quit')}
+          ${this.btn('back', 'Cancel', true, '', ' data-autofocus')}
+        </nav>
       </div>`,
     );
   }
@@ -1038,8 +1367,8 @@ export class Menus {
         <h2 class="ds-dialog__title">Quit?</h2>
         <p class="ds-dialog__text">Leave this flight and return to the main menu. The current run is not saved.</p>
         <nav class="ds-menu">
-          ${this.btn('menu', 'Quit to menu', true, ' ds-btn--quit')}
-          ${this.btn('resume', 'Cancel')}
+          ${this.btn('menu', 'Quit to menu', false, ' ds-btn--quit')}
+          ${this.btn('resume', 'Cancel', true, '', ' data-autofocus')}
         </nav>
       </div>`,
     );
@@ -1051,7 +1380,7 @@ export class Menus {
       `
       <div class="ds-panel ds-glass ds-dialog">
         <h2 class="ds-dialog__title">Drone Sim closed</h2>
-        <p class="ds-dialog__text">Sound is off. You can close this browser tab now.</p>
+        <p class="ds-dialog__text" data-f="byeText">${this.installed || this.native ? 'Sound is off. You can now close Drone&nbsp;Sim.' : 'Sound is off. You can now close this&nbsp;tab.'}</p>
         <nav class="ds-menu">
           ${this.btn('menu', 'Back to game', true)}
         </nav>
@@ -1067,7 +1396,7 @@ export class Menus {
         <p class="ds-finish__kicker">Finish</p>
         <span class="ds-badge-new" data-f="badge" hidden>New best</span>
         <div class="ds-finish__time" data-f="time">--:--.--</div>
-        <p class="ds-finish__best"><span class="ds-label">Best</span> <span data-f="best">--:--.--</span></p>
+        <p class="ds-finish__best"><span class="ds-label" data-f="bestLabel">Best</span> <span data-f="best">--:--.--</span> <span data-f="delta" hidden></span></p>
         <nav class="ds-menu ds-menu--row">
           ${this.btn('retry', 'Retry', true)}
           ${this.btn('menu', 'Menu')}
@@ -1081,9 +1410,14 @@ export class Menus {
       'error',
       `
       <div class="ds-panel ds-glass ds-dialog ds-error">
-        <h2 class="ds-dialog__title">Can't start the simulator</h2>
-        <p class="ds-error__msg" data-f="msg"></p>
-        <div class="ds-dialog__actions">${this.btn('reload', 'Reload', true)}</div>
+        <h2 class="ds-dialog__title">Can’t start the simulator</h2>
+        <p class="ds-dialog__text">Drone Sim couldn’t start 3D graphics on this&nbsp;${this.native ? 'device' : 'browser'}.</p>
+        <p class="ds-dialog__text" data-f="advice">${ERROR_ADVICE[this.platform](this.native)}</p>
+        <details class="ds-help ds-dialog__text">
+          <summary>Technical details</summary>
+          <p class="ds-error__msg" data-f="msg"></p>
+        </details>
+        <nav class="ds-menu">${this.btn('reload', this.native ? 'Try again' : 'Reload', true)}</nav>
       </div>`,
     );
   }

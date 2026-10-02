@@ -3,6 +3,7 @@
  * arm + take-off latch, altitude hold on the centred thumbstick, camera cycle, pause and leaving VR.
  */
 import { expect, test, type Page } from '@playwright/test';
+import { XR_CARD_PX, XR_CARD_TEXT_W, type XrPanelView } from '../../src/render/xr-panel';
 
 interface Hook {
   state: { position: { x: number; y: number; z: number } };
@@ -11,7 +12,8 @@ interface Hook {
   armed: boolean;
   camera: string;
   screen: string;
-  xr: { presenting: boolean; source: string; latched: boolean; panelDraws: number };
+  audio: string;
+  xr: { presenting: boolean; source: string; latched: boolean; panelDraws: number; frameRate: number | null; foveation: number | null; motorsMuted: boolean; panel: XrPanelView | null };
   pixelRatio: number;
   renderScale: number;
   stats: () => { calls: number; triangles: number };
@@ -25,7 +27,7 @@ interface EmuController {
 }
 
 /** Page globals: the game's debug hook and the IWER device (not declared globally: game.spec owns `__drone`). */
-type W = { __drone: Hook; __xrDevice: { controllers: Record<Hand, EmuController> } };
+type W = { __drone: Hook; __xrDevice: { controllers: Record<Hand, EmuController>; updateVisibilityState(s: 'visible' | 'visible-blurred' | 'hidden'): void } };
 
 const errors: string[] = [];
 
@@ -40,6 +42,20 @@ async function press(page: Page, hand: Hand, button: string): Promise<void> {
 /** Thumbstick in xr-standard axes (Y −1 = pushed up). */
 const stick = (page: Page, hand: Hand, x: number, y: number) =>
   page.evaluate(([h, sx, sy]) => (window as unknown as W).__xrDevice.controllers[h as Hand].updateAxes('thumbstick', sx as number, sy as number), [hand, x, y] as const);
+
+/**
+ * The VR card as laid out with the browser's real fonts: every line fits the text width at its own size
+ * (drawn without fillText's maxWidth squeeze), and the flight card keeps sub / hint at full legible size.
+ */
+async function expectCardFits(page: Page, layout: 'menu' | 'hud'): Promise<void> {
+  const panel = await page.evaluate(() => (window as unknown as W).__drone.xr.panel);
+  expect(panel?.layout).toBe(layout);
+  expect(panel!.lines.length).toBeGreaterThanOrEqual(2);
+  for (const l of panel!.lines) {
+    expect(l.width, l.text).toBeLessThanOrEqual(XR_CARD_TEXT_W);
+    if (layout === 'hud' && l.weight !== 700) expect(l.px, l.text).toBe(l.weight === 500 ? XR_CARD_PX.sub : XR_CARD_PX.hint);
+  }
+}
 
 const altitude = (page: Page) => page.evaluate(() => (window as unknown as W).__drone.state.position.y);
 
@@ -63,6 +79,7 @@ test('emulated Quest 2: enter VR, fly with Touch controllers, pause and exit', a
   await page.waitForFunction(() => (window as unknown as W).__drone.xr.presenting, null, { timeout: 10_000 });
   expect(await page.evaluate(() => (window as unknown as W).__drone.tier)).toBe('low');
   expect(await page.evaluate(() => (window as unknown as W).__drone.stats().calls)).toBeGreaterThan(10);
+  await expectCardFits(page, 'menu');
 
   // Menu card: X = Free fly
   await press(page, 'left', 'x-button');
@@ -86,6 +103,7 @@ test('emulated Quest 2: enter VR, fly with Touch controllers, pause and exit', a
   const draws = (await page.evaluate(() => (window as unknown as W).__drone.xr.panelDraws)) - d0;
   expect(draws).toBeGreaterThan(0);
   expect(draws).toBeLessThanOrEqual(24);
+  await expectCardFits(page, 'hud');
 
   // Centre: altitude hold keeps it in the air
   await stick(page, 'left', 0, 0);
@@ -104,6 +122,10 @@ test('emulated Quest 2: enter VR, fly with Touch controllers, pause and exit', a
   // Y pauses, B leaves VR and the flat-screen pause menu is waiting
   await press(page, 'left', 'y-button');
   await page.waitForFunction(() => (window as unknown as W).__drone.race.status === 'paused');
+  await page.waitForFunction(() => (window as unknown as W).__drone.xr.panel?.title === 'PAUSED');
+  await expectCardFits(page, 'menu');
+  const pauseHelp = await page.evaluate(() => (window as unknown as W).__drone.xr.panel!.lines.filter((l) => l.weight === 500).map((l) => l.text));
+  expect(pauseHelp).toEqual(['L-stick click recentre', 'L-trigger heading arrow']);
   await press(page, 'right', 'b-button');
   await page.waitForFunction(() => !(window as unknown as W).__drone.xr.presenting, null, { timeout: 10_000 });
   expect(await page.evaluate(() => (window as unknown as W).__drone.screen)).toBe('pause');
@@ -184,6 +206,14 @@ for (const installed of [true, false]) {
     await page.waitForFunction(() => !!(window as unknown as Partial<W>).__drone && !!(window as unknown as Partial<W>).__xrDevice, null, { timeout: 20_000 });
     if (installed) {
       await page.waitForFunction(() => (window as unknown as W).__drone.xr.presenting, null, { timeout: 10_000 });
+      // B leaves to the app's 2D panel: the card says so, and the panel offers Enter VR straight away
+      await page.waitForFunction(() => (window as unknown as W).__drone.xr.panel?.hint.includes('B 2D menu'));
+      expect(await page.evaluate(() => (window as unknown as W).__drone.xr.panel?.hint)).not.toContain('Exit VR');
+      await press(page, 'right', 'b-button');
+      await page.waitForFunction(() => !(window as unknown as W).__drone.xr.presenting, null, { timeout: 10_000 });
+      expect(await page.evaluate(() => (window as unknown as W).__drone.screen)).toBe('main');
+      await expect(page.locator('.ds-toast', { hasText: 'Press Enter VR to fly' })).toBeVisible();
+      await expect(page.getByRole('button', { name: 'Enter VR' })).toBeFocused();
     } else {
       await page.waitForTimeout(1500);
       expect(await page.evaluate(() => (window as unknown as W).__drone.xr.presenting)).toBe(false);
@@ -193,3 +223,75 @@ for (const installed of [true, false]) {
     await ctx.close();
   });
 }
+
+test('Quest system menu / headset off: the flight pauses and the sound stops; back in view the sound returns', async ({ page }) => {
+  const errs: string[] = [];
+  page.on('pageerror', (e) => errs.push(e.message));
+  await page.goto('/?xremu=1');
+  await page.waitForFunction(() => !!(window as unknown as Partial<W>).__drone && !!(window as unknown as Partial<W>).__xrDevice, null, { timeout: 20_000 });
+  await page.getByRole('button', { name: 'Enter VR' }).click();
+  await page.waitForFunction(() => (window as unknown as W).__drone.xr.presenting, null, { timeout: 10_000 });
+  await press(page, 'left', 'x-button');
+  await page.waitForFunction(() => (window as unknown as W).__drone.race.status === 'freefly');
+  await press(page, 'right', 'a-button');
+  await page.waitForFunction(() => (window as unknown as W).__drone.armed);
+  await page.waitForFunction(() => (window as unknown as W).__drone.audio === 'running', null, { timeout: 5_000 });
+
+  for (const state of ['visible-blurred', 'hidden'] as const) {
+    await page.evaluate((s) => (window as unknown as W).__xrDevice.updateVisibilityState(s), state);
+    await page.waitForFunction(() => (window as unknown as W).__drone.race.status === 'paused', null, { timeout: 5_000 });
+    await page.waitForFunction(() => (window as unknown as W).__drone.audio === 'suspended', null, { timeout: 5_000 });
+    await page.evaluate(() => (window as unknown as W).__xrDevice.updateVisibilityState('visible'));
+    await page.waitForFunction(() => (window as unknown as W).__drone.audio === 'running', null, { timeout: 5_000 });
+    // still paused until the pilot resumes with A; the audio context runs again (menu sounds), the motors stay muted
+    expect(await page.evaluate(() => (window as unknown as W).__drone.race.status)).toBe('paused');
+    expect(await page.evaluate(() => (window as unknown as W).__drone.xr.motorsMuted)).toBe(true);
+    await press(page, 'right', 'a-button');
+    await page.waitForFunction(() => (window as unknown as W).__drone.race.status === 'freefly');
+    await page.waitForFunction(() => !(window as unknown as W).__drone.xr.motorsMuted);
+  }
+  expect(errs).toEqual([]);
+});
+
+test('VR session runs at 72 Hz with fixed foveation; the browser card offers B Exit VR and the full flight hints', async ({ page }) => {
+  const errs: string[] = [];
+  page.on('pageerror', (e) => errs.push(e.message));
+  await page.goto('/?xremu=1');
+  await page.waitForFunction(() => !!(window as unknown as Partial<W>).__drone && !!(window as unknown as Partial<W>).__xrDevice, null, { timeout: 20_000 });
+  // record what the game asks the runtime for (IWER starts at 72 Hz already)
+  await page.evaluate(() => {
+    const proto = (window as unknown as { XRSession: { prototype: { updateTargetFrameRate(r: number): Promise<void> } } }).XRSession.prototype;
+    const orig = proto.updateTargetFrameRate;
+    const asked: number[] = [];
+    (window as unknown as { __asked: number[] }).__asked = asked;
+    proto.updateTargetFrameRate = function (this: unknown, r: number) {
+      asked.push(r);
+      return orig.call(this, r);
+    };
+  });
+  await page.getByRole('button', { name: 'Enter VR' }).click();
+  await page.waitForFunction(() => (window as unknown as W).__drone.xr.presenting, null, { timeout: 10_000 });
+  await page.waitForFunction(() => (window as unknown as { __asked: number[] }).__asked.length > 0, null, { timeout: 5_000 });
+  expect(await page.evaluate(() => (window as unknown as { __asked: number[] }).__asked)).toEqual([72]);
+  expect(await page.evaluate(() => (window as unknown as W).__drone.xr.frameRate)).toBe(72);
+  expect(await page.evaluate(() => (window as unknown as W).__drone.xr.foveation)).toBe(1);
+  await page.waitForFunction(() => (window as unknown as W).__drone.xr.panel?.hint.includes('B Exit VR'));
+
+  await press(page, 'left', 'x-button');
+  await page.waitForFunction(() => (window as unknown as W).__drone.race.status === 'freefly');
+  for (const armed of [false, true]) {
+    if (armed) {
+      await press(page, 'right', 'a-button');
+      await page.waitForFunction(() => (window as unknown as W).__drone.armed);
+      // past the take-off latch (its prompt replaces the button hints)
+      await stick(page, 'left', 0, -1);
+      await page.waitForFunction(() => !(window as unknown as W).__drone.xr.latched);
+      await stick(page, 'left', 0, 0);
+    }
+    await page.waitForTimeout(400);
+    const hint = await page.evaluate(() => (window as unknown as W).__drone.xr.panel?.hint ?? '');
+    for (const part of ['B mode', 'X reset', 'R-stick click cam', 'Y pause']) expect(hint, `armed=${armed}`).toContain(part);
+  }
+  expect(await page.evaluate(() => (window as unknown as W).__drone.xr.panel?.title)).toMatch(/km\/h$/);
+  expect(errs).toEqual([]);
+});

@@ -19,8 +19,8 @@ import { Hud, type UiAction } from './ui/hud';
 import { throttleDownHint } from './ui/mode-labels';
 import { throttleSlot } from './input/stick';
 import { MobileShell, hardenGestures } from './ui/mobile-shell';
-import { isQuestBrowser, onSessionGranted, requestVrSession, vrSupported } from './core/xr';
-import { xrHudContent } from './ui/xr-hud';
+import { isQuestBrowser, onSessionGranted, requestVrSession, tuneXrSession, vrSupported, xrSessionObscured } from './core/xr';
+import { XR_APP_EXIT_HINT, XR_EXIT_HINT, xrHudContent } from './ui/xr-hud';
 import { TouchControls } from './ui/touch-controls';
 import type { ButtonEvents, CameraMode, ControlInput, DroneState, GameEvent, InputFrame, QualityTier } from './types';
 
@@ -63,6 +63,7 @@ function boot(): void {
   let settings: Settings = loadSettings(storage);
 
   const device = detectDevice(window);
+  document.body.classList.toggle('is-quest', isQuestBrowser(navigator.userAgent));
   const params = new URLSearchParams(location.search);
   const selftest = params.get('selftest') === '1';
   const hud = new Hud(uiRoot, (a) => onAction(a));
@@ -130,6 +131,7 @@ function boot(): void {
     shell = new MobileShell(uiRoot, {
       storage,
       standalone: device.standalone,
+      form: device.form,
       onGateTap: () => {
         // Runs inside the tap: the gesture both unlocks WebAudio and allows the fullscreen request.
         void audio.resume();
@@ -156,6 +158,8 @@ function boot(): void {
   const injected: Partial<ButtonEvents> = {};
   let hasInjected = false;
   let motorsMuted = false;
+  /** the flying pad was unplugged during a crash: pause as soon as the respawn ends */
+  let pauseAfterRespawn = false;
 
   function applySettings(s: Settings): void {
     settings = s;
@@ -178,7 +182,23 @@ function boot(): void {
   }
   applySettings(settings);
   hud.setSettings(settings);
-  input.onConnection = (c) => toast(c.connected ? `Controller connected: ${c.name}` : `Controller disconnected: ${c.name}`);
+  input.onConnection = (c) => {
+    toast(c.connected ? `Controller connected: ${c.name}` : `Controller disconnected: ${c.name}`);
+    // the pilot just lost their sticks mid-flight; during a crash, pause once the respawn is done
+    if (c.connected) pauseAfterRespawn = false;
+    else if (c.wasActive) {
+      if (race.snapshot().status === 'crashed') pauseAfterRespawn = true;
+      else pauseFlight();
+    }
+  };
+
+  /** Pauses a flight in progress (not a crash, which respawns on its own) behind the pause menu. */
+  function pauseFlight(): void {
+    const status = race.snapshot().status;
+    if (!FLYING.has(status) || status === 'crashed') return;
+    race.pause();
+    hud.showScreen('pause');
+  }
 
   function placeDrone(position: Vector3, yaw: number): void {
     sim.world.reset(position, yaw);
@@ -253,7 +273,9 @@ function boot(): void {
       const granted = session;
       input.xr.setSources(() => granted.inputSources);
       input.latchTakeoff();
+      session.addEventListener('visibilitychange', onXrVisibility);
       await view.startXr(session);
+      void tuneXrSession(session, view.renderer.xr);
       loop.reset();
     } catch (err) {
       xrSession = null;
@@ -274,15 +296,36 @@ function boot(): void {
   view.renderer.xr.addEventListener('sessionend', onVrEnd);
   function onVrEnd(): void {
     if (!xrSession) return;
+    xrSession.removeEventListener('visibilitychange', onXrVisibility);
     xrSession = null;
     input.xr.setSources(null);
     view.endXr();
-    const status = race.snapshot().status;
-    if (FLYING.has(status) && status !== 'crashed') {
-      race.pause();
-      hud.showScreen('pause');
+    if (questApp) {
+      // The installed app only flies in VR: back on its 2D panel, offer the way straight back in.
+      exited = false;
+      race.toMenu();
+      placeDrone(spawnPos, LOFT_LEVEL.spawn.yaw);
+      hud.showScreen('main');
+      uiRoot.querySelector<HTMLElement>('[data-act="enter-vr"]')?.focus({ preventScroll: true });
+      toast('Press Enter VR to fly');
+    } else {
+      pauseFlight();
     }
     loop.reset();
+  }
+
+  /**
+   * Quest system menu / Guardian ('visible-blurred') or headset taken off ('hidden'): the pilot can no
+   * longer see or steer, so the flight pauses and the sound stops until the session is visible again.
+   */
+  function onXrVisibility(): void {
+    if (!xrSession) return;
+    if (xrSessionObscured(xrSession.visibilityState)) {
+      void audio.suspend();
+      pauseFlight();
+    } else if (xrSession.visibilityState === 'visible' && !exited && !document.hidden) {
+      void audio.resume();
+    }
   }
 
   /** VR menu screens on the XR card: A = primary, X = secondary, B = leave VR. */
@@ -397,11 +440,8 @@ function boot(): void {
   document.addEventListener('visibilitychange', () => {
     if (document.hidden) {
       void audio.suspend();
-      if (FLYING.has(race.snapshot().status) && race.snapshot().status !== 'crashed') {
-        race.pause();
-        hud.showScreen('pause');
-      }
-    } else if (!exited) {
+      pauseFlight();
+    } else if (!exited && !(xrSession && xrSessionObscured(xrSession.visibilityState))) {
       void audio.resume();
     }
   });
@@ -451,10 +491,7 @@ function boot(): void {
     const status = race.snapshot().status;
     const flying = FLYING.has(status);
 
-    if (flying && shell?.rotateOpen && status !== 'crashed') {
-      race.pause();
-      hud.showScreen('pause');
-    }
+    if (flying && shell?.rotateOpen) pauseFlight();
 
     const inVr = view.presenting;
     if (inVr && inp.xr?.lStick) view.recenterXr();
@@ -528,6 +565,8 @@ function boot(): void {
         speed,
         headingArrow: settings.headingArrow,
       });
+      // first drawn frame: fade the boot splash (index.html)
+      if (view.frames === 1) document.body.classList.add('is-ready');
     }
 
     // a frozen view's frame time says nothing about the GPU, so dynamic resolution only adapts while rendering
@@ -539,7 +578,17 @@ function boot(): void {
         xrPanelAt = time;
         xrPanelStatus = snap.status;
         view.xrPanel.set(
-          xrHudContent({ race: snap, armed: sim.fc.armed, latched: input.takeoffLatched, mode: sim.fc.mode, camera: cameraMode, altitude: drone.position.y, speed, toast: xrToast }),
+          xrHudContent({
+            race: snap,
+            armed: sim.fc.armed,
+            latched: input.takeoffLatched,
+            mode: sim.fc.mode,
+            camera: cameraMode,
+            altitude: drone.position.y,
+            speed,
+            toast: xrToast,
+            exitHint: questApp ? XR_APP_EXIT_HINT : XR_EXIT_HINT,
+          }),
         );
       }
     }
@@ -556,8 +605,15 @@ function boot(): void {
       tier,
       settings,
     });
+    if (pauseAfterRespawn && snap.status !== 'crashed') {
+      pauseAfterRespawn = false;
+      pauseFlight();
+    }
     if (touchUi) {
-      touchUi.setVisible(inp.source === 'touch' && FLYING.has(snap.status) && hud.screen === 'none' && !shell?.rotateOpen);
+      touchUi.setVisible(
+        inp.source === 'touch' && FLYING.has(snap.status) && hud.screen === 'none' && !shell?.rotateOpen,
+        snap.status === 'paused' || snap.status === 'finished',
+      );
       touchUi.update(settings, sim.fc.armed, sim.fc.mode, cameraMode);
     }
     const mute = snap.status === 'paused';
@@ -592,7 +648,18 @@ function boot(): void {
       return cameraMode;
     },
     get xr() {
-      return { presenting: view.presenting, source: input.activeSource, latched: input.takeoffLatched, panelDraws: view.xrPanel.draws };
+      return {
+        presenting: view.presenting,
+        source: input.activeSource,
+        latched: input.takeoffLatched,
+        panelDraws: view.xrPanel.draws,
+        frameRate: xrSession?.frameRate ?? null,
+        foveation: view.renderer.xr.getFoveation() ?? null,
+        /** motor sound muted (paused flight) */
+        motorsMuted,
+        /** the VR card's current text (title / sub / hint) */
+        panel: view.xrPanel.content,
+      };
     },
     stats: () => view.stats(),
     /** camera the view is rendering (menus show LOS; pause keeps the flight camera) */
@@ -622,6 +689,11 @@ function boot(): void {
       hasInjected = true;
     },
     action: onAction,
+    /** UI audit / e2e: open any menu screen directly (finish needs its time data) */
+    showScreen: (name: Parameters<Hud['showScreen']>[0], data?: Parameters<Hud['showScreen']>[1]) => hud.showScreen(name, data),
+    /** UI audit: render the fatal-error screen */
+    showError: (msg: string) => hud.setError(msg),
+    toast: (msg: string) => toast(msg),
     teleport(x: number, y: number, z: number, yaw = 0) {
       placeDrone(new Vector3(x, y, z), yaw);
     },
@@ -659,12 +731,22 @@ function boot(): void {
   if (selftest) void import('./ui/selftest').then((m) => m.runSelfTest(hook, settings.stickMode));
 }
 
+/** A boot that throws must not leave the splash covering the page. */
+function safeBoot(): void {
+  try {
+    boot();
+  } catch (err) {
+    document.body.classList.add('is-ready');
+    throw err;
+  }
+}
+
 // `?xremu=1` emulates a Quest 2 (IWER) before boot so navigator.xr is the emulated runtime.
 if (new URLSearchParams(location.search).get('xremu') === '1') {
   void import('./core/xr-emulator').then((m) => {
     m.installXrEmulator();
-    boot();
+    safeBoot();
   });
 } else {
-  boot();
+  safeBoot();
 }

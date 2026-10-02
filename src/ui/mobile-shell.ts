@@ -4,11 +4,22 @@
  * without element fullscreen (iPhone Safari), and the phone "Rotate your device" overlay.
  */
 import './mobile.css';
+import { formFactor, readEnv, type FormFactor } from '../core/device';
 
 export const A2HS_DISMISSED_KEY = 'drone-sim.a2hs-dismissed';
 
 const SHARE_ICON = `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v12M7.5 7.5 12 3l4.5 4.5" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/><path d="M8 11H6.5A1.5 1.5 0 0 0 5 12.5v7A1.5 1.5 0 0 0 6.5 21h11a1.5 1.5 0 0 0 1.5-1.5v-7a1.5 1.5 0 0 0-1.5-1.5H16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>`;
 const ADD_ICON = `<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="4" width="16" height="16" rx="4" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M12 8.5v7M8.5 12h7" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>`;
+
+/** iPadOS 13+ Safari reports a Mac user agent; only the touch points give it away. */
+export function iosDeviceName(userAgent: string, maxTouchPoints: number): 'iPhone' | 'iPad' {
+  return /iPad/.test(userAgent) || (/Macintosh/.test(userAgent) && maxTouchPoints > 1) ? 'iPad' : 'iPhone';
+}
+
+/** Phones are held in landscape (portrait shows the rotate overlay); tablets fly either way up. */
+export function gateHint(form: FormFactor): string {
+  return form === 'phone' ? 'Landscape · two thumbs · sound on' : 'Two thumbs · sound on';
+}
 
 export interface MobileShellOptions {
   storage: Storage | null;
@@ -16,18 +27,24 @@ export interface MobileShellOptions {
   standalone: boolean;
   /** called synchronously inside the gate tap (user gesture) */
   onGateTap: () => void;
+  /** Add-to-Home-Screen wording; detected from the user agent when omitted */
+  iosDevice?: 'iPhone' | 'iPad';
+  /** gate wording; detected from the screen when omitted */
+  form?: FormFactor;
 }
 
 export class MobileShell {
   private readonly gate: HTMLElement;
   private readonly sheet: HTMLElement;
   private readonly rotate: HTMLElement;
+  private readonly sheetOk: HTMLButtonElement;
   private readonly storage: Storage | null;
   private rotating = false;
 
   constructor(root: HTMLElement, opts: MobileShellOptions) {
     this.storage = opts.storage;
     const label = opts.standalone ? 'Tap to play' : 'Tap to play full screen';
+    const form = opts.form ?? (typeof window === 'undefined' ? 'phone' : formFactor(readEnv(window)));
     this.gate = this.el(
       root,
       'ds-gate',
@@ -35,7 +52,7 @@ export class MobileShell {
          <span class="ds-gate__ring" aria-hidden="true"></span>
          <span class="ds-gate__title">DRONE SIM</span>
          <span class="ds-gate__cta">${label}</span>
-         <span class="ds-gate__sub">Landscape · two thumbs · sound on</span>
+         <span class="ds-gate__sub">${gateHint(form)}</span>
        </button>`,
     );
     this.gate.querySelector('button')!.addEventListener('click', () => {
@@ -43,12 +60,14 @@ export class MobileShell {
       opts.onGateTap();
     });
 
+    const nav = typeof navigator === 'undefined' ? null : navigator;
+    const iosDevice = opts.iosDevice ?? iosDeviceName(nav?.userAgent ?? '', nav?.maxTouchPoints ?? 0);
     this.sheet = this.el(
       root,
       'ds-sheet',
       `<div class="ds-sheet__card" role="dialog" aria-modal="true" aria-labelledby="ds-sheet-title">
-         <h2 id="ds-sheet-title">Play full screen</h2>
-         <p>Safari on iPhone can't hide its toolbars for web games. Add Drone Sim to your Home Screen and open it from there:</p>
+         <h2 id="ds-sheet-title" class="ds-dialog__title">Play full screen</h2>
+         <p>Safari on ${iosDevice} can’t hide its toolbars for web games. Add Drone Sim to your Home Screen and open it from there:</p>
          <ol class="ds-sheet__steps">
            <li><span class="ds-sheet__ico">${SHARE_ICON}</span><span>Tap <b>Share</b> in the Safari toolbar</span></li>
            <li><span class="ds-sheet__ico">${ADD_ICON}</span><span>Choose <b>Add to Home Screen</b></span></li>
@@ -57,7 +76,11 @@ export class MobileShell {
          <button type="button" class="ds-sheet__ok" data-sheet="ok">Got it</button>
        </div>`,
     );
-    this.sheet.querySelector('[data-sheet="ok"]')!.addEventListener('click', () => this.dismissSheet());
+    this.sheetOk = this.sheet.querySelector<HTMLButtonElement>('[data-sheet="ok"]')!;
+    this.sheetOk.addEventListener('click', () => this.dismissSheet());
+    this.sheet.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape') this.dismissSheet();
+    });
 
     this.rotate = this.el(
       root,
@@ -85,6 +108,7 @@ export class MobileShell {
   offerHomeScreen(): boolean {
     if (this.dismissed()) return false;
     this.sheet.classList.add('is-open');
+    this.sheetOk.focus({ preventScroll: true });
     return true;
   }
 

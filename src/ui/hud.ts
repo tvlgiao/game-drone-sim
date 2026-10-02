@@ -115,6 +115,9 @@ const HUD_HTML = `
   <div class="ds-toasts" data-r="toasts" role="status" aria-live="polite"></div>
 </div>`;
 
+/** state classes `setCenter` toggles on the centre title and its wrapper */
+const CENTER_KINDS = ['is-crash', 'is-count', 'is-go', 'is-ok', 'is-dim'] as const;
+
 export class Hud {
   private readonly root: HTMLElement;
   private readonly refs: Record<Ref, HTMLElement>;
@@ -135,6 +138,9 @@ export class Hud {
   private throttle = 9;
   private lastUpdate = -Infinity;
   private goTimer: ReturnType<typeof setTimeout> | null = null;
+  private free: boolean | null = null;
+  /** Free-fly session clock (s): the race clock stays at 0 outside a race. */
+  private flightTime = 0;
 
   constructor(root: HTMLElement, onAction: (a: UiAction) => void) {
     this.root = root;
@@ -174,16 +180,22 @@ export class Hud {
     }
     this.menus.updateLive(f.input, dt, now);
     if (race.status !== this.status) this.setStatus(race.status);
+    if (race.status === 'freefly' || (race.status === 'crashed' && race.nextRing < 0)) this.flightTime += dt;
     if (race.status === 'menu') this.menus.setMenuBest(race.bestTime);
     this.updateRings(race, now);
     this.updateCountdown(race);
+    const free = race.nextRing < 0;
+    if (free !== this.free) {
+      this.free = free;
+      r.gates.hidden = free;
+      r.bestRow.hidden = free;
+    }
 
     const textDue = now - this.lastText >= TEXT_INTERVAL;
     if (textDue) {
       this.lastText = now;
-      const free = race.status === 'freefly' || (race.status === 'paused' && race.nextRing < 0);
-      this.text(r.timeLabel, free ? 'Free fly' : 'Time');
-      this.text(r.time, free ? '∞' : formatTime(race.time));
+      this.text(r.timeLabel, free ? 'Flight' : 'Time');
+      this.text(r.time, formatTime(free ? this.flightTime : race.time));
       this.text(r.best, formatTime(race.bestTime));
       this.text(r.speed, String(Math.round(f.speed * 3.6)));
       this.text(r.alt, Math.max(0, f.altitude).toFixed(1));
@@ -192,7 +204,7 @@ export class Hud {
       const cell = v / CELLS;
       this.cls(r.batt, cell < 3.3 ? 'is-crit' : cell < 3.55 ? 'is-warn' : '');
       this.text(r.fps, `${Math.round(f.fps)} fps · ${f.tier}`);
-      this.text(r.thrVal, String(Math.round(f.input.control.throttle * 100)));
+      this.text(r.thrVal, `${Math.round(f.input.control.throttle * 100)}%`);
     }
 
     this.text(r.mode, f.mode === 'acro' ? 'ACRO' : 'ANGLE');
@@ -207,8 +219,9 @@ export class Hud {
     this.updateSticks(f.input);
   }
 
-  showScreen(s: 'main' | 'pause' | 'finish' | 'none' | 'settings' | 'controls' | 'controller' | 'rates' | 'confirm-quit' | 'bye', data?: FinishData & { best?: number | null }): void {
+  showScreen(s: 'main' | 'pause' | 'finish' | 'none' | 'settings' | 'controls' | 'controller' | 'rates' | 'confirm-quit' | 'confirm-reset' | 'about' | 'bye', data?: FinishData & { best?: number | null }): void {
     if (s === 'main' && data && 'best' in data) this.menus.setMenuBest(data.best ?? null);
+    if (s === 'bye') this.clearToasts();
     this.menus.show(s as ScreenName, data);
   }
 
@@ -252,6 +265,8 @@ export class Hud {
         this.flash('is-crash');
         break;
       case 'armed':
+        // The armed chip already shows it; a centre pulse would replace the countdown digit or CRASHED.
+        if (this.status !== 'racing' && this.status !== 'freefly') break;
         this.centerPulse(e.armed ? 'ARMED' : 'DISARMED', e.armed ? 'is-ok' : 'is-dim', 700);
         break;
       default:
@@ -266,6 +281,7 @@ export class Hud {
     t.textContent = msg;
     box.appendChild(t);
     while (box.childElementCount > 3) box.firstElementChild?.remove();
+    this.placeToasts();
     setTimeout(() => {
       t.classList.add('is-out');
       setTimeout(() => t.remove(), 400);
@@ -273,25 +289,29 @@ export class Hud {
   }
 
   setError(msg: string): void {
+    this.clearToasts();
     this.root.classList.add('ds-fatal');
     this.menus.setError(msg);
+  }
+
+  private clearToasts(): void {
+    this.refs.toasts.textContent = '';
   }
 
   private setStatus(s: RaceStatus): void {
     const prev = this.status;
     this.status = s;
     this.root.dataset.status = s;
-    const r = this.refs;
     if (s === 'crashed') {
       this.setCenter('CRASHED', 'is-crash', 'Respawning…');
+      this.popIn();
     } else if (s === 'racing' && prev === 'countdown') {
       this.centerPulse('GO!', 'is-go', 900);
     } else if (s !== 'countdown' && s !== 'paused') {
       this.setCenter('', '', '');
     }
     if (s === 'menu') this.countdown = -1;
-    r.gates.hidden = s === 'freefly';
-    r.bestRow.hidden = s === 'freefly';
+    if (s === 'freefly' && prev !== 'paused' && prev !== 'crashed') this.flightTime = 0;
   }
 
   private updateRings(race: RaceSnapshot, now: number): void {
@@ -338,7 +358,10 @@ export class Hud {
     if (race.status !== 'countdown') return;
     if (race.countdown === this.countdown) return;
     this.countdown = race.countdown;
-    if (race.countdown > 0) this.centerPulse(String(race.countdown), 'is-count', 950);
+    if (race.countdown > 0) {
+      this.setCenter(String(race.countdown), 'is-count', '');
+      this.popIn();
+    }
   }
 
   private updateHint(f: HudFrame): void {
@@ -361,8 +384,10 @@ export class Hud {
         }
       }
     }
+    if (this.refs.hint.textContent === msg) return;
     this.text(this.refs.hint, msg);
     this.cls(this.refs.hint, msg ? 'is-on' : '');
+    this.placeToasts();
   }
 
   private updateSticks(input: InputFrame): void {
@@ -421,11 +446,76 @@ export class Hud {
       this.goTimer = null;
     }
     const r = this.refs;
+    // A finished pulse is held by fill:'forwards' at opacity 0; it would hide whatever is shown next.
+    r.center.getAnimations?.().forEach((a) => a.cancel());
     this.text(r.center, big);
     r.center.className = `ds-center__big ${kind}`;
+    const wrap = r.center.parentElement;
+    if (wrap) {
+      wrap.classList.remove(...CENTER_KINDS);
+      if (kind) wrap.classList.add(kind);
+    }
     this.text(r.centerSub, sub);
+    this.placeToasts();
   }
 
+  /**
+   * Toasts get their own lane. While a centre title (countdown digit, CRASHED, GO!) is up they sit just
+   * above the bottom telemetry card / arm hint, clear of the title and of the respawning drone under it;
+   * when that gap is too short they fall back to just under the title stack. Otherwise the stylesheet's
+   * top-of-screen lane applies.
+   */
+  private placeToasts(): void {
+    const box = this.refs.toasts;
+    // default lane ('' = the stylesheet's); styles are only written when the lane actually changes
+    const lane = (top: string, bottom: string): void => {
+      if (box.style.top !== top) box.style.top = top;
+      if (box.style.bottom !== bottom) box.style.bottom = bottom;
+    };
+    const center = this.refs.center.parentElement;
+    const up = !!(this.refs.center.textContent || this.refs.centerSub.textContent);
+    if (!up || !box.childElementCount || !center) return lane('', '');
+    // the lane's width and height don't depend on top/bottom, so it is measured where it currently sits
+    const hud = box.offsetParent as HTMLElement | null;
+    if (!hud) return lane('', '');
+    const host = hud.getBoundingClientRect();
+    // Big digits overflow their line-height:1 box (and pop in scaled up): measure the glyphs too.
+    const glyphs = document.createRange();
+    glyphs.selectNodeContents(this.refs.center);
+    const titleBottom = Math.max(center.getBoundingClientRect().bottom, glyphs.getBoundingClientRect().bottom);
+    const gap = 12;
+    const laneBox = box.getBoundingClientRect();
+    const floorAbove = (els: (HTMLElement | null)[]): number => {
+      let floor = host.bottom - gap;
+      for (const el of els) {
+        const r = el?.getBoundingClientRect();
+        if (r && r.height > 0 && r.left < laneBox.right && laneBox.left < r.right) floor = Math.min(floor, r.top - gap);
+      }
+      return floor;
+    };
+    const tele = hud.querySelector<HTMLElement>('.ds-hud__bl');
+    const hint = this.refs.hint.classList.contains('is-on') ? this.refs.hint : null;
+    // Short screens: no room above the arm hint, so the toast sits over it (opaque, it hides the hint for its 3 s).
+    const floor = [floorAbove([tele, hint]), floorAbove([tele])].find((f) => f - laneBox.height >= titleBottom + gap);
+    if (floor !== undefined) {
+      lane('auto', `${Math.round(host.bottom - floor)}px`);
+    } else {
+      lane(`${Math.round(titleBottom - host.top + gap)}px`, '');
+    }
+  }
+
+  /** Entrance only: the text stays fully visible until the next setCenter (countdown digit, CRASHED). */
+  private popIn(): void {
+    this.refs.center.animate?.(
+      [
+        { opacity: 0, transform: 'scale(1.5)', filter: 'blur(6px)' },
+        { opacity: 1, transform: 'scale(1)', filter: 'blur(0)' },
+      ],
+      { duration: 220, easing: 'cubic-bezier(.2,.8,.2,1)' },
+    );
+  }
+
+  /** Transient message (GO!, ARMED) that fades out and clears itself. */
   private centerPulse(big: string, kind: string, ms: number): void {
     this.setCenter(big, kind, '');
     this.refs.center.animate?.(
@@ -440,6 +530,7 @@ export class Hud {
     this.goTimer = setTimeout(() => {
       this.goTimer = null;
       if (this.status !== 'crashed') this.text(this.refs.center, '');
+      this.placeToasts();
     }, ms);
   }
 

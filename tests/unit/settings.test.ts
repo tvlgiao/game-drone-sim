@@ -2,9 +2,11 @@ import { describe, expect, it } from 'vitest';
 import {
   DEFAULT_SETTINGS,
   SETTINGS_KEY,
+  SETTINGS_OPTIONS,
   applyRatePreset,
   cloneSettings,
   loadSettings,
+  rateEditReplacesCustom,
   saveSettings,
   setRateValue,
   validateSettings,
@@ -36,6 +38,7 @@ describe('settings', () => {
       flightMode: 'angle',
       ratePreset: 'freestyle',
       rates: { roll: { center: 200, max: 670, expo: 0.54 }, pitch: { center: 200, max: 670, expo: 0.54 }, yaw: { center: 200, max: 670, expo: 0.54 } },
+      customRates: null,
       linkRollPitch: true,
       throttleMid: null,
       throttleExpo: 0.3,
@@ -45,7 +48,7 @@ describe('settings', () => {
       fovDeg: 110,
       quality: 'auto',
       volume: 0.7,
-      showFps: true,
+      showFps: false,
       headingArrow: true,
       deadzone: 0.05,
       touchThrottleCentre: true,
@@ -106,6 +109,7 @@ describe('settings', () => {
       flightMode: 'acro',
       ratePreset: 'freestyle',
       rates: { roll: { center: 200, max: 670, expo: 0.54 }, pitch: { center: 200, max: 670, expo: 0.54 }, yaw: { center: 200, max: 670, expo: 0.54 } },
+      customRates: null,
       linkRollPitch: true,
       throttleMid: null,
       throttleExpo: 0.3,
@@ -115,7 +119,7 @@ describe('settings', () => {
       fovDeg: 80,
       quality: 'low',
       volume: 0,
-      showFps: true,
+      showFps: false,
       headingArrow: true,
       deadzone: 0.05,
       touchThrottleCentre: true,
@@ -133,7 +137,7 @@ describe('settings', () => {
       invert: { throttle: false, yaw: true, pitch: false, roll: true },
       axisMap: { lx: 0, ly: 1, rx: 3, ry: 4 },
       fovDeg: 120,
-      showFps: false,
+      showFps: true,
       headingArrow: false,
     };
     saveSettings(custom, st);
@@ -181,7 +185,7 @@ describe('settings', () => {
     expect(s.rates.roll).toEqual({ center: 20, max: 1800, expo: 1 });
     expect(s.rates.pitch).toEqual({ center: 500, max: 500, expo: 0 });
     expect(s.rates.yaw).toEqual(RATE_PRESETS.freestyle);
-    expect(s).toMatchObject({ throttleMid: 0.75, throttleExpo: 1, throttleLimit: 0.25, angleMaxTiltDeg: 80 });
+    expect(s).toMatchObject({ throttleMid: 0.75, throttleExpo: 1, throttleLimit: 0.5, angleMaxTiltDeg: 80 });
     expect(validateSettings({ throttleMid: 0.1 }).throttleMid).toBe(0.25);
     expect(validateSettings({ throttleMid: 'auto' }).throttleMid).toBeNull();
     expect(validateSettings({ throttleMid: null }).throttleMid).toBeNull();
@@ -200,6 +204,67 @@ describe('settings', () => {
     applyRatePreset(s, 'custom');
     expect(s.rates.yaw.max).toBe(500); // custom keeps values
     expect(DEFAULT_SETTINGS.rates.roll).toEqual(RATE_PRESETS.freestyle);
+  });
+
+  it('custom rates survive cycling through the named presets and back', () => {
+    const s = cloneSettings(DEFAULT_SETTINGS);
+    s.linkRollPitch = false;
+    setRateValue(s, 'roll', 'center', 333);
+    setRateValue(s, 'yaw', 'expo', 0.12);
+    const mine = cloneSettings(s).rates;
+    for (const p of ['beginner', 'freestyle', 'race'] as const) {
+      applyRatePreset(s, p);
+      expect(s.rates.roll).toEqual(RATE_PRESETS[p]);
+    }
+    applyRatePreset(s, 'custom');
+    expect(s.ratePreset).toBe('custom');
+    expect(s.rates).toEqual(mine);
+    s.rates.roll.center = 1; // restored values are a copy, not the stored object
+    expect(s.customRates!.roll.center).toBe(333);
+  });
+
+  it('editing on a named preset replaces saved custom rates, and rateEditReplacesCustom warns exactly then', () => {
+    const s = cloneSettings(DEFAULT_SETTINGS);
+    expect(rateEditReplacesCustom(s)).toBe(false); // nothing saved yet
+    setRateValue(s, 'roll', 'center', 333);
+    expect(rateEditReplacesCustom(s)).toBe(false); // on custom: edits extend the saved set
+    applyRatePreset(s, 'race');
+    expect(rateEditReplacesCustom(s)).toBe(true);
+    setRateValue(s, 'yaw', 'max', 900);
+    expect(s.ratePreset).toBe('custom');
+    expect(s.customRates!.roll).toEqual(RATE_PRESETS.race); // the old 333 is gone: race + the edit
+    expect(s.customRates!.yaw.max).toBe(900);
+    expect(rateEditReplacesCustom(s)).toBe(false);
+  });
+
+  it('custom with nothing stored keeps the current values', () => {
+    const s = cloneSettings(DEFAULT_SETTINGS);
+    applyRatePreset(s, 'race');
+    applyRatePreset(s, 'custom');
+    expect(s.rates.roll).toEqual(RATE_PRESETS.race);
+    expect(s.customRates).toBeNull();
+  });
+
+  it('customRates persist, validate and migrate', () => {
+    const st = mem();
+    const s = cloneSettings(DEFAULT_SETTINGS);
+    setRateValue(s, 'roll', 'max', 990);
+    applyRatePreset(s, 'beginner');
+    saveSettings(s, st);
+    const back = loadSettings(st);
+    expect(back.ratePreset).toBe('beginner');
+    expect(back.customRates!.roll.max).toBe(990);
+    applyRatePreset(back, 'custom');
+    expect(back.rates.roll.max).toBe(990);
+    // bad values clamp per field; a non-object is dropped
+    const v = validateSettings({ customRates: { roll: { center: 5, max: 9999, expo: 4 }, pitch: 'x' } });
+    expect(v.customRates!.roll).toEqual({ center: 20, max: 1800, expo: 1 });
+    expect(v.customRates!.pitch).toEqual(RATE_PRESETS.freestyle);
+    expect(validateSettings({ customRates: [1, 2] }).customRates).toBeNull();
+    expect(validateSettings({ customRates: 'x' }).customRates).toBeNull();
+    // a pre-customRates save on the custom preset keeps its values as the custom copy
+    const old = validateSettings({ ratePreset: 'custom', rates: { roll: { center: 250, max: 700, expo: 0.3 } } });
+    expect(old.customRates!.roll).toEqual({ center: 250, max: 700, expo: 0.3 });
   });
 
   it('link roll & pitch mirrors edits; yaw is never linked', () => {
@@ -241,5 +306,34 @@ describe('settings v2 migration', () => {
     expect(loadSettings(storage).touchThrottleCentre).toBe(true);
     saveSettings({ ...loadSettings(storage), touchThrottleCentre: false }, storage);
     expect(loadSettings(storage).touchThrottleCentre).toBe(false);
+  });
+});
+
+describe('settings v3 migration', () => {
+  const memStore = (): { store: Map<string, string>; storage: Storage } => {
+    const store = new Map<string, string>();
+    return { store, storage: { getItem: (k: string) => store.get(k) ?? null, setItem: (k: string, v: string) => void store.set(k, v) } as unknown as Storage };
+  };
+
+  it('the FPS chip is off by default and an older save (which stored the old default) does not turn it back on', () => {
+    expect(DEFAULT_SETTINGS.showFps).toBe(false);
+    const { store, storage } = memStore();
+    store.set(SETTINGS_KEY, JSON.stringify({ ...DEFAULT_SETTINGS, showFps: true, v: 2 }));
+    expect(loadSettings(storage).showFps).toBe(false);
+  });
+
+  it('a pilot who turns the FPS chip on keeps it, and a v2 save keeps its touch throttle choice', () => {
+    const { store, storage } = memStore();
+    saveSettings({ ...loadSettings(storage), showFps: true }, storage);
+    expect(loadSettings(storage).showFps).toBe(true);
+    store.set(SETTINGS_KEY, JSON.stringify({ ...DEFAULT_SETTINGS, touchThrottleCentre: false, v: 2 }));
+    expect(loadSettings(storage).touchThrottleCentre).toBe(false);
+  });
+
+  it('a stored throttle limit below the new minimum is raised to it', () => {
+    const { store, storage } = memStore();
+    store.set(SETTINGS_KEY, JSON.stringify({ throttleLimit: 0.3, v: 2 }));
+    expect(loadSettings(storage).throttleLimit).toBe(SETTINGS_OPTIONS.throttleLimit.min);
+    expect(SETTINGS_OPTIONS.throttleLimit.min).toBeGreaterThanOrEqual(0.5);
   });
 });

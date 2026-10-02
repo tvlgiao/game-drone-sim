@@ -62,6 +62,8 @@ export class TouchSticks {
    */
   latched = false;
   private throttleSide: TouchSide = 'l';
+  /** Unknown counts as armed: re-latching an armed quad on release would cut its throttle mid-air. */
+  private disarmed = false;
 
   constructor() {
     this.l.holdsThrottle = true;
@@ -156,6 +158,14 @@ export class TouchSticks {
     this.sync();
   }
 
+  /**
+   * FC armed state, fed every frame. While disarmed, letting go of the auto-centring throttle
+   * re-latches it: the stick springs to centre (hover), which the FC would refuse to arm on.
+   */
+  setArmed(armed: boolean): void {
+    this.disarmed = !armed;
+  }
+
   /** Throttle 0..1 → throttle stick position (e.g. zero it for a new session). */
   setThrottle(v: number): void {
     const t = this.track(this.throttleSide);
@@ -167,6 +177,7 @@ export class TouchSticks {
     t.pointerId = -1;
     t.x = 0;
     if (!t.holdsThrottle || this.opts.centreThrottle) t.y = 0;
+    if (t.holdsThrottle && this.opts.centreThrottle && this.disarmed) this.latched = true;
     t.cx = t.ax;
     t.cy = t.ay;
     this.sync();

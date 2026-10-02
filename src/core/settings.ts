@@ -35,6 +35,8 @@ export interface Settings {
   ratePreset: RatePreset;
   /** per-axis Betaflight Actual rates (source of truth; presets just fill these) */
   rates: AxisRates;
+  /** the pilot's own rates, restored when cycling back to 'custom' (null = never edited) */
+  customRates: AxisRates | null;
   /** editing roll also sets pitch (UI convenience, persisted) */
   linkRollPitch: boolean;
   /** throttle stick centre → motor command; null = auto (hover throttle) */
@@ -71,6 +73,7 @@ export const DEFAULT_SETTINGS: Readonly<Settings> = Object.freeze({
   flightMode: 'angle',
   ratePreset: 'freestyle',
   rates: Object.freeze(axisRatesFrom(RATE_PRESETS.freestyle)) as AxisRates,
+  customRates: null,
   linkRollPitch: true,
   throttleMid: null,
   throttleExpo: 0.3,
@@ -80,7 +83,7 @@ export const DEFAULT_SETTINGS: Readonly<Settings> = Object.freeze({
   fovDeg: 110,
   quality: 'auto',
   volume: 0.7,
-  showFps: true,
+  showFps: false,
   headingArrow: true,
   deadzone: 0.05,
   touchThrottleCentre: true,
@@ -98,7 +101,8 @@ export const SETTINGS_OPTIONS = {
   rateExpo: { min: 0, max: 1, step: 0.01 },
   throttleMid: { min: 0.25, max: 0.75, step: 0.01 },
   throttleExpo: { min: 0, max: 1, step: 0.01 },
-  throttleLimit: { min: 0.25, max: 1, step: 0.01 },
+  /** below ~0.5 a drained pack could no longer climb at full stick (the limit only scales above mid) */
+  throttleLimit: { min: 0.5, max: 1, step: 0.01 },
   angleMaxTiltDeg: { min: 20, max: 80, step: 1 },
   quality: ['auto', 'ultra', 'high', 'medium', 'low'] as const,
   cameraTiltDeg: { min: 0, max: 45, step: 5 },
@@ -151,25 +155,39 @@ export function clampRate(raw: unknown, fallback: Readonly<RateProfile>): RatePr
   return { center, max: Math.max(max, center), expo: num(r.expo, rateRange('expo'), fallback.expo) };
 }
 
+const copyRates = (r: Readonly<AxisRates>): AxisRates => ({ roll: { ...r.roll }, pitch: { ...r.pitch }, yaw: { ...r.yaw } });
+
 /** Deep copy (nested objects are never shared between Settings values). */
 export function cloneSettings(s: Readonly<Settings>): Settings {
   return {
     ...s,
     invert: { ...s.invert },
     axisMap: { ...s.axisMap },
-    rates: { roll: { ...s.rates.roll }, pitch: { ...s.rates.pitch }, yaw: { ...s.rates.yaw } },
+    rates: copyRates(s.rates),
+    customRates: s.customRates ? copyRates(s.customRates) : null,
   };
 }
 
-/** Selects a rate preset: a named preset copies its values into all three axes; 'custom' keeps them. */
+/** Selects a rate preset: a named preset copies its values into all three axes; 'custom' restores the pilot's own rates. */
 export function applyRatePreset(s: Settings, preset: RatePreset): void {
+  if (s.ratePreset === 'custom') s.customRates = copyRates(s.rates);
   s.ratePreset = preset;
   if (preset !== 'custom') s.rates = axisRatesFrom(RATE_PRESETS[preset]);
+  else if (s.customRates) s.rates = copyRates(s.customRates);
+}
+
+/**
+ * True when a rate edit would overwrite the saved Custom rates: there is a saved set, but a named preset is active,
+ * so the edit starts from that preset's values (one Custom slot only). The Rates screen warns about it.
+ */
+export function rateEditReplacesCustom(s: Readonly<Settings>): boolean {
+  return s.ratePreset !== 'custom' && s.customRates !== null;
 }
 
 /**
  * Edits one rate value (clamped). Center above max pushes max up; max below center is held at center.
- * With `linkRollPitch`, roll and pitch edits mirror each other. Any edit switches the preset to 'custom'.
+ * With `linkRollPitch`, roll and pitch edits mirror each other. Any edit switches the preset to 'custom' and the
+ * edited rates become `customRates` — on a named preset that replaces the saved set (see `rateEditReplacesCustom`).
  */
 export function setRateValue(s: Settings, axis: RateAxis, field: RateField, value: number): void {
   const range = rateRange(field);
@@ -188,6 +206,7 @@ export function setRateValue(s: Settings, axis: RateAxis, field: RateField, valu
     s.rates = { ...s.rates, [a]: r };
   }
   s.ratePreset = 'custom';
+  s.customRates = copyRates(s.rates);
 }
 
 /** Coerces arbitrary data into valid Settings: unknown enum values fall back, numbers clamp, old values migrate. */
@@ -203,6 +222,8 @@ export function validateSettings(raw: unknown): Settings {
   // Old saves have only a preset name: its values become the per-axis rates.
   const base = axisRatesFrom(RATE_PRESETS[preset === 'custom' ? 'freestyle' : preset]);
   const rr = obj(r.rates);
+  const rates: AxisRates = { roll: clampRate(rr.roll, base.roll), pitch: clampRate(rr.pitch, base.pitch), yaw: clampRate(rr.yaw, base.yaw) };
+  const cr = r.customRates !== null && typeof r.customRates === 'object' && !Array.isArray(r.customRates) ? obj(r.customRates) : null;
   return {
     stickMode: mode === 1 || mode === 2 || mode === 3 || mode === 4 ? mode : d.stickMode,
     throttleSource: pick(ts, o.throttleSource, d.throttleSource),
@@ -221,11 +242,13 @@ export function validateSettings(raw: unknown): Settings {
     },
     flightMode: pick(r.flightMode, o.flightMode, d.flightMode),
     ratePreset: preset,
-    rates: {
-      roll: clampRate(rr.roll, base.roll),
-      pitch: clampRate(rr.pitch, base.pitch),
-      yaw: clampRate(rr.yaw, base.yaw),
-    },
+    rates,
+    // Saves from before customRates: a custom preset's values are the pilot's own.
+    customRates: cr
+      ? { roll: clampRate(cr.roll, rates.roll), pitch: clampRate(cr.pitch, rates.pitch), yaw: clampRate(cr.yaw, rates.yaw) }
+      : preset === 'custom'
+        ? copyRates(rates)
+        : null,
     linkRollPitch: bool(r.linkRollPitch, d.linkRollPitch),
     throttleMid: typeof r.throttleMid === 'number' && Number.isFinite(r.throttleMid) ? num(r.throttleMid, o.throttleMid, 0.5) : null,
     throttleExpo: num(r.throttleExpo, o.throttleExpo, d.throttleExpo),
@@ -252,18 +275,21 @@ export function defaultStorage(): Storage | null {
   }
 }
 
-/** Loads persisted settings; bad JSON / missing storage yield defaults. `undefined` = localStorage. */
 /** Bumped when a default changes in a way stored settings must not override. */
-const SETTINGS_VERSION = 2;
+const SETTINGS_VERSION = 3;
 
+/** Loads persisted settings; bad JSON / missing storage yield defaults. `undefined` = localStorage. */
 export function loadSettings(storage: Storage | null = defaultStorage()): Settings {
   if (!storage) return cloneSettings(DEFAULT_SETTINGS);
   try {
     const text = storage.getItem(SETTINGS_KEY);
     if (!text) return cloneSettings(DEFAULT_SETTINGS);
     const raw = JSON.parse(text) as Record<string, unknown>;
+    const v = raw && typeof raw.v === 'number' ? raw.v : 1;
     // v2: touch throttle auto-centres by default (MOBA-style); drop the old stored default.
-    if (raw && raw.v !== SETTINGS_VERSION) delete raw.touchThrottleCentre;
+    if (raw && v < 2) delete raw.touchThrottleCentre;
+    // v3: the FPS chip is off by default; every older save stored the old `true` default.
+    if (raw && v < 3) delete raw.showFps;
     return validateSettings(raw);
   } catch {
     return cloneSettings(DEFAULT_SETTINGS);
