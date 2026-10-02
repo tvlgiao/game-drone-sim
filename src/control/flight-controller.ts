@@ -62,7 +62,10 @@ export class FlightController {
   angleMaxTiltDeg = ANGLE_MAX_TILT_DEG;
   /** throttle curve expo around the mid point (Betaflight thr_expo) */
   throttleExpo = THROTTLE_EXPO;
-  /** throttle output scale 0.25..1 (Betaflight throttle_limit "scale") */
+  /**
+   * 0.5..1: scales only the stick travel above mid, so centre still hovers and full stick still climbs
+   * (scaling the whole curve like Betaflight's "scale" left a 3" quad unable to hover below ≈0.47)
+   */
   throttleLimit = 1;
   /** DJI-style altitude hold: throttle stick commands climb rate, centre holds altitude */
   altitudeHold = false;
@@ -222,7 +225,8 @@ export class FlightController {
       this.pidYaw.relax(dt, I_RELAX_TAU);
     }
 
-    const u = throttleCurve(input.throttle, this.throttleMid, this.throttleExpo) * this.throttleLimit;
+    const curve = throttleCurve(input.throttle, this.throttleMid, this.throttleExpo);
+    const u = curve > this.throttleMid ? this.throttleMid + (curve - this.throttleMid) * this.throttleLimit : curve;
     const idle = this.params.idle;
     const collective = this.altitudeHold ? this.altitudeCollective(dt, input.throttle, state) : u * u;
     const thrust = this.mixer.mix(collective, r, p, y, idle * idle);
