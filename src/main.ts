@@ -317,7 +317,7 @@ function boot(): void {
     if (xrSessionObscured(xrSession.visibilityState)) {
       void audio.suspend();
       pauseFlight();
-    } else if (!exited && !document.hidden) {
+    } else if (xrSession.visibilityState === 'visible' && !exited && !document.hidden) {
       void audio.resume();
     }
   }
@@ -600,7 +600,10 @@ function boot(): void {
       settings,
     });
     if (touchUi) {
-      touchUi.setVisible(inp.source === 'touch' && FLYING.has(snap.status) && hud.screen === 'none' && !shell?.rotateOpen);
+      touchUi.setVisible(
+        inp.source === 'touch' && FLYING.has(snap.status) && hud.screen === 'none' && !shell?.rotateOpen,
+        snap.status === 'paused' || snap.status === 'finished',
+      );
       touchUi.update(settings, sim.fc.armed, sim.fc.mode, cameraMode);
     }
     const mute = snap.status === 'paused';
