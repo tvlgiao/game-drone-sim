@@ -62,6 +62,11 @@ export function xrHudContent(s: XrHudState): XrPanelContent {
   }
 }
 
+/** First-run tutorial offer in the headset (the DOM prompt is not visible there): A starts, X skips. */
+export function xrTutorialPrompt(): XrPanelContent {
+  return { layout: 'menu', title: 'NEW TO FPV?', sub: '3-minute tutorial: arm, hover, turn, land, fly a ring', hint: 'A Start · X Skip', accent: CYAN };
+}
+
 const XR_BAR_CELLS = 10;
 
 /** Text progress bar for the canvas card (geometric-shape glyphs every headset font has; no extra texture or mesh). */

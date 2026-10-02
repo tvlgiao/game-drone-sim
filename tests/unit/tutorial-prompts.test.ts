@@ -3,7 +3,7 @@ import { DEFAULT_SETTINGS, type Settings } from '../../src/core/settings';
 import { TUTORIAL_STEPS, TutorialMachine, type TutorialStepId } from '../../src/game/tutorial';
 import { buttonLabel, channelDirLabel, channelSide, pressVerb } from '../../src/ui/mode-labels';
 import { promptFor, skipLabel, tutorialView, type PromptSettings } from '../../src/ui/tutorial-prompts';
-import { xrProgressBar, xrTutorialCard } from '../../src/ui/xr-hud';
+import { xrProgressBar, xrTutorialCard, xrTutorialPrompt } from '../../src/ui/xr-hud';
 import type { InputSource } from '../../src/types';
 
 const NO_INVERT = { throttle: false, yaw: false, pitch: false, roll: false };
@@ -222,6 +222,10 @@ describe('xrTutorialCard', () => {
     expect(c.sub).toBe('a · b');
     expect(c.accent).toBe('#ffc861');
     expect(c.hint).toContain('Skipping 40%');
+  });
+
+  it('first-run offer card: A Start · X Skip at eye level', () => {
+    expect(xrTutorialPrompt()).toMatchObject({ layout: 'menu', title: 'NEW TO FPV?', hint: 'A Start · X Skip' });
   });
 
   it('done card: A Start Training · X Menu', () => {
