@@ -37,6 +37,7 @@ describe('settings', () => {
       flightMode: 'angle',
       ratePreset: 'freestyle',
       rates: { roll: { center: 200, max: 670, expo: 0.54 }, pitch: { center: 200, max: 670, expo: 0.54 }, yaw: { center: 200, max: 670, expo: 0.54 } },
+      customRates: null,
       linkRollPitch: true,
       throttleMid: null,
       throttleExpo: 0.3,
@@ -107,6 +108,7 @@ describe('settings', () => {
       flightMode: 'acro',
       ratePreset: 'freestyle',
       rates: { roll: { center: 200, max: 670, expo: 0.54 }, pitch: { center: 200, max: 670, expo: 0.54 }, yaw: { center: 200, max: 670, expo: 0.54 } },
+      customRates: null,
       linkRollPitch: true,
       throttleMid: null,
       throttleExpo: 0.3,
@@ -201,6 +203,53 @@ describe('settings', () => {
     applyRatePreset(s, 'custom');
     expect(s.rates.yaw.max).toBe(500); // custom keeps values
     expect(DEFAULT_SETTINGS.rates.roll).toEqual(RATE_PRESETS.freestyle);
+  });
+
+  it('custom rates survive cycling through the named presets and back', () => {
+    const s = cloneSettings(DEFAULT_SETTINGS);
+    s.linkRollPitch = false;
+    setRateValue(s, 'roll', 'center', 333);
+    setRateValue(s, 'yaw', 'expo', 0.12);
+    const mine = cloneSettings(s).rates;
+    for (const p of ['beginner', 'freestyle', 'race'] as const) {
+      applyRatePreset(s, p);
+      expect(s.rates.roll).toEqual(RATE_PRESETS[p]);
+    }
+    applyRatePreset(s, 'custom');
+    expect(s.ratePreset).toBe('custom');
+    expect(s.rates).toEqual(mine);
+    s.rates.roll.center = 1; // restored values are a copy, not the stored object
+    expect(s.customRates!.roll.center).toBe(333);
+  });
+
+  it('custom with nothing stored keeps the current values', () => {
+    const s = cloneSettings(DEFAULT_SETTINGS);
+    applyRatePreset(s, 'race');
+    applyRatePreset(s, 'custom');
+    expect(s.rates.roll).toEqual(RATE_PRESETS.race);
+    expect(s.customRates).toBeNull();
+  });
+
+  it('customRates persist, validate and migrate', () => {
+    const st = mem();
+    const s = cloneSettings(DEFAULT_SETTINGS);
+    setRateValue(s, 'roll', 'max', 990);
+    applyRatePreset(s, 'beginner');
+    saveSettings(s, st);
+    const back = loadSettings(st);
+    expect(back.ratePreset).toBe('beginner');
+    expect(back.customRates!.roll.max).toBe(990);
+    applyRatePreset(back, 'custom');
+    expect(back.rates.roll.max).toBe(990);
+    // bad values clamp per field; a non-object is dropped
+    const v = validateSettings({ customRates: { roll: { center: 5, max: 9999, expo: 4 }, pitch: 'x' } });
+    expect(v.customRates!.roll).toEqual({ center: 20, max: 1800, expo: 1 });
+    expect(v.customRates!.pitch).toEqual(RATE_PRESETS.freestyle);
+    expect(validateSettings({ customRates: [1, 2] }).customRates).toBeNull();
+    expect(validateSettings({ customRates: 'x' }).customRates).toBeNull();
+    // a pre-customRates save on the custom preset keeps its values as the custom copy
+    const old = validateSettings({ ratePreset: 'custom', rates: { roll: { center: 250, max: 700, expo: 0.3 } } });
+    expect(old.customRates!.roll).toEqual({ center: 250, max: 700, expo: 0.3 });
   });
 
   it('link roll & pitch mirrors edits; yaw is never linked', () => {
