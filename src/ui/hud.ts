@@ -136,6 +136,8 @@ export class Hud {
   private lastUpdate = -Infinity;
   private goTimer: ReturnType<typeof setTimeout> | null = null;
   private free: boolean | null = null;
+  /** Free-fly session clock (s): the race clock stays at 0 outside a race. */
+  private flightTime = 0;
 
   constructor(root: HTMLElement, onAction: (a: UiAction) => void) {
     this.root = root;
@@ -175,6 +177,7 @@ export class Hud {
     }
     this.menus.updateLive(f.input, dt, now);
     if (race.status !== this.status) this.setStatus(race.status);
+    if (race.status === 'freefly' || (race.status === 'crashed' && race.nextRing < 0)) this.flightTime += dt;
     if (race.status === 'menu') this.menus.setMenuBest(race.bestTime);
     this.updateRings(race, now);
     this.updateCountdown(race);
@@ -188,8 +191,8 @@ export class Hud {
     const textDue = now - this.lastText >= TEXT_INTERVAL;
     if (textDue) {
       this.lastText = now;
-      this.text(r.timeLabel, free ? 'Free fly' : 'Time');
-      this.text(r.time, free ? '∞' : formatTime(race.time));
+      this.text(r.timeLabel, free ? 'Flight' : 'Time');
+      this.text(r.time, formatTime(free ? this.flightTime : race.time));
       this.text(r.best, formatTime(race.bestTime));
       this.text(r.speed, String(Math.round(f.speed * 3.6)));
       this.text(r.alt, Math.max(0, f.altitude).toFixed(1));
@@ -198,7 +201,7 @@ export class Hud {
       const cell = v / CELLS;
       this.cls(r.batt, cell < 3.3 ? 'is-crit' : cell < 3.55 ? 'is-warn' : '');
       this.text(r.fps, `${Math.round(f.fps)} fps · ${f.tier}`);
-      this.text(r.thrVal, String(Math.round(f.input.control.throttle * 100)));
+      this.text(r.thrVal, `${Math.round(f.input.control.throttle * 100)}%`);
     }
 
     this.text(r.mode, f.mode === 'acro' ? 'ACRO' : 'ANGLE');
@@ -217,6 +220,15 @@ export class Hud {
     if (s === 'main' && data && 'best' in data) this.menus.setMenuBest(data.best ?? null);
     if (s === 'bye') this.clearToasts();
     this.menus.show(s as ScreenName, data);
+    if (s === 'finish') this.markFinishDelta();
+  }
+
+  /** Colours the finish delta by its sign: "−1.20 s" faster (green), "+0.40 s" slower (amber). */
+  private markFinishDelta(): void {
+    const el = this.root.querySelector<HTMLElement>('.ds-screen--finish [data-f="delta"]');
+    if (!el) return;
+    const t = el.textContent ?? '';
+    el.dataset.sign = t.startsWith('−') || t.startsWith('-') ? 'faster' : t.startsWith('+') ? 'slower' : '';
   }
 
   /** Currently open menu screen ('none' while flying). */
@@ -275,6 +287,7 @@ export class Hud {
     t.textContent = msg;
     box.appendChild(t);
     while (box.childElementCount > 3) box.firstElementChild?.remove();
+    this.placeToasts();
     setTimeout(() => {
       t.classList.add('is-out');
       setTimeout(() => t.remove(), 400);
@@ -304,6 +317,7 @@ export class Hud {
       this.setCenter('', '', '');
     }
     if (s === 'menu') this.countdown = -1;
+    if (s === 'freefly' && prev !== 'paused' && prev !== 'crashed') this.flightTime = 0;
   }
 
   private updateRings(race: RaceSnapshot, now: number): void {
@@ -442,6 +456,30 @@ export class Hud {
     r.center.className = `ds-center__big ${kind}`;
     r.center.parentElement!.className = `ds-center ${kind}`;
     this.text(r.centerSub, sub);
+    this.placeToasts();
+  }
+
+  /**
+   * Toasts get their own lane: while a centre title (countdown digit, CRASHED, GO!) is up they sit just
+   * under the title stack instead of on top of it; otherwise the stylesheet's top-of-screen lane applies.
+   */
+  private placeToasts(): void {
+    const box = this.refs.toasts;
+    const center = this.refs.center.parentElement!;
+    const up = !!(this.refs.center.textContent || this.refs.centerSub.textContent);
+    if (!up || !box.childElementCount) {
+      box.style.top = '';
+      return;
+    }
+    const hud = box.offsetParent as HTMLElement | null;
+    if (!hud) return;
+    const host = hud.getBoundingClientRect();
+    // Big digits overflow their line-height:1 box (and pop in scaled up): measure the glyphs too.
+    const glyphs = document.createRange();
+    glyphs.selectNodeContents(this.refs.center);
+    const bottom = Math.max(center.getBoundingClientRect().bottom, glyphs.getBoundingClientRect().bottom);
+    const gap = 12;
+    box.style.top = `${Math.round(bottom - host.top + gap)}px`;
   }
 
   /** Entrance only: the text stays fully visible until the next setCenter (countdown digit, CRASHED). */
@@ -470,6 +508,7 @@ export class Hud {
     this.goTimer = setTimeout(() => {
       this.goTimer = null;
       if (this.status !== 'crashed') this.text(this.refs.center, '');
+      this.placeToasts();
     }, ms);
   }
 
