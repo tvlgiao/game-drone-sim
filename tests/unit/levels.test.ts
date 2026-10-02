@@ -155,6 +155,8 @@ describe('soft bounds', () => {
     const counts = ev.slice(0, firstRespawn).filter((e) => e.type === 'out-of-bounds').map((e) => (e as { seconds: number }).seconds);
     expect(counts).toEqual([5, 4, 3, 2, 1]);
     expect(ev.filter((e) => e.type === 'respawn')).toHaveLength(1);
+    // the warning is withdrawn with the respawn (the VR card clears its toast on in-bounds)
+    expect(ev.slice(firstRespawn).some((e) => e.type === 'in-bounds')).toBe(true);
     expect(rc.respawnPoint().position.toArray()).toEqual(TRAINING_LEVEL.spawn.position);
     expect(rc.snapshot().status).toBe('freefly');
   });

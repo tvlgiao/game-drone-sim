@@ -399,6 +399,9 @@ export class RaceController {
     this.outTimer += dt;
     if (this.outTimer >= OUT_OF_BOUNDS_RESPAWN) {
       this.respawn();
+      // the countdown is over: listeners clearing the warning on in-bounds (VR card toast) must hear it,
+      // after the respawn (same queue, so the order is respawn → in-bounds)
+      this.pending.push({ type: 'in-bounds' });
       return;
     }
     const left = Math.ceil(OUT_OF_BOUNDS_RESPAWN - this.outTimer);
