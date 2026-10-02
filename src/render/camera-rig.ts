@@ -17,6 +17,12 @@ const LOS_MARGIN_PITCH = 0.55;
 const LOS_HEAD_OMEGA = 4.5;
 const LOS_RELAX = 0.35;
 /**
+ * Hard limit (fraction of the half-frame, in NDC) on the drone's offset from the head direction, applied after the
+ * spring: a fast climb or dash next to the pilot outruns the spring, which would otherwise lose the drone.
+ */
+const LOS_HARD_FRAME = 0.62;
+const LOS_MAX_PITCH = 1.45;
+/**
  * FPV under the ceiling: within this clearance (m) the camera's uptilt eases off (to FPV_CEILING_TILT
  * of the setting at contact), otherwise a quad pressed to the unlit ceiling sees nothing but black.
  */
@@ -40,6 +46,8 @@ const _m = new THREE.Matrix4();
 const _e = new THREE.Euler();
 const _up = new THREE.Vector3(0, 1, 0);
 const _x = new THREE.Vector3(1, 0, 0);
+const _right = new THREE.Vector3();
+const _camUp = new THREE.Vector3();
 
 export interface RigInput {
   dt: number;
@@ -300,6 +308,39 @@ export class CameraRig {
     const ep = this.headTargetPitch - this.headPitch;
     this.headPitchV += (ep * w * w - 2 * w * this.headPitchV) * dt;
     this.headPitch += this.headPitchV * dt;
+
+    this.keepInFrame(f.drone.position, Math.tan(halfH) * LOS_HARD_FRAME, Math.tan(halfV) * LOS_HARD_FRAME, droneYaw, dronePitch);
+    this.headPitch = THREE.MathUtils.clamp(this.headPitch, -LOS_MAX_PITCH, LOS_MAX_PITCH);
+  }
+
+  /**
+   * Turns the head the least needed so `p` projects within ±`tx` / ±`ty` (tangent units of the view frame).
+   * Works in the head's own frame: yaw/pitch differences alone misjudge the projection when looking up steeply.
+   */
+  private keepInFrame(p: THREE.Vector3, tx: number, ty: number, droneYaw: number, dronePitch: number): void {
+    _v.copy(p).sub(this.pilot);
+    for (let i = 0; i < 6; i++) {
+      dirFromAngles(this.headYaw, this.headPitch, _fwd);
+      _right.crossVectors(_fwd, _up).normalize();
+      _camUp.crossVectors(_right, _fwd);
+      const zf = _v.dot(_fwd);
+      if (zf <= 1e-3) {
+        this.headYaw = droneYaw;
+        this.headPitch = dronePitch;
+        this.headYawV = this.headPitchV = 0;
+        continue;
+      }
+      const x = _v.dot(_right) / zf;
+      const y = _v.dot(_camUp) / zf;
+      const ex = Math.abs(x) > tx ? Math.atan(x) - Math.sign(x) * Math.atan(tx) : 0;
+      const ey = Math.abs(y) > ty ? Math.atan(y) - Math.sign(y) * Math.atan(ty) : 0;
+      if (ex === 0 && ey === 0) break;
+      // +x (right) is a negative yaw; a yaw turn moves the view sideways by about cos(pitch) of its angle
+      this.headYaw = wrapAngle(this.headYaw - (ex * 1.05) / Math.max(0.25, Math.cos(this.headPitch)));
+      this.headPitch = THREE.MathUtils.clamp(this.headPitch + ey * 1.05, -LOS_MAX_PITCH, LOS_MAX_PITCH);
+      if (this.headYawV * ex > 0) this.headYawV = 0;
+      if (this.headPitchV * ey < 0) this.headPitchV = 0;
+    }
   }
 
   /** FPV lens position in world space for an uptilt of `tilt` rad → `out`. */
