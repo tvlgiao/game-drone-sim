@@ -559,6 +559,8 @@ function boot(): void {
         speed,
         headingArrow: settings.headingArrow,
       });
+      // first drawn frame: fade the boot splash (index.html)
+      if (view.frames === 1) document.body.classList.add('is-ready');
     }
 
     // a frozen view's frame time says nothing about the GPU, so dynamic resolution only adapts while rendering
@@ -640,6 +642,8 @@ function boot(): void {
         panelDraws: view.xrPanel.draws,
         frameRate: xrSession?.frameRate ?? null,
         foveation: view.renderer.xr.getFoveation() ?? null,
+        /** motor sound muted (paused flight) */
+        motorsMuted,
         /** the VR card's current text (title / sub / hint) */
         panel: view.xrPanel.content,
       };
@@ -715,11 +719,22 @@ function boot(): void {
 }
 
 // `?xremu=1` emulates a Quest 2 (IWER) before boot so navigator.xr is the emulated runtime.
+/** A boot that throws must not leave the splash covering the page. */
+function safeBoot(): void {
+  try {
+    boot();
+  } catch (err) {
+    document.body.classList.add('is-ready');
+    throw err;
+  }
+}
+
+// `?xremu=1` emulates a Quest 2 (IWER) before boot so navigator.xr is the emulated runtime.
 if (new URLSearchParams(location.search).get('xremu') === '1') {
   void import('./core/xr-emulator').then((m) => {
     m.installXrEmulator();
-    boot();
+    safeBoot();
   });
 } else {
-  boot();
+  safeBoot();
 }

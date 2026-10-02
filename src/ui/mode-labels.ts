@@ -1,4 +1,5 @@
 /** Human labels for the RC stick mode / throttle source (HUD, controls help, controller setup). */
+import { FPV_FOV_V_RANGE } from '../core/camera-limits';
 import type { Settings } from '../core/settings';
 import { MODE_TABLE, throttleSlot, type Channel } from '../input/stick';
 
@@ -79,10 +80,6 @@ export function throttleDownHint(s: ModeSettings, keyboard: boolean): string {
   const c = throttleControl(s);
   return c === 'rt' ? 'Release RT' : `${c === 'left' ? 'Left' : 'Right'} stick fully down`;
 }
-
-/** Vertical-FOV clamp of the FPV camera, owned by CameraRig. */
-export { FPV_FOV_V_RANGE } from '../render/camera-rig';
-import { FPV_FOV_V_RANGE } from '../render/camera-rig';
 
 const RAD = Math.PI / 180;
 
