@@ -6,6 +6,7 @@ import {
   applyRatePreset,
   cloneSettings,
   loadSettings,
+  rateEditReplacesCustom,
   saveSettings,
   setRateValue,
   validateSettings,
@@ -220,6 +221,20 @@ describe('settings', () => {
     expect(s.rates).toEqual(mine);
     s.rates.roll.center = 1; // restored values are a copy, not the stored object
     expect(s.customRates!.roll.center).toBe(333);
+  });
+
+  it('editing on a named preset replaces saved custom rates, and rateEditReplacesCustom warns exactly then', () => {
+    const s = cloneSettings(DEFAULT_SETTINGS);
+    expect(rateEditReplacesCustom(s)).toBe(false); // nothing saved yet
+    setRateValue(s, 'roll', 'center', 333);
+    expect(rateEditReplacesCustom(s)).toBe(false); // on custom: edits extend the saved set
+    applyRatePreset(s, 'race');
+    expect(rateEditReplacesCustom(s)).toBe(true);
+    setRateValue(s, 'yaw', 'max', 900);
+    expect(s.ratePreset).toBe('custom');
+    expect(s.customRates!.roll).toEqual(RATE_PRESETS.race); // the old 333 is gone: race + the edit
+    expect(s.customRates!.yaw.max).toBe(900);
+    expect(rateEditReplacesCustom(s)).toBe(false);
   });
 
   it('custom with nothing stored keeps the current values', () => {

@@ -79,3 +79,19 @@ export function throttleDownHint(s: ModeSettings, keyboard: boolean): string {
   const c = throttleControl(s);
   return c === 'rt' ? 'Release RT' : `${c === 'left' ? 'Left' : 'Right'} stick fully down`;
 }
+
+/** Vertical-FOV clamp of the FPV camera, mirrored from CameraRig (tests/unit/mode-labels.test.ts pins it to the rig). */
+export const FPV_FOV_V_RANGE = { min: 35, max: 110 } as const;
+
+const RAD = Math.PI / 180;
+
+/**
+ * Horizontal FOV the FPV camera really shows for a settings FOV at a viewport aspect (w / h).
+ * Differs from `fovDeg` only when the rig's vertical clamp kicks in (wide FOV on a narrow screen).
+ */
+export function effectiveFovDeg(fovDeg: number, aspect: number): number {
+  if (!(aspect > 0)) return fovDeg;
+  const v = 2 * Math.atan(Math.tan((fovDeg * RAD) / 2) / aspect) / RAD;
+  const vc = Math.min(FPV_FOV_V_RANGE.max, Math.max(FPV_FOV_V_RANGE.min, v));
+  return vc === v ? fovDeg : (2 * Math.atan(Math.tan((vc * RAD) / 2) * aspect)) / RAD;
+}

@@ -58,7 +58,10 @@ test.describe('desktop menus', () => {
     await expect(privacy).toHaveAttribute('target', '_blank');
     await expect(about.getByRole('link', { name: /Email support/ })).toHaveAttribute('href', /^mailto:support@coworkgamestudio\.com/);
     await expect(about.getByRole('link', { name: /Licences/ })).toHaveAttribute('href', './licenses.txt');
-    expect((await page.request.get('./licenses.txt')).ok()).toBe(true);
+    const licences = await page.request.get('./licenses.txt');
+    expect(licences.ok()).toBe(true);
+    expect(await licences.text()).toContain('IWER (Immersive Web Emulation Runtime)');
+    await expect(about).toContainText('IWER (MIT)');
     expect((await page.request.get('./privacy/')).ok()).toBe(true);
     await page.keyboard.press('Escape', { delay: 40 });
     await expect.poll(() => screenOf(page)).toBe('main');
@@ -122,7 +125,7 @@ test.describe('desktop menus', () => {
   test('custom rates survive a preset cycle; fine step only on rate cells and Throttle mid leaves Auto', async ({ page }) => {
     await boot(page);
     await page.getByRole('button', { name: 'Settings' }).click();
-    await page.getByRole('button', { name: /Rates & sensitivity/ }).click();
+    await page.getByRole('button', { name: 'Rates ›', exact: true }).click();
     const rates = page.locator('.ds-screen--rates');
     const cell = (k: string) => rates.locator(`[data-key="${k}"] .ds-row__value`);
     const preset = rates.locator('[data-key="ratePreset"] .ds-row__value');
@@ -171,16 +174,17 @@ test.describe('desktop menus', () => {
     expect(errors).toEqual([]);
   });
 
-  test('controller setup without a pad shows an empty state and no remap buttons; Reset mapping stays', async ({ page }) => {
+  test('controller setup without a pad shows only the empty state: no remap buttons, no lone Reset mapping', async ({ page }) => {
     await boot(page);
     await page.getByRole('button', { name: 'Settings' }).click();
-    await page.getByRole('button', { name: /Controller setup/ }).click();
+    await page.getByRole('button', { name: 'Controller ›', exact: true }).click();
     const ctl = page.locator('.ds-screen--controller');
     await expect(ctl.locator('[data-f="devEmpty"]')).toBeVisible();
     await expect(ctl).toContainText('Connect a Bluetooth or USB controller');
     await expect(ctl.locator('[data-act="remap-lx"]')).toBeHidden();
     await expect(ctl.locator('[data-f="devName"]')).toBeHidden();
-    await expect(ctl.getByRole('button', { name: 'Reset mapping' })).toBeVisible();
+    await expect(ctl.locator('[data-act="remap-reset"]')).toBeHidden();
+    await expect(ctl.getByRole('heading', { name: 'Axis mapping' })).toBeHidden();
     expect(errors).toEqual([]);
   });
 
@@ -193,6 +197,85 @@ test.describe('desktop menus', () => {
     await expect(body.locator('[data-f="touchTable"]')).toHaveCount(0);
     await expect(body.locator('thead')).not.toContainText('Touch controllers');
     expect(errors).toEqual([]);
+  });
+
+  test('Settings: About and Reset are rows of the list; the footer is one row of same-size buttons', async ({ page }) => {
+    await boot(page);
+    await page.getByRole('button', { name: 'Settings' }).click();
+    const settings = page.locator('.ds-screen--settings');
+    for (const act of ['about', 'confirm-reset']) await expect(settings.locator(`.ds-rows > .ds-row[data-act="${act}"]`)).toBeVisible();
+    const footer = settings.locator('.ds-dialog__actions');
+    await expect(footer).toHaveCount(1);
+    const boxes = await footer.locator('.ds-btn:visible').evaluateAll((els) => els.map((e) => e.getBoundingClientRect()).map((r) => [Math.round(r.top), Math.round(r.height)]));
+    expect(boxes.map((b) => b[0] - boxes[0]![0])).toEqual(boxes.map(() => 0)); // one row
+    expect(new Set(boxes.map((b) => b[1])).size).toBe(1); // one height
+    await expect(footer.locator('.ds-btn--sm')).toHaveCount(0);
+    expect(errors).toEqual([]);
+  });
+
+  test('throttle curve: the 0 % label clears the live dot at the origin', async ({ page }) => {
+    await boot(page);
+    await page.getByRole('button', { name: 'Settings' }).click();
+    await page.getByRole('button', { name: 'Rates ›', exact: true }).click();
+    const chart = page.locator('.ds-screen--rates [data-f="thrChart"]');
+    await expect(chart.locator('.ds-chart__dot')).toHaveAttribute('transform', /^translate\(/); // placed by the live update (stick at 0)
+    const dot = (await chart.locator('.ds-chart__dot').boundingBox())!;
+    const label = (await chart.locator('.ds-chart__ylabel', { hasText: /^0%$/ }).boundingBox())!;
+    const zero = (await chart.locator('.ds-chart__xlabel', { hasText: /^0$/ }).boundingBox())!;
+    expect(label.x + label.width).toBeLessThan(dot.x);
+    expect(zero.y).toBeGreaterThan(dot.y + dot.height);
+    expect(errors).toEqual([]);
+  });
+
+  test('Rates warns that editing a named preset replaces the saved Custom rates', async ({ page }) => {
+    await boot(page);
+    await page.getByRole('button', { name: 'Settings' }).click();
+    await page.getByRole('button', { name: 'Rates ›', exact: true }).click();
+    const rates = page.locator('.ds-screen--rates');
+    const hint = rates.locator('[data-f="replaceHint"]');
+    await expect(hint).toBeHidden(); // nothing saved yet
+    await rates.locator('[data-key="rate.roll.center"] [data-dir="1"]').click();
+    await expect(hint).toBeHidden(); // on Custom: edits extend it
+    await rates.locator('[data-key="ratePreset"] [data-dir="1"]').click(); // Custom → Beginner
+    await expect(hint).toBeVisible();
+    await expect(hint).toContainText('replaces your saved Custom rates');
+    await rates.locator('[data-key="rate.yaw.max"] [data-dir="1"]').click();
+    await expect(rates.locator('[data-key="ratePreset"] .ds-row__value')).toHaveText('Custom');
+    await expect(hint).toBeHidden();
+    expect(errors).toEqual([]);
+  });
+
+  test('Field of view hint shows the narrower FOV a 4:3 screen really gets', async ({ page }) => {
+    await page.setViewportSize({ width: 1024, height: 768 });
+    await boot(page);
+    await page.getByRole('button', { name: 'Settings' }).click();
+    const row = page.locator('.ds-screen--settings [data-key="fovDeg"]');
+    const hint = row.locator('.ds-row__hint');
+    await expect(hint).toHaveText('FPV lens width');
+    for (let i = 0; i < 3; i++) await row.locator('[data-dir="1"]').click(); // 110 → 125
+    await expect(row.locator('.ds-row__value')).toHaveText('125°');
+    await expect(hint).toHaveText('FPV lens width');
+    await row.locator('[data-dir="1"]').click(); // 130: capped by the camera's vertical FOV
+    await expect(hint).toHaveText(/this screen shows 12[0-9]°/);
+    expect(errors).toEqual([]);
+  });
+
+  test('Bye copy: a browser tab is told to close the tab', async ({ page }) => {
+    await boot(page);
+    await page.evaluate(() => (window as unknown as { __drone: Hook }).__drone.showScreen('bye'));
+    await expect(page.locator('.ds-screen--bye [data-f="byeText"]')).toContainText('close this tab');
+  });
+
+  test('Bye copy: an installed app names Drone Sim instead of a tab', async ({ page }) => {
+    await page.addInitScript(() => {
+      const mm = window.matchMedia.bind(window);
+      window.matchMedia = (q: string) => (q === '(display-mode: standalone)' ? ({ ...mm(q), matches: true, media: q } as MediaQueryList) : mm(q));
+    });
+    await boot(page);
+    await page.evaluate(() => (window as unknown as { __drone: Hook }).__drone.showScreen('bye'));
+    const text = page.locator('.ds-screen--bye [data-f="byeText"]');
+    await expect(text).toContainText('You can now close Drone Sim.');
+    await expect(text).not.toContainText('tab');
   });
 
   test('finish on a new best shows the previous best and the gain; error screen hides the jargon', async ({ page }) => {
@@ -238,6 +321,7 @@ test.describe('Quest Browser', () => {
     await expect(row('Recentre view')).toHaveText('Left stick click');
     await expect(row('Heading arrow')).toHaveText('Left trigger');
     await expect(body.locator('[data-f="xrTip"]')).toContainText('holds altitude');
+    await expect(body.locator('.ds-pad-wrap')).toHaveCount(0); // no Xbox diagram for a headset without a gamepad
     expect(errors).toEqual([]);
   });
 });
@@ -267,8 +351,12 @@ test.describe('touch devices', () => {
     await expect(body).not.toContainText('fully down, then press A');
     await expect(body.locator('[data-f="padTable"]')).toHaveCount(0); // gamepad section collapsed
 
-    await page.getByRole('button', { name: /Gamepad & keyboard/ }).tap();
+    const more = page.locator('.ds-screen--controls [data-act="controls-more"]');
+    await expect(more.locator('..')).toContainText('Controller ›'); // in the footer, beside the other nav buttons
+    await more.tap();
     await expect(body.locator('[data-f="padTable"]')).toBeVisible();
+    await expect(more).toHaveText('Hide gamepad ‹');
+    await expect(more).toHaveAttribute('aria-expanded', 'true');
 
     // Hold mode: the tip follows the setting
     await page.locator('.ds-screen--controls [data-act="back"]').tap();
@@ -281,11 +369,22 @@ test.describe('touch devices', () => {
     expect(errors).toEqual([]);
   });
 
+  test('main menu on a landscape phone: Quit fills its own row instead of a lone half cell', async ({ page }) => {
+    await boot(page);
+    await passGate(page);
+    const quit = page.locator('.ds-screen--main [data-act="exit"]');
+    test.skip(!(await quit.isVisible()), 'Quit hidden on this platform');
+    const race = (await page.locator('.ds-screen--main [data-act="race"]').boundingBox())!;
+    const q = (await quit.boundingBox())!;
+    expect(Math.abs(q.width - race.width)).toBeLessThan(2);
+    expect(errors).toEqual([]);
+  });
+
   test('gamepad-only hints are hidden; Rates notes altitude hold for auto-centre touch throttle', async ({ page }) => {
     await boot(page);
     await passGate(page);
     await page.getByRole('button', { name: 'Settings' }).tap();
-    await page.getByRole('button', { name: /Rates & sensitivity/ }).tap();
+    await page.getByRole('button', { name: 'Rates ›', exact: true }).tap();
     const rates = page.locator('.ds-screen--rates');
     await expect(rates.locator('[data-f="fine"]')).toBeHidden();
     await expect(rates.locator('[data-f="altHold"]')).toContainText("throttle mid, expo and limit don't apply");

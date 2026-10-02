@@ -1,5 +1,6 @@
 /** Betaflight-style rate preview + throttle curve (SVG). Curves redraw on settings change only; live dots are cheap attribute updates. */
-import { actualRate, throttleCurve } from '../control/rates';
+import { throttleOutput } from '../control/flight-controller';
+import { actualRate } from '../control/rates';
 import { RATE_AXES, type RateAxis, type Settings } from '../core/settings';
 import { hoverThrottle } from '../physics/drone-params';
 import type { ControlInput } from '../types';
@@ -14,13 +15,15 @@ const RH = 240;
 const RP = { l: 46, r: 12, t: 12, b: 24 };
 const TW = 420;
 const TH = 170;
-const TP = { l: 46, r: 12, t: 10, b: 24 };
+const TP = { l: 50, r: 12, t: 10, b: 28 };
+/** clearance between the axis labels and the plot edge: the live dot (r 5 + stroke) sits on the 0 / 0 % corner */
+const T_LABEL_GAP = 10;
 
 export const HOVER = hoverThrottle();
 
-/** Effective throttle command for a stick value (mid auto = hover). */
+/** Motor command the flight controller produces for a stick value (mid auto = hover). */
 export function throttleOut(stick: number, s: Pick<Settings, 'throttleMid' | 'throttleExpo' | 'throttleLimit'>): number {
-  return throttleCurve(stick, s.throttleMid ?? HOVER, s.throttleExpo) * s.throttleLimit;
+  return throttleOutput(stick, s.throttleMid ?? HOVER, s.throttleExpo, s.throttleLimit);
 }
 
 /** Rate chart y-range: max rate rounded up to 200 °/s, at least 400. */
@@ -167,9 +170,9 @@ export class RateCharts {
     g.textContent = '';
     for (const v of [0, 0.25, 0.5, 0.75, 1]) {
       el('line', { x1: TP.l, x2: TW - TP.r, y1: this.ty(v), y2: this.ty(v) }, g);
-      el('text', { x: TP.l - 6, y: this.ty(v) + 4, class: 'ds-chart__ylabel' }, g).textContent = `${v * 100}%`;
+      el('text', { x: TP.l - T_LABEL_GAP, y: this.ty(v) + 4, class: 'ds-chart__ylabel' }, g).textContent = `${v * 100}%`;
       el('line', { x1: this.tx(v), x2: this.tx(v), y1: TP.t, y2: TH - TP.b }, g);
-      el('text', { x: this.tx(v), y: TH - 6, class: 'ds-chart__xlabel' }, g).textContent = `${v * 100}`;
+      el('text', { x: this.tx(v), y: TH - TP.b + T_LABEL_GAP + 8, class: 'ds-chart__xlabel' }, g).textContent = `${v * 100}`;
     }
     el('line', { x1: TP.l, x2: TW - TP.r, y1: this.ty(HOVER), y2: this.ty(HOVER), class: 'is-hover' }, g);
     if (s.throttleLimit < 1) el('line', { x1: TP.l, x2: TW - TP.r, y1: this.ty(s.throttleLimit), y2: this.ty(s.throttleLimit), class: 'is-limit' }, g);
