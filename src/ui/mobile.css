@@ -363,6 +363,7 @@
 .ds-ui.ds-touch-on .ds-center__big.is-count {
   color: #fff;
   text-shadow:
+    0 0 2px rgba(0, 0, 0, 0.9),
     0 2px 6px rgba(0, 0, 0, 0.75),
     0 0 24px rgba(40, 231, 255, 0.85),
     0 0 60px rgba(40, 231, 255, 0.5);
@@ -418,7 +419,13 @@
 .ds-ui.is-touch .ds-screen {
   touch-action: pan-y;
   -webkit-overflow-scrolling: touch;
-  padding: max(12px, env(safe-area-inset-top)) max(12px, env(safe-area-inset-right)) max(12px, env(safe-area-inset-bottom)) max(12px, env(safe-area-inset-left));
+  --ds-screen-pb: max(12px, env(safe-area-inset-bottom));
+  padding: max(12px, env(safe-area-inset-top)) max(12px, env(safe-area-inset-right)) var(--ds-screen-pb) max(12px, env(safe-area-inset-left));
+}
+
+/* the stuck footer meets the screen edge: keep its buttons above the home indicator */
+.ds-ui.is-touch .ds-dialog > .ds-dialog__actions:last-of-type {
+  padding-bottom: max(calc(14 * var(--ds-u)), env(safe-area-inset-bottom));
 }
 
 .ds-ui.is-touch .ds-arrow {
@@ -493,8 +500,15 @@
   }
   .ds-ui.is-touch .ds-main .ds-menu .ds-btn--primary { grid-column: 1 / -1; }
   .ds-ui.is-touch .ds-btn { min-height: 44px; font-size: 0.95em; }
-  .ds-ui.is-touch .ds-dialog { padding: 14px 16px; }
+  .ds-ui.is-touch .ds-dialog { --ds-dlg-pad: 14px; padding: 14px 16px; }
+  .ds-ui.is-touch .ds-dialog > .ds-dialog__actions:last-of-type { margin-inline: -16px; padding: 10px 16px max(10px, env(safe-area-inset-bottom)); }
   .ds-ui.is-touch .ds-dialog__title { margin-bottom: 8px; font-size: 20px; }
+  .ds-ui.is-touch .ds-dialog__actions:not(.ds-about__links) {
+    display: grid;
+    grid-auto-flow: column;
+    grid-auto-columns: minmax(0, 1fr);
+  }
+  .ds-ui.is-touch .ds-dialog__actions .ds-btn:not(.ds-btn--sm) { padding-inline: 8px; letter-spacing: 0.1em; }
   .ds-ui.is-touch .ds-screen { place-items: start center; }
   .ds-ui.is-touch .ds-screen--main,
   .ds-ui.is-touch .ds-screen--pause,
@@ -615,10 +629,9 @@
   animation: ds-rise 0.35s cubic-bezier(0.2, 0.8, 0.2, 1);
 }
 
-.ds-sheet__card h2 {
-  margin: 0 0 6px;
-  font-size: 18px;
-  letter-spacing: 0.06em;
+.ds-sheet__card .ds-dialog__title {
+  margin: 0 0 8px;
+  font-size: 20px;
 }
 
 .ds-sheet__card p {

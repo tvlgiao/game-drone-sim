@@ -66,8 +66,8 @@ export class MobileShell {
       root,
       'ds-sheet',
       `<div class="ds-sheet__card" role="dialog" aria-modal="true" aria-labelledby="ds-sheet-title">
-         <h2 id="ds-sheet-title">Play full screen</h2>
-         <p>Safari on ${iosDevice} can't hide its toolbars for web games. Add Drone Sim to your Home Screen and open it from there:</p>
+         <h2 id="ds-sheet-title" class="ds-dialog__title">Play full screen</h2>
+         <p>Safari on ${iosDevice} can’t hide its toolbars for web games. Add Drone Sim to your Home Screen and open it from there:</p>
          <ol class="ds-sheet__steps">
            <li><span class="ds-sheet__ico">${SHARE_ICON}</span><span>Tap <b>Share</b> in the Safari toolbar</span></li>
            <li><span class="ds-sheet__ico">${ADD_ICON}</span><span>Choose <b>Add to Home Screen</b></span></li>

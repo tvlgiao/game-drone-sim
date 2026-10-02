@@ -63,6 +63,7 @@ function boot(): void {
   let settings: Settings = loadSettings(storage);
 
   const device = detectDevice(window);
+  document.body.classList.toggle('is-quest', isQuestBrowser(navigator.userAgent));
   const params = new URLSearchParams(location.search);
   const selftest = params.get('selftest') === '1';
   const hud = new Hud(uiRoot, (a) => onAction(a));
