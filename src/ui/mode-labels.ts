@@ -1,7 +1,8 @@
 /** Human labels for the RC stick mode / throttle source (HUD, controls help, controller setup). */
 import { FPV_FOV_V_RANGE } from '../core/camera-limits';
 import type { Settings } from '../core/settings';
-import { MODE_TABLE, throttleSlot, type Channel } from '../input/stick';
+import { MODE_TABLE, slotOf, throttleSlot, type Channel, type StickSlot } from '../input/stick';
+import type { InputSource } from '../types';
 
 export const CH_SHORT: Record<Channel, string> = { throttle: 'THR', yaw: 'YAW', pitch: 'PIT', roll: 'ROL' };
 export const CH_NAME: Record<Channel, string> = { throttle: 'Throttle', yaw: 'Yaw', pitch: 'Pitch', roll: 'Roll' };
@@ -79,6 +80,64 @@ export function throttleDownHint(s: ModeSettings, keyboard: boolean): string {
   if (keyboard) return slot === 'ly' ? 'Hold S' : 'Hold ↓';
   const c = throttleControl(s);
   return c === 'rt' ? 'Release RT' : `${c === 'left' ? 'Left' : 'Right'} stick fully down`;
+}
+
+/** Flight / menu buttons a prompt can name (the `ButtonEvents` the input manager emits). */
+export type PromptButton = 'arm' | 'toggleMode' | 'cycleCamera' | 'reset' | 'pause' | 'confirm';
+
+/**
+ * Default bindings as `InputManager` maps them (PAD_BUTTON / KEY_BUTTON / XR_BUTTON there); touch names the
+ * on-screen button. Keep in step with input-manager.ts.
+ */
+const BUTTON_LABEL: Record<Exclude<InputSource, 'none'>, Record<PromptButton, string>> = {
+  keyboard: { arm: 'Space', toggleMode: 'M', cycleCamera: 'C', reset: 'R', pause: 'Esc', confirm: 'Enter' },
+  gamepad: { arm: 'A', toggleMode: 'Y', cycleCamera: 'RB', reset: 'B', pause: 'Start', confirm: 'A' },
+  touch: { arm: 'ARM', toggleMode: 'MODE', cycleCamera: 'CAM', reset: 'RESET', pause: 'Pause', confirm: 'Continue' },
+  xr: { arm: 'A', toggleMode: 'B', cycleCamera: 'R-stick', reset: 'X', pause: 'Y', confirm: 'A' },
+};
+
+/** No device used yet: a desktop browser most likely, so keyboard names. */
+const promptSource = (src: InputSource): Exclude<InputSource, 'none'> => (src === 'none' ? 'keyboard' : src);
+
+/** Name of the control behind a button for an input source, e.g. "Space", "A", "ARM". */
+export function buttonLabel(b: PromptButton, src: InputSource): string {
+  return BUTTON_LABEL[promptSource(src)][b];
+}
+
+/** Verb for a button on a source: touch buttons are tapped, everything else pressed. */
+export function pressVerb(src: InputSource): 'Tap' | 'Press' {
+  return src === 'touch' ? 'Tap' : 'Press';
+}
+
+const KEY_DIR: Record<StickSlot, [string, string]> = { lx: ['A', 'D'], ly: ['S', 'W'], rx: ['←', '→'], ry: ['↓', '↑'] };
+const ARROW: Record<StickSlot, [string, string]> = { lx: ['←', '→'], ly: ['↓', '↑'], rx: ['←', '→'], ry: ['↓', '↑'] };
+
+type DirSettings = Pick<Settings, 'stickMode' | 'throttleSource' | 'invert'>;
+
+/**
+ * The physical stick ('l' / 'r') carrying a channel for a source, or null when the gamepad's right trigger is the
+ * throttle. Only gamepads use the trigger setting; keyboard, touch and XR always fly throttle on a stick.
+ */
+export function channelSide(s: Pick<Settings, 'stickMode' | 'throttleSource'>, ch: Channel, src: InputSource): 'l' | 'r' | null {
+  if (ch === 'throttle' && src === 'gamepad' && s.throttleSource === 'trigger') return null;
+  return slotOf(s.stickMode, ch)[0] === 'l' ? 'l' : 'r';
+}
+
+/**
+ * The control that moves a channel one way, e.g. throttle +1 → "W" (keyboard, mode 2), "Left stick ↑" (pad),
+ * "Right thumb ↑" (touch, mode 1), "Squeeze RT" (trigger throttle). `dir` is the channel's sign (+ = throttle up,
+ * yaw right, pitch forward, roll right); an inverted channel swaps the physical direction.
+ */
+export function channelDirLabel(s: DirSettings, ch: Channel, dir: 1 | -1, src: InputSource): string {
+  const phys = s.invert[ch] ? -dir : dir;
+  const side = channelSide(s, ch, src);
+  if (side === null) return phys > 0 ? 'Squeeze RT' : 'Release RT';
+  const slot = slotOf(s.stickMode, ch);
+  const i = phys > 0 ? 1 : 0;
+  const p = promptSource(src);
+  if (p === 'keyboard') return KEY_DIR[slot][i];
+  const stick = p === 'touch' ? (side === 'l' ? 'Left thumb' : 'Right thumb') : side === 'l' ? 'Left stick' : 'Right stick';
+  return `${stick} ${ARROW[slot][i]}`;
 }
 
 const RAD = Math.PI / 180;

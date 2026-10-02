@@ -5,6 +5,7 @@
 import type { XrPanelContent } from '../render/xr-panel';
 import type { CameraMode, FlightMode, RaceSnapshot } from '../types';
 import { formatTime } from './format';
+import type { TutorialView } from './tutorial-prompts';
 
 export interface XrHudState {
   race: RaceSnapshot;
@@ -66,4 +67,41 @@ export function xrHudContent(s: XrHudState): XrPanelContent {
     default:
       return { layout: 'hud', title: `${formatTime(r.time)} · Ring ${Math.min(r.nextRing + 1, r.totalRings)}/${r.totalRings}`, sub: flightLine, hint: hint(flightHint), accent: s.armed ? GREEN : CYAN };
   }
+}
+
+/** First-run tutorial offer in the headset (the DOM prompt is not visible there): A starts, X skips. */
+export function xrTutorialPrompt(): XrPanelContent {
+  return { layout: 'menu', title: 'NEW TO FPV?', sub: '3-minute tutorial: arm, hover, turn, land, fly a ring', hint: 'A Start · X Skip', accent: CYAN };
+}
+
+const XR_BAR_CELLS = 10;
+
+/** Text progress bar for the canvas card (geometric-shape glyphs every headset font has; no extra texture or mesh). */
+export function xrProgressBar(value: number): string {
+  const v = Math.min(1, Math.max(0, Number.isFinite(value) ? value : 0));
+  const n = Math.round(v * XR_BAR_CELLS);
+  return `${'●'.repeat(n)}${'○'.repeat(XR_BAR_CELLS - n)} ${Math.round(v * 100)}%`;
+}
+
+/**
+ * In-headset tutorial card: step title, the instruction line, progress and how to skip. Welcome and done sit
+ * at eye level ('menu'); flight steps use the low 'hud' placement so the drone stays in view.
+ * VR buttons: A starts / confirms, hold B skips, on the done card A = Start Training, X = Menu.
+ */
+export function xrTutorialCard(v: TutorialView): XrPanelContent {
+  if (v.id === 'done') {
+    return { layout: 'menu', title: v.title.toUpperCase(), sub: v.lines[0] ?? '', hint: 'A Start Training · X Menu', accent: GREEN };
+  }
+  const welcome = v.id === 'welcome';
+  const first = v.lines[0] ?? '';
+  const sub = welcome ? (v.lines[1] ?? '') : v.hint && v.lines[1] ? `${first} · ${v.lines[1]}` : first;
+  const status = welcome ? 'A start' : xrProgressBar(v.progress);
+  const skip = v.skipHold > 0 ? `Skipping ${Math.round(v.skipHold * 100)}%` : v.skipLabel;
+  return {
+    layout: welcome ? 'menu' : 'hud',
+    title: `${v.number}/${v.total} · ${v.title.toUpperCase()}`,
+    sub,
+    hint: `${status} · ${skip}`,
+    accent: v.hint ? AMBER : CYAN,
+  };
 }
