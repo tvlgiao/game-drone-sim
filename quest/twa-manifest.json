@@ -15,7 +15,7 @@
   "enableNotifications": false,
   "enableMicrophone": false,
   "enableXRScene": false,
-  "startUrl": "/",
+  "startUrl": "/app/",
   "iconUrl": "https://dronesim.coworkgamestudio.com/icons/icon-512.png",
   "maskableIconUrl": "https://dronesim.coworkgamestudio.com/icons/icon-maskable-512.png",
   "splashScreenFadeOutDuration": 300,
@@ -23,11 +23,11 @@
     "path": "./quest-upload.jks",
     "alias": "quest"
   },
-  "appVersionName": "1.0.2",
-  "appVersionCode": 3,
+  "appVersionName": "1.0.3",
+  "appVersionCode": 4,
   "shortcuts": [],
   "generatorApp": "bubblewrap-cli",
-  "webManifestUrl": "https://dronesim.coworkgamestudio.com/manifest.webmanifest",
+  "webManifestUrl": "https://dronesim.coworkgamestudio.com/app/manifest.webmanifest",
   "fallbackType": "customtabs",
   "features": {},
   "alphaDependencies": {
@@ -37,7 +37,7 @@
   "isChromeOSOnly": false,
   "isMetaQuest": true,
   "horizonOSAppMode": "immersive",
-  "fullScopeUrl": "https://dronesim.coworkgamestudio.com/",
+  "fullScopeUrl": "https://dronesim.coworkgamestudio.com/app/",
   "minSdkVersion": 32,
   "orientation": "landscape",
   "fingerprints": [],
@@ -50,5 +50,5 @@
     "fullscreen",
     "standalone"
   ],
-  "appVersion": "1.0.2"
+  "appVersion": "1.0.3"
 }
