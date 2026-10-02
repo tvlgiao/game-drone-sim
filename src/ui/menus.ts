@@ -20,9 +20,9 @@ import type { InputFrame, LevelId, NavEvents } from '../types';
 import { formatTime } from './format';
 import { drawThumbs, levelAct, levelCardsHtml, parseLevelAct, type LevelCard, type LevelMode } from './level-select';
 import { controllerDiagram } from './icons';
-import { actionGlyphs, type Glyph, type HintAction, type HintScheme } from './input-glyphs';
+import { actionGlyphs, channelHints, glyphHtml, glyphsHtml, keyGlyph, type HintAction, type HintScheme } from './input-glyphs';
 import { HOVER, RateCharts } from './rate-charts';
-import { CH_NAME, CH_SHORT, effectiveFovDeg, keyboardKeys, padControls, stickLong, stickShort, throttleControl, touchControls, xrControls } from './mode-labels';
+import { CH_NAME, CH_SHORT, effectiveFovDeg, stickLong, stickShort, throttleControl } from './mode-labels';
 
 /** package.json version, injected by vite.config.ts `define`. */
 declare const __APP_VERSION__: string;
@@ -112,14 +112,6 @@ const rangeRow = (id: NumKey, label: string, hint: string, fmt: (v: number) => s
   },
 });
 
-/** One binding as table text, read from the input tables: "Menu (☰)", "Left trigger", "Space", '—' when unbound. */
-function bindingText(scheme: HintScheme, action: HintAction): string {
-  const g: Glyph | undefined = actionGlyphs(scheme, action)[0];
-  if (!g) return '—';
-  if (g.style === 'system' && g.label !== g.name) return `${g.name} (${g.label})`;
-  if (g.style === 'stick' || g.label.includes(' ')) return g.name;
-  return g.label;
-}
 const ACTION_ROWS: readonly [string, HintAction][] = [
   ['Arm / disarm', 'arm'],
   ['Flight mode', 'toggleMode'],
@@ -611,12 +603,17 @@ export class Menus {
     this.renderMenuBest();
   }
 
-  /** Main-menu line under the buttons: the selected level and its best lap. */
+  /** Main-menu level button under the menu: the selected level and its best lap; it opens the level picker. */
   private renderMenuBest(): void {
     const name = this.levelCards.find((c) => c.id === this.currentLevel)?.name ?? '';
     const best = this.menuBestValue === null ? '' : `Best lap ${formatTime(this.menuBestValue)}`;
-    const text = name && best ? `${name} · ${best}` : name || best;
+    const text = name ? (best ? `Level: ${name} · ${best}` : `Level: ${name}`) : best;
     if (this.menuBest.textContent !== text) this.menuBest.textContent = text;
+    const btn = this.menuBest.parentElement!;
+    if (btn.hidden !== !name) {
+      btn.hidden = !name;
+      if (this.current === 'main') this.refreshItems();
+    }
   }
 
   /** Level picker contents: one card per playable level; `current` is the level loaded now. */
@@ -1086,17 +1083,19 @@ export class Menus {
   }
 
   private touchControlsHtml(s: Settings): string {
-    const t = touchControls(s);
+    const arrows = { throttle: '↕', yaw: '↔', pitch: '↕', roll: '↔' } as const;
+    const chan = channelHints('touch', s).map((c) => `${glyphsHtml(c.glyphs)}<small class="ds-table__note">${arrows[c.channel]}</small>`);
+    const btn = (t: string): string => `<kbd class="ds-g ds-g--touch">${t}</kbd>`;
     const rows: [string, string][] = [
-      ['Throttle', t.throttle],
-      ['Yaw', t.yaw],
-      ['Pitch', t.pitch],
-      ['Roll', t.roll],
-      ['Arm / disarm', 'ARM'],
-      ['Flight mode (Angle / Acro)', 'MODE'],
-      ['Camera', 'CAM'],
-      ['Reset to checkpoint', 'RESET ↺'],
-      ['Pause', 'Pause ❚❚ (top left)'],
+      ['Throttle', chan[0]!],
+      ['Yaw', chan[1]!],
+      ['Pitch', chan[2]!],
+      ['Roll', chan[3]!],
+      ['Arm / disarm', btn('ARM')],
+      ['Flight mode (Angle / Acro)', btn('MODE')],
+      ['Camera', btn('CAM')],
+      ['Reset to checkpoint', btn('RESET ↺')],
+      ['Pause', `${btn('❚❚')}<small class="ds-table__note">top left</small>`],
     ];
     const where = s.touchSticksFixed
       ? 'Use the two sticks in the bottom corners.'
@@ -1113,21 +1112,27 @@ export class Menus {
   }
 
   private padControlsHtml(s: Settings, xr: boolean, diagram: boolean): string {
-    const pad = padControls(s);
-    const kb = keyboardKeys(s);
     const thr = throttleControl(s);
-    const vr = xr ? xrControls(s) : null;
+    const note = (t: string): string => (t ? `<small class="ds-table__note">${t}</small>` : '');
+    const chans = (scheme: HintScheme): string[] => channelHints(scheme, s).map((c) => `${glyphsHtml(c.glyphs)}${note(c.note)}`);
+    const act = (scheme: HintScheme, a: HintAction): string => {
+      const g = actionGlyphs(scheme, a);
+      if (!g.length) return '<span class="ds-table__none">—</span>';
+      return `${glyphsHtml(g)}${g[0]!.style === 'stick' ? note('click') : ''}`;
+    };
+    const [vT, vY, vP, vR] = chans('quest');
+    const [pT, pY, pP, pR] = chans('xbox');
+    const [kT, kY, kP, kR] = chans('keyboard');
     const map: [string, string, string, string][] = [
-      ['Throttle', vr?.throttle ?? '', pad.throttle, kb.throttle],
-      ['Yaw', vr?.yaw ?? '', pad.yaw, kb.yaw],
-      ['Pitch', vr?.pitch ?? '', pad.pitch, kb.pitch],
-      ['Roll', vr?.roll ?? '', pad.roll, kb.roll],
-      ...ACTION_ROWS.map(([label, a]): [string, string, string, string] => [label, bindingText('quest', a), bindingText('xbox', a), bindingText('keyboard', a)]),
+      ['Throttle', vT!, pT!, kT!],
+      ['Yaw', vY!, pY!, kY!],
+      ['Pitch', vP!, pP!, kP!],
+      ['Roll', vR!, pR!, kR!],
+      ...ACTION_ROWS.map(([label, a]): [string, string, string, string] => [label, act('quest', a), act('xbox', a), act('keyboard', a)]),
+      [xr ? 'Recentre view' : 'Recentre view (VR)', act('quest', 'recenter'), act('xbox', 'recenter'), act('keyboard', 'recenter')],
+      ['Mouse flight', '<span class="ds-table__none">—</span>', '<span class="ds-table__none">—</span>', `${glyphHtml({ style: 'mouse', label: '', name: 'Mouse' })}${note(`click the view · ${glyphHtml(keyGlyph('Escape'))} frees it`)}`],
     ];
-    if (xr) map.push(['Recentre view', bindingText('quest', 'recenter'), bindingText('xbox', 'recenter'), bindingText('keyboard', 'recenter')]);
-    const rows = map
-      .map(([a, v, x, k]) => `<tr><th scope="row">${a}</th>${xr ? `<td>${v}</td>` : ''}<td>${x}</td><td>${k === '—' ? k : `<kbd class="ds-kbd">${k}</kbd>`}</td></tr>`)
-      .join('');
+    const rows = map.map(([a, v, x, k]) => `<tr><th scope="row">${a}</th>${xr ? `<td>${v}</td>` : ''}<td>${x}</td><td>${k}</td></tr>`).join('');
     const kbTip = 'Keyboard: keys spring back like a stick and centre holds altitude; press Space to arm, then hold W (↑ in modes 1/3) to take off.';
     const padTip =
       thr === 'rt'
@@ -1292,7 +1297,7 @@ export class Menus {
           ${this.btn('about', 'About')}
           ${this.btn('exit', 'Quit', false, ' ds-btn--quit', ' style="grid-column:1/-1"')}
         </nav>
-        <p class="ds-main__best" data-f="best"></p>
+        <button type="button" class="ds-main__level" data-nav data-act="levels-race" hidden><span data-f="best"></span><span class="ds-main__chev" aria-hidden="true">›</span></button>
         <footer class="ds-foot" data-pad-only>
           <span><kbd class="ds-kbd ds-kbd--a">A</kbd><kbd class="ds-kbd">Enter</kbd> Select</span>
           <span><kbd class="ds-kbd ds-kbd--b">B</kbd><kbd class="ds-kbd">Esc</kbd> Back</span>

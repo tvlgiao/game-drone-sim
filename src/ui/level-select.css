@@ -104,6 +104,15 @@
     height: 22vh;
   }
 
+  /* the strip shows a third of the 16:9 picture: keep each level's rings (the key content) in it */
+  .ds-lvl__thumb[data-thumb='training'] {
+    object-position: 50% 80%;
+  }
+
+  .ds-lvl__thumb[data-thumb='night-loft'] {
+    object-position: 50% 55%;
+  }
+
   .ds-lvl__blurb {
     display: none;
   }

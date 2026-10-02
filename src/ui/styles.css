@@ -536,6 +536,8 @@
 .ds-src {
   display: flex;
   align-items: center;
+  /* one header height for every source name and icon: the widget never shifts when the source changes */
+  height: calc(20 * var(--ds-u));
   gap: calc(6 * var(--ds-u));
   font-size: 0.75em;
   font-weight: 600;
@@ -884,11 +886,11 @@
   display: grid;
   grid-template-columns: repeat(3, auto);
   gap: calc(2 * var(--ds-u));
-  --ds-g: calc(15 * var(--ds-u));
+  --ds-g: max(17px, calc(17 * var(--ds-u)));
 }
 
 .ds-kc .ds-g {
-  font-size: calc(9 * var(--ds-u));
+  font-size: max(11px, calc(11 * var(--ds-u)));
   padding: 0 calc(3 * var(--ds-u));
 }
 
@@ -1115,7 +1117,9 @@
 .ds-toast {
   padding: calc(9 * var(--ds-u)) calc(16 * var(--ds-u));
   border-radius: calc(10 * var(--ds-u));
-  background: var(--ds-panel-solid);
+  /* solid: a bright sky behind a translucent toast washed the text out */
+  background: rgba(6, 10, 20, 0.95);
+  color: var(--ds-text);
   border: 1px solid var(--ds-edge-hot);
   box-shadow: 0 0 calc(24 * var(--ds-u)) rgba(40, 231, 255, 0.18);
   font-weight: 600;
@@ -1262,13 +1266,42 @@
     0 0 calc(12 * var(--ds-u)) rgba(2, 4, 10, 0.8);
 }
 
-.ds-main__best {
-  margin: 0;
-  min-height: 1.2em;
-  font-family: var(--ds-mono);
-  font-variant-numeric: tabular-nums;
+.ds-main__level {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.6em;
+  min-height: 44px;
+  padding: 0 calc(16 * var(--ds-u));
+  font: inherit;
+  font-size: 0.95em;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  color: var(--ds-text);
+  background: rgba(8, 14, 26, 0.9);
+  border: 1px solid var(--ds-edge);
+  border-radius: 999px;
+  cursor: pointer;
+}
+
+.ds-main__level[hidden] {
+  display: none;
+}
+
+.ds-main__level:hover,
+.ds-main__level.is-focused {
+  border-color: var(--ds-edge-hot);
+  box-shadow: 0 0 calc(16 * var(--ds-u)) rgba(40, 231, 255, 0.28);
+}
+
+.ds-main__level:focus-visible:not(.is-focused) {
+  outline: 2px solid rgba(40, 231, 255, 0.55);
+  outline-offset: 2px;
+}
+
+.ds-main__chev {
   color: var(--ds-cyan);
-  letter-spacing: 0.08em;
+  font-size: 1.3em;
+  line-height: 1;
 }
 
 .ds-menu {
@@ -1338,6 +1371,11 @@ a.ds-btn { text-decoration: none; }
     inset 0 0 0 1px rgba(40, 231, 255, 0.55),
     0 0 calc(22 * var(--ds-u)) rgba(40, 231, 255, 0.3),
     inset 0 0 calc(18 * var(--ds-u)) rgba(255, 61, 232, 0.18);
+}
+
+/* One focus look per menu: the primary button's cyan edge steps back while another button holds the focus. */
+.ds-menu:has(.is-focused) .ds-btn--primary:not(.is-focused):not(:hover) {
+  border-color: var(--ds-edge);
 }
 
 /* Native focus that disagrees with .is-focused gets a quiet outline, not a second glow. */
@@ -2007,7 +2045,8 @@ a.ds-btn { text-decoration: none; }
 .ds-row__ctl {
   position: relative;
   display: grid;
-  grid-template-columns: calc(30 * var(--ds-u)) minmax(9.5em, max-content) calc(30 * var(--ds-u));
+  /* one value column width: every row's arrows line up */
+  grid-template-columns: calc(30 * var(--ds-u)) 9.5em calc(30 * var(--ds-u));
   align-items: center;
   padding-bottom: calc(6 * var(--ds-u));
 }
@@ -2482,4 +2521,86 @@ body.is-quest .ds-foot {
 
 .ds-error .ds-dialog__actions .ds-btn {
   width: 100%;
+}
+
+/* ---------- modal dialogs (first run, tutorial complete, quit / reset confirmations) ---------- */
+.ds-ui .ds-tut-screen,
+.ds-ui .ds-screen--confirm-quit,
+.ds-ui .ds-screen--confirm-reset {
+  background: rgba(5, 8, 14, 0.7);
+}
+
+.ds-ui .ds-tut-screen > .ds-dialog,
+.ds-ui .ds-screen--confirm-quit > .ds-dialog,
+.ds-ui .ds-screen--confirm-reset > .ds-dialog {
+  background: linear-gradient(160deg, rgba(14, 22, 38, 0.97), rgba(7, 11, 21, 0.98));
+}
+
+/* two equal buttons across the dialog's full width */
+.ds-ui .ds-tut-screen .ds-dialog__actions {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+}
+
+.ds-ui .ds-tut-screen .ds-dialog__actions .ds-btn {
+  width: 100%;
+  min-width: 0;
+}
+
+/* a long value ellipsises instead of widening its column */
+.ds-row__value {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* rows scrolling under the sticky footer fade out instead of showing through it */
+.ds-dialog > .ds-dialog__actions:last-of-type::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 100%;
+  height: calc(28 * var(--ds-u));
+  background: linear-gradient(180deg, rgba(7, 11, 21, 0), rgba(7, 11, 21, 0.95));
+  pointer-events: none;
+}
+
+/* touch buttons named in copy and tables, drawn like the on-screen buttons */
+.ds-g--touch {
+  display: inline-flex;
+  align-items: center;
+  padding: 0 0.45em;
+  min-height: 1.45em;
+  font: inherit;
+  font-size: 0.78em;
+  font-weight: 800;
+  letter-spacing: 0.1em;
+  color: var(--ds-text);
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(234, 246, 255, 0.4);
+  border-radius: 0.5em;
+}
+
+/* Controls screen: glyphs for every binding, prose as quiet notes */
+.ds-table td .ds-g + .ds-g {
+  margin-left: calc(4 * var(--ds-u));
+}
+
+.ds-table__note {
+  margin-left: calc(6 * var(--ds-u));
+  font-size: 0.85em;
+  color: var(--ds-muted);
+}
+
+.ds-table__note .ds-g {
+  vertical-align: middle;
+}
+
+.ds-table__none {
+  color: var(--ds-muted);
+}
+
+.ds-table td {
+  --ds-g: calc(22 * var(--ds-u));
 }

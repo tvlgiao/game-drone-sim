@@ -372,6 +372,43 @@ test.describe('desktop menus', () => {
   });
 });
 
+test.describe('menu polish', () => {
+  test.skip(({ isMobile }) => isMobile, 'desktop only');
+
+  test('the main menu level line is a button that opens the level picker', async ({ page }) => {
+    await boot(page);
+    const level = page.locator('.ds-screen--main .ds-main__level');
+    await expect(level).toHaveText(/^Level: Training Field/);
+    await expect(level).toHaveCSS('font-family', /SF Pro|Segoe|system-ui|sans/);
+    await level.click();
+    await expect.poll(() => screenOf(page)).toBe('levels');
+    expect(errors).toEqual([]);
+  });
+
+  test('pause: one focus look; moving it takes the primary button\'s edge away too', async ({ page }) => {
+    await boot(page);
+    await hook(page, (d) => d.action({ type: 'freefly' }));
+    await page.keyboard.press('Escape');
+    await expect.poll(() => screenOf(page)).toBe('pause');
+    await page.keyboard.press('ArrowDown');
+    await expect(focused(page, 'pause')).toHaveCount(1);
+    const primary = page.locator('.ds-screen--pause .ds-btn--primary');
+    await expect(primary).not.toHaveClass(/is-focused/);
+    await expect(primary).toHaveCSS('border-color', 'rgba(120, 220, 255, 0.2)');
+    expect(errors).toEqual([]);
+  });
+
+  test('settings: every stepper value column has one width, so the arrows line up', async ({ page }) => {
+    await boot(page);
+    await page.getByRole('button', { name: 'Settings' }).click();
+    // a long value (a future option, a translation) must not push its arrows out of line
+    await page.locator('.ds-screen--settings [data-key="mouseStick"] .ds-row__value').evaluate((e) => (e.textContent = 'Auto: Angle hold / Acro spring'));
+    const xs = await page.locator('.ds-screen--settings .ds-row:not([hidden]) .ds-arrow').evaluateAll((els) => els.filter((e) => (e as HTMLElement).offsetParent).map((e) => `${(e as HTMLElement).dataset.dir}:${Math.round(e.getBoundingClientRect().left)}`));
+    expect(xs.length).toBeGreaterThan(10);
+    expect(new Set(xs).size, xs.join(' ')).toBe(2);
+  });
+});
+
 test.describe('Quest Browser', () => {
   test.skip(({ isMobile }) => isMobile, 'desktop Chromium with a Quest user agent');
   test.use({ userAgent: QUEST_UA });
@@ -382,13 +419,16 @@ test.describe('Quest Browser', () => {
     const body = page.locator('.ds-screen--controls [data-f="body"]');
     await expect(body.locator('thead')).toContainText('Touch controllers');
     const row = (name: string) => body.locator('[data-f="padTable"] tbody tr', { has: page.locator('th', { hasText: new RegExp(`^${name}$`) }) }).locator('td').first();
-    await expect(row('Arm / disarm')).toHaveText('A');
-    await expect(row('Flight mode')).toHaveText('B');
-    await expect(row('Reset to checkpoint')).toHaveText('X');
-    await expect(row('Pause')).toHaveText('Y');
-    await expect(row('Camera')).toHaveText('Right stick click');
-    await expect(row('Recentre view')).toHaveText('Left stick click');
-    await expect(row('Heading arrow')).toHaveText('Left trigger');
+    // bindings are drawn glyphs (the accessible name says what a stick / trigger glyph is)
+    await expect(row('Arm / disarm').locator('.ds-g--face')).toHaveText('A');
+    await expect(row('Flight mode').locator('.ds-g--face')).toHaveText('B');
+    await expect(row('Reset to checkpoint').locator('.ds-g--face')).toHaveText('X');
+    await expect(row('Pause').locator('.ds-g--face')).toHaveText('Y');
+    await expect(row('Camera').locator('.ds-g')).toHaveAttribute('aria-label', 'Right stick click');
+    await expect(row('Recentre view').locator('.ds-g')).toHaveAttribute('aria-label', 'Left stick click');
+    await expect(row('Heading arrow').locator('.ds-g')).toHaveAttribute('aria-label', 'Left trigger');
+    // keyboard cells are keycaps, the mouse has its own row
+    await expect(body.locator('[data-f="padTable"] tbody tr', { has: page.locator('th', { hasText: /^Mouse flight$/ }) })).toContainText('click the view');
     await expect(body.locator('[data-f="xrTip"]')).toContainText('holds altitude');
     await expect(body.locator('.ds-pad-wrap')).toHaveCount(0); // no Xbox diagram for a headset without a gamepad
     // the gamepad note must not read as contradicting the VR one: each names its input
