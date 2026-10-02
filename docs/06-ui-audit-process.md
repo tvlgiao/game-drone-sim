@@ -17,18 +17,25 @@ open audit/round-N/index.html                    # contact sheet (audit/ is git-
 emulator (`?xremu=1`). Each device folder gets numbered shots plus `-scrolled` variants for panels that
 scroll; `manifest.json` lists shots and any console/page errors per device.
 
+Pages per device, in order (the site is split since 1.0.3, see `src/core/edition.ts`):
+
+1. `/` landing page: `01-landing` (first viewport) and `02-landing-full` (whole page).
+2. `/play/` free web game: every game screen below (never VR, so no Enter VR button here).
+3. `/app/` in a plain browser: `store-gate` (no Digital Goods API, so the Meta Horizon Store gate).
+4. VR device only: `/app/?xremu=1` with an init script that stubs `window.getDigitalGoodsService` as an
+   owner's store-installed Quest app sees it (`getLoggedInUserId()` → non-zero id), then the VR states.
+
 | Device class | Configs |
 |---|---|
 | Desktop | 1920×1080 (+ emulated Quest 2 VR card states), 2560×1440, 1366×768, 1280×720 |
 | Quest Browser 2D panel | 1280×720, Quest UA, no touch |
-| iPhone (WebKit, Safari toolbars included) | SE landscape 568×320, 15 Pro landscape, 15 Pro Max landscape, 15 Pro portrait (rotate overlay) |
+| iPhone (WebKit, Safari toolbars included) | SE landscape 568×320, 15 Pro landscape, 15 Pro Max landscape, 15 Pro portrait and SE portrait (landing + rotate overlay) |
 | iPad (WebKit) | mini landscape, Pro 11 landscape and portrait |
 | Android (Chromium) | Pixel 7 landscape, Galaxy Tab S4 landscape |
 
-Screens per device: tap gate, Add to Home Screen (iOS), main menu, settings, rates, controls, controller
+Screens per device: landing page (viewport + full page), tap gate, Add to Home Screen (iOS), main menu, settings, rates, controls, controller
 setup, pause, confirm quit, finish (normal + new best), race countdown / racing / crashed, flight HUD in
-LOS / FPV / chase (touch sticks on touch devices), toast, bye, error; VR: Enter VR menu, VR menu card,
-VR flight, VR paused card.
+LOS / FPV / chase (touch sticks on touch devices), toast, bye, error, Quest store gate; VR: Enter VR menu, VR menu card, VR flight, VR paused card.
 
 ## 2. Review (parallel subagents, read-only)
 

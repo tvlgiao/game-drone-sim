@@ -1,6 +1,8 @@
 /**
  * UI audit capture: every screen × every device class → audit/<round>/<device>/<nn-screen>.png,
  * plus audit/<round>/index.html (contact sheet) and manifest.json (for review agents).
+ * Per device: the landing page (/) first, then the game under /play/, the Quest app's store gate
+ * (/app/ in a plain browser) and, on the VR device, the VR states under /app/ with an owner's store stub.
  *
  *   npm run build && npm run preview          # serves http://localhost:4173
  *   node scripts/ui-audit.mjs round-1 [baseUrl] [deviceFilter]
@@ -30,6 +32,7 @@ const DEVICES = [
   { name: 'iphone-15pro-landscape', engine: 'webkit', ctx: devices['iPhone 15 Pro landscape'], touch: true },
   { name: 'iphone-15promax-landscape', engine: 'webkit', ctx: devices['iPhone 15 Pro Max landscape'], touch: true },
   { name: 'iphone-15pro-portrait', engine: 'webkit', ctx: devices['iPhone 15 Pro'], touch: true, portrait: true },
+  { name: 'iphone-se-portrait', engine: 'webkit', ctx: devices['iPhone SE'], touch: true, portrait: true },
   { name: 'ipad-mini-landscape', engine: 'webkit', ctx: devices['iPad Mini landscape'], touch: true },
   { name: 'ipad-pro11-landscape', engine: 'webkit', ctx: devices['iPad Pro 11 landscape'], touch: true },
   { name: 'ipad-pro11-portrait', engine: 'webkit', ctx: devices['iPad Pro 11'], touch: true },
@@ -38,6 +41,11 @@ const DEVICES = [
 ];
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+/** The Meta Horizon Store Digital Goods API as an owner's store-installed Quest app sees it (init script). */
+function questOwnerStub() {
+  window.getDigitalGoodsService = async () => ({ getLoggedInUserId: async () => '4815162342' });
+}
 
 async function run() {
   mkdirSync(OUT, { recursive: true });
@@ -53,9 +61,9 @@ async function run() {
     page.on('console', (m) => m.type() === 'error' && errors.push(m.text()));
     const shots = [];
     let n = 0;
-    const shot = async (label, note = '') => {
+    const shot = async (label, note = '', fullPage = false) => {
       const file = `${String(++n).padStart(2, '0')}-${label}.png`;
-      await page.screenshot({ path: join(dir, file) });
+      await page.screenshot({ path: join(dir, file), fullPage });
       shots.push({ file, label, note });
     };
     const h = (fn, arg) => page.evaluate(fn, arg);
@@ -79,8 +87,12 @@ async function run() {
       }
     };
     try {
+      await page.goto(`${BASE}/`);
+      await page.waitForLoadState('networkidle');
+      await shot('landing');
+      await shot('landing-full', 'whole landing page', true);
       // plain load first: ?xremu=1 makes the app treat the desktop as a Quest (Touch copy, Quest advice)
-      await page.goto(`${BASE}/${d.portrait ? '' : '?rotate=0'}`);
+      await page.goto(`${BASE}/play/${d.portrait ? '' : '?rotate=0'}`);
       await page.waitForFunction(() => !!window.__drone, null, { timeout: 30_000 });
       await sleep(1500);
       if (d.portrait) {
@@ -146,8 +158,14 @@ async function run() {
       await h(() => window.__drone.showError('WebGL2 is not available on this device/browser (context lost). Enable hardware acceleration or try a recent Chrome, Edge, Firefox or Safari.'));
       await sleep(400);
       await shot('error');
+      // the Quest app page in a plain browser (no Digital Goods API): the store gate
+      await page.goto(`${BASE}/app/`);
+      await page.getByRole('heading', { level: 1 }).waitFor({ timeout: 30_000 });
+      await sleep(300);
+      await shot('store-gate');
       if (d.vr) {
-        await page.goto(`${BASE}/?rotate=0&xremu=1`);
+        await ctx.addInitScript(questOwnerStub);
+        await page.goto(`${BASE}/app/?rotate=0&xremu=1`);
         await page.waitForFunction(() => !!window.__drone && !!window.__xrDevice, null, { timeout: 30_000 });
         await sleep(800);
         await shot('main-menu-with-enter-vr');

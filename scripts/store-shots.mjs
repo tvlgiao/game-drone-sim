@@ -10,7 +10,7 @@ for (const d of devices) {
   const ctx = await b.newContext({ viewport: d.viewport, deviceScaleFactor: d.dpr, hasTouch: d.touch, isMobile: d.touch });
   const p = await ctx.newPage();
   await p.addInitScript(() => localStorage.setItem('drone-sim.settings', JSON.stringify({ quality: 'ultra', showFps: false })));
-  await p.goto('http://localhost:4173/?rotate=0&selftest=0');
+  await p.goto('http://localhost:4173/play/?rotate=0&selftest=0');
   await p.waitForFunction(() => window.__drone);
   const h = (fn, arg) => p.evaluate(fn, arg);
   // dismiss the tap gate on touch devices
