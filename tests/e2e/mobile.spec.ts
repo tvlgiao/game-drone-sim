@@ -240,6 +240,148 @@ test.describe('touch devices', () => {
     expect(bad).toEqual([]);
   });
 
+  // Audit device widths: the ones the project's own viewport doesn't cover are emulated by resizing.
+  const PHONE_VIEWS = [
+    { width: 568, height: 320 },
+    { width: 734, height: 343 },
+    { width: 863, height: 360 },
+  ];
+  const TABLET_VIEWS = [
+    { width: 1024, height: 768 },
+    { width: 1138, height: 712 },
+    { width: 1194, height: 834 },
+    { width: 834, height: 1194 },
+  ];
+  const views = (project: string) => (project.includes('iphone') ? PHONE_VIEWS : TABLET_VIEWS);
+  const showScreen = (page: Page, s: string) =>
+    page.evaluate((s) => (window as unknown as { __drone: { showScreen: (s: string) => void } }).__drone.showScreen(s), s);
+
+  test('rates: the stepper table never runs into the chart column at any audit width', async ({ page }, info) => {
+    await boot(page);
+    await passGate(page);
+    await showScreen(page, 'rates');
+    for (const vp of views(info.project.name)) {
+      await page.setViewportSize(vp);
+      await page.waitForTimeout(600);
+      const r = await page.evaluate(() => {
+        const [a, b] = [...document.querySelectorAll<HTMLElement>('.ds-screen--rates .ds-ctl__col')].map((c) => c.getBoundingClientRect());
+        const cells = [...document.querySelectorAll<HTMLElement>('.ds-screen--rates .ds-cell')].map((c) => c.getBoundingClientRect());
+        const right = Math.max(...cells.map((c) => c.right));
+        const bottom = Math.max(...cells.map((c) => c.bottom));
+        const sideBySide = b!.top < a!.bottom - 1;
+        // charts beside the table: every cell ends left of them; stacked: the charts start below the cells
+        return { sideBySide, clash: sideBySide ? right - b!.left : bottom - b!.top, pastCol: right - a!.right };
+      });
+      expect(r.clash, `${vp.width}×${vp.height} ${JSON.stringify(r)}`).toBeLessThanOrEqual(-8);
+      expect(r.pastCol, `${vp.width}×${vp.height}`).toBeLessThanOrEqual(0.5);
+    }
+  });
+
+  test('settings on tablets: hints wrap instead of being cut off; the footer stays on one row', async ({ page }, info) => {
+    test.skip(info.project.name.includes('iphone'), 'tablets only (phones hide hints)');
+    await boot(page);
+    await passGate(page);
+    await showScreen(page, 'settings');
+    // Android Chrome shows Full screen too (WebKit has no element fullscreen): the four-button footer is the one that wrapped.
+    await page.evaluate(() => document.querySelectorAll<HTMLElement>('.ds-screen--settings [data-fs-only]').forEach((b) => (b.hidden = false)));
+    for (const vp of TABLET_VIEWS) {
+      await page.setViewportSize(vp);
+      await page.waitForTimeout(600);
+      const r = await page.evaluate(() => {
+        const hints = [...document.querySelectorAll<HTMLElement>('.ds-screen--settings .ds-row__hint')].filter((h) => h.offsetParent);
+        const clipped = hints.filter((h) => h.scrollWidth > h.clientWidth + 1 || h.scrollHeight > h.clientHeight + 1).map((h) => h.textContent!.slice(0, 24));
+        const acts = [...document.querySelectorAll<HTMLElement>('.ds-screen--settings .ds-dialog__actions')].pop()!;
+        const rows = new Set([...acts.querySelectorAll<HTMLElement>('.ds-btn')].filter((b) => b.offsetParent).map((b) => Math.round(b.getBoundingClientRect().top)));
+        return { shown: hints.length, clipped, rows: rows.size };
+      });
+      expect(r.shown, `${vp.width}×${vp.height}`).toBeGreaterThan(0);
+      expect(r.clipped, `${vp.width}×${vp.height}`).toEqual([]);
+      expect(r.rows, `${vp.width}×${vp.height}`).toBe(1);
+    }
+  });
+
+  test('tap gate copy fits the form factor (tablets fly in portrait too)', async ({ page }, info) => {
+    await boot(page);
+    const sub = page.locator('.ds-gate__sub');
+    if (info.project.name.includes('iphone')) await expect(sub).toContainText('Landscape');
+    else await expect(sub).not.toContainText('Landscape');
+    await expect(sub).toContainText('two thumbs', { ignoreCase: true });
+  });
+
+  test('phone HUD: micro labels ≥ 9 px, CRASHED and toasts clear the buttons, toasts centred on ≤ 2 lines', async ({ page }, info) => {
+    test.skip(!info.project.name.includes('iphone'), 'phones only');
+    await boot(page);
+    await passGate(page);
+    await startFreeFly(page);
+    await page.evaluate(() => (window as unknown as { __drone: Hook }).__drone.action({ type: 'race' }));
+    await page.waitForTimeout(3600);
+    const msg = 'Controller connected: Xbox Wireless Controller';
+    // one toast at a time: stacked repeats would push the newest one down onto the telemetry panel
+    const toast = (page: Page) =>
+      page.evaluate((m) => {
+        document.querySelectorAll('.ds-toast').forEach((t) => t.remove());
+        (window as unknown as { __drone: { toast: (t: string) => void } }).__drone.toast(m);
+      }, msg);
+    const measure = () =>
+      page.evaluate((m) => {
+        const gap = (a: DOMRect, b: DOMRect) => Math.max(b.left - a.right, a.left - b.right, b.top - a.bottom, a.top - b.bottom);
+        const blockers = [...document.querySelectorAll<HTMLElement>('[data-tbtn], .ds-hud__tl, .ds-hud__tc .ds-gates, .ds-hud__tr')]
+          .filter((e) => e.getClientRects().length && getComputedStyle(e).display !== 'none')
+          .map((e) => e.getBoundingClientRect());
+        const small = [...document.querySelectorAll<HTMLElement>('.ds-hud .ds-label, .ds-hud .ds-unit, .ds-tbtn small')]
+          .filter((e) => e.getClientRects().length && parseFloat(getComputedStyle(e).fontSize) < 9)
+          .map((e) => `${e.textContent} ${getComputedStyle(e).fontSize}`);
+        const t = [...document.querySelectorAll<HTMLElement>('.ds-toast')].filter((x) => x.textContent === m).pop();
+        let tr = null;
+        if (t) {
+          const r = t.getBoundingClientRect();
+          const cs = getComputedStyle(t);
+          const lh = parseFloat(cs.lineHeight) || parseFloat(cs.fontSize) * 1.2;
+          tr = {
+            off: Math.abs((r.left + r.right) / 2 - innerWidth / 2),
+            lines: Math.round((t.clientHeight - parseFloat(cs.paddingTop) - parseFloat(cs.paddingBottom)) / lh),
+            gap: Math.min(...blockers.map((b) => gap(r, b))),
+          };
+        }
+        const big = document.querySelector<HTMLElement>('.ds-center__big.is-crash');
+        let crash = null;
+        if (big && big.textContent) {
+          const rg = document.createRange();
+          rg.selectNodeContents(big);
+          const ink = rg.getBoundingClientRect();
+          crash = Math.min(...blockers.map((b) => gap(ink, b)));
+          if (t) crash = Math.min(crash, gap(ink, t.getBoundingClientRect()));
+        }
+        return { small, tr, crash };
+      }, msg);
+    for (const vp of [page.viewportSize()!, ...PHONE_VIEWS]) {
+      await page.setViewportSize(vp);
+      await page.waitForTimeout(300);
+      await toast(page);
+      await page.waitForTimeout(450);
+      const m = await measure();
+      const at = `${vp.width}×${vp.height} ${JSON.stringify(m)}`;
+      expect(m.small, at).toEqual([]);
+      expect(m.tr!.off, at).toBeLessThanOrEqual(1);
+      expect(m.tr!.lines, at).toBeLessThanOrEqual(2);
+      expect(m.tr!.gap, at).toBeGreaterThanOrEqual(10);
+    }
+    for (const vp of PHONE_VIEWS) {
+      await page.setViewportSize(vp);
+      await expect.poll(() => hook(page, (d) => d.race.status), { timeout: 5000 }).not.toBe('crashed');
+      await page.evaluate(() => (window as unknown as { __drone: Hook }).__drone.teleport(-9, 4.5, 5.8, 0));
+      await expect.poll(() => hook(page, (d) => d.race.status), { timeout: 5000 }).toBe('crashed');
+      await toast(page);
+      await page.waitForTimeout(400);
+      const m = await measure();
+      const at = `crashed ${vp.width}×${vp.height} ${JSON.stringify(m)}`;
+      expect(m.crash, at).toBeGreaterThanOrEqual(10);
+      expect(m.tr!.off, at).toBeLessThanOrEqual(1);
+      expect(m.tr!.gap, at).toBeGreaterThanOrEqual(10);
+    }
+    expect(errors).toEqual([]);
+  });
+
   test('Add-to-Home-Screen sheet names the device and is a centred modal', async ({ page }, info) => {
     await boot(page);
     // Fullscreen is refused in Playwright WebKit, so the gate tap offers the sheet on iOS.
