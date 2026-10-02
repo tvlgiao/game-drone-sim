@@ -316,9 +316,9 @@ const ERROR_ADVICE: Record<Platform, (native: boolean) => string> = {
 };
 const REMAP_PROMPT = 'Select a stick axis, then move that stick.';
 /** Settings rows that open a screen or dialog instead of cycling a value. */
-const SETTINGS_ACTION_ROWS: { act: string; label: string; hint: string; value: string; alert?: boolean }[] = [
-  { act: 'about', label: 'About', hint: 'Version, support, privacy policy and licences', value: `v${APP_VERSION}` },
-  { act: 'confirm-reset', label: 'Reset all settings', hint: 'Controls, rates, mapping, graphics and sound back to defaults', value: 'Reset', alert: true },
+const SETTINGS_ACTION_ROWS: { act: string; label: string; hint: string; danger?: boolean }[] = [
+  { act: 'about', label: 'About', hint: `Version ${APP_VERSION}, support, privacy policy and licences` },
+  { act: 'confirm-reset', label: 'Reset all settings', hint: 'Controls, rates, mapping, graphics and sound back to defaults', danger: true },
 ];
 /** Stick (left / right) carrying throttle for the mode, regardless of the RT option (touch and VR always use a stick). */
 const throttleSlotSide = (s: Settings): 'left' | 'right' => (throttleControl({ stickMode: s.stickMode, throttleSource: 'stick' }) === 'left' ? 'left' : 'right');
@@ -972,10 +972,12 @@ export class Menus {
     const rows = map
       .map(([a, v, x, k]) => `<tr><th scope="row">${a}</th>${xr ? `<td>${v}</td>` : ''}<td>${x}</td><td>${k === '—' ? k : `<kbd class="ds-kbd">${k}</kbd>`}</td></tr>`)
       .join('');
-    const tip =
+    const padTip =
       thr === 'rt'
         ? 'Arming needs throttle at zero: release RT, then press A (keyboard: Space).'
         : `Arming needs throttle at zero: hold the ${thr} stick fully down (keyboard: ${throttleDownHint(s, true).replace(/^Hold/, 'hold')}), then press A (Space). The throttle does not re-centre — like a real radio.`;
+    // next to the VR note the two would contradict (Touch sticks spring back, a gamepad throttle does not)
+    const tip = xr ? `Gamepad / keyboard: ${padTip.charAt(0).toLowerCase()}${padTip.slice(1)}` : padTip;
     const thrXr = throttleSlotSide(s);
     const xrTip = xr
       ? `<p class="ds-tip" data-f="xrTip">VR: the Touch controller sticks spring back — the ${thrXr} stick's centre holds altitude and the other stick's centre holds position. Press A to arm, then push the ${thrXr} stick up to take off.</p>`
@@ -1093,17 +1095,13 @@ export class Menus {
       .join('');
   }
 
-  /** Rows styled like setting rows that open a screen; the arrow is decorative (a click anywhere activates the row). */
+  /** Link rows that open a screen: label + chevron, no value cell, so they never read as a stepper. */
   private actionRowsHtml(): string {
     return SETTINGS_ACTION_ROWS.map(
       (r) => `
-        <div class="ds-row" data-nav data-act="${r.act}" role="button" aria-label="${r.label}">
+        <div class="ds-row ds-row--link${r.danger ? ' ds-row--danger' : ''}" data-nav data-act="${r.act}" role="button" aria-label="${r.label}">
           <div class="ds-row__text"><span class="ds-row__label">${r.label}</span><span class="ds-row__hint">${r.hint}</span></div>
-          <div class="ds-row__ctl">
-            <span aria-hidden="true"></span>
-            <span class="ds-row__value${r.alert ? ' is-alert' : ''}">${r.value}</span>
-            <button type="button" class="ds-arrow" aria-hidden="true" tabindex="-1">›</button>
-          </div>
+          <span class="ds-row__chev" aria-hidden="true">›</span>
         </div>`,
     ).join('');
   }
@@ -1199,9 +1197,13 @@ export class Menus {
                 <span class="ds-label">Buttons</span> <span class="ds-num" data-f="buttons">—</span></p>
               <p class="ds-dev__warn" data-f="devWarn" hidden>Non-standard mapping — sticks may be on other axes. Use Remap below.</p>
               <div class="ds-axes" data-f="axes" data-needs-pad hidden></div>
-              <p class="ds-dev__name" data-no-pad data-f="devEmpty">No controller connected</p>
-              <p class="ds-help" data-no-pad>Connect a Bluetooth or USB controller, then press any button on it. Its sticks, axes and remap options appear here.</p>
-              <p class="ds-help" data-no-pad data-pad-only>Keyboard: WASD and the arrow keys work as the two sticks.</p>
+              <p class="ds-dev__name" data-no-pad data-f="devEmpty">${this.quest ? 'No gamepad connected' : 'No controller connected'}</p>
+              ${
+                this.quest
+                  ? '<p class="ds-help" data-no-pad>In VR you fly with the Touch controllers — no gamepad needed. To use one, pair a Bluetooth gamepad with the headset and press any button on it; its sticks, axes and remap options appear here.</p>'
+                  : `<p class="ds-help" data-no-pad>Connect a Bluetooth or USB controller, then press any button on it. Its sticks, axes and remap options appear here.</p>
+              <p class="ds-help" data-no-pad data-pad-only>Keyboard: WASD and the arrow keys work as the two sticks.</p>`
+              }
             </div>
             <h3 class="ds-h3" data-needs-pad hidden>Axis mapping</h3>
             <div class="ds-remap" data-needs-pad hidden>${remap}${this.btn('remap-reset', 'Reset mapping', false, ' ds-btn--sm')}</div>
@@ -1315,7 +1317,7 @@ export class Menus {
         </table>
         <h3 class="ds-h3">Open-source software</h3>
         <p class="ds-help">${oss.map(([n, l]) => `${n} (${l})`).join(' · ')}. Full licence texts are included with the app.</p>
-        <div class="ds-dialog__actions">
+        <div class="ds-dialog__actions ds-about__links">
           ${link(`mailto:${SUPPORT_EMAIL}?subject=${encodeURIComponent(`Drone Sim ${APP_VERSION}`)}`, 'Email support', false)}
           ${link(`${base}privacy/`, 'Privacy policy ↗', true)}
           ${link(`${base}licenses.txt`, 'Licences ↗', true)}
@@ -1408,7 +1410,7 @@ export class Menus {
       'error',
       `
       <div class="ds-panel ds-glass ds-dialog ds-error">
-        <h2 class="ds-dialog__title">Can't start the simulator</h2>
+        <h2 class="ds-dialog__title">Can’t start the simulator</h2>
         <p class="ds-dialog__text">Drone Sim couldn’t start 3D graphics on this&nbsp;${this.native ? 'device' : 'browser'}.</p>
         <p class="ds-dialog__text" data-f="advice">${ERROR_ADVICE[this.platform](this.native)}</p>
         <details class="ds-help ds-dialog__text">

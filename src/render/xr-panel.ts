@@ -38,10 +38,16 @@ const PAD_X = 64;
 const PAD_Y = 36;
 export const XR_CARD_TEXT_W = XR_CARD_W - 2 * PAD_X;
 const BLOCK_GAP = 16;
+/** the action line follows the text above it at line rhythm: a block gap there reads as a detached footer */
+const HINT_GAP = 2;
 const LINE_H = 1.12;
 const FONT = 'system-ui, -apple-system, "Segoe UI", sans-serif';
 /** canvas px per block; sub / hint are sized so their cap height clears ~1.1° on the flight card */
 export const XR_CARD_PX = { title: 92, sub: 66, hint: 66 } as const;
+/** menu cards are twice the flight card's angular size: their hints can step down below the title */
+export const XR_MENU_HINT_PX = 56;
+const HINT_COLOUR = '#7fe3ff';
+const MENU_HINT_COLOUR = '#6aa9c2';
 /** cap height / font size of system-ui (SF, Roboto, Segoe all ≈ 0.7) */
 export const XR_CAP_RATIO = 0.7;
 /**
@@ -161,25 +167,28 @@ type Measure = (text: string, weight: number, px: number) => number;
  * Every returned line fits XR_CARD_TEXT_W at its own px, so none is drawn with a horizontal squeeze.
  */
 export function layoutCard(c: XrPanelContent, measure: Measure): XrCardLine[] {
+  const menu = c.layout === 'menu';
   const blocks = [
-    { text: c.title, weight: 700, px: XR_CARD_PX.title, colour: c.accent ?? '#e9f6ff' },
-    { text: c.sub, weight: 500, px: XR_CARD_PX.sub, colour: '#b9d3e6' },
-    { text: c.hint, weight: 600, px: XR_CARD_PX.hint, colour: '#7fe3ff' },
+    { text: c.title, weight: 700, px: XR_CARD_PX.title, colour: c.accent ?? '#e9f6ff', gap: 0 },
+    { text: c.sub, weight: 500, px: XR_CARD_PX.sub, colour: '#b9d3e6', gap: BLOCK_GAP },
+    { text: c.hint, weight: 600, px: menu ? XR_MENU_HINT_PX : XR_CARD_PX.hint, colour: menu ? MENU_HINT_COLOUR : HINT_COLOUR, gap: HINT_GAP },
   ].filter((b) => b.text !== '');
+  // the tight hint gap applies only under the sub line; under the title alone it keeps a block gap
+  const gaps = blocks.map((b, i) => (i === 0 ? 0 : b.gap === HINT_GAP && blocks[i - 1].gap === 0 ? BLOCK_GAP : b.gap));
   for (let k = 1; ; k *= 0.94) {
     const laid = blocks.map((b) => fitBlock(b.text, b.weight, Math.floor(b.px * k), measure));
-    const total = laid.reduce((h, l) => h + l.lines.length * l.px * LINE_H, 0) + BLOCK_GAP * Math.max(0, laid.length - 1);
+    const total = laid.reduce((h, l, i) => h + l.lines.length * l.px * LINE_H + gaps[i], 0);
     if (total > XR_CARD_H - 2 * PAD_Y && k > 0.3) continue;
     const out: XrCardLine[] = [];
     let y = (XR_CARD_H - total) / 2;
     laid.forEach((l, i) => {
       const { weight, colour } = blocks[i];
       const lh = l.px * LINE_H;
+      y += gaps[i];
       for (const text of l.lines) {
         out.push({ text, weight, px: l.px, colour, y: y + lh / 2, width: measure(text, weight, l.px) });
         y += lh;
       }
-      y += BLOCK_GAP;
     });
     return out;
   }

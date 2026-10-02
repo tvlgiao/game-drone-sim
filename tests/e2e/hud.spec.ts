@@ -108,7 +108,14 @@ const toastVsCenter = (page: Page) =>
       right: Math.max(...boxes.map((b) => b.right)),
     };
     const t = [...document.querySelectorAll<HTMLElement>('.ds-toast')].pop()!.getBoundingClientRect();
-    return { text: big.textContent ?? '', center, toast: { top: t.top, bottom: t.bottom, left: t.left, right: t.right } };
+    const box = (r: DOMRect) => ({ top: r.top, bottom: r.bottom, left: r.left, right: r.right });
+    // telemetry card and on-screen touch buttons / sticks the lane must never sit on
+    const others = [...document.querySelectorAll<HTMLElement>('.ds-hud__bl, .ds-tbtn, .ds-tstick__base')]
+      .map((e) => e.getBoundingClientRect())
+      .filter((r) => r.width > 0 && r.height > 0)
+      .map(box);
+    const tele = document.querySelector<HTMLElement>('.ds-hud__bl')!.getBoundingClientRect();
+    return { text: big.textContent ?? '', center, toast: box(t), others, tele: box(tele) };
   });
 
 const toast = (page: Page, m: string) => page.evaluate((msg) => (window.__drone as unknown as { toast: (s: string) => void }).toast(msg), m);
@@ -140,6 +147,13 @@ for (const [name, opts] of [
       const s = await toastVsCenter(page);
       expect(s.text).toBe('CRASHED');
       expect(overlaps(s.toast, s.center), JSON.stringify(s)).toBe(false);
+      for (const o of s.others) expect(overlaps(s.toast, o), JSON.stringify({ toast: s.toast, o })).toBe(false);
+      if (name === 'phone') {
+        // just above the telemetry card, not over the respawning drone under the title
+        const above = s.tele.top - s.toast.bottom;
+        expect(above, JSON.stringify(s)).toBeGreaterThanOrEqual(0);
+        expect(above, JSON.stringify(s)).toBeLessThan(40);
+      }
     });
 
     test('a toast never covers the countdown digit', async ({ page }) => {
@@ -150,9 +164,25 @@ for (const [name, opts] of [
       const s = await toastVsCenter(page);
       expect(s.text).toMatch(/^[123]$/);
       expect(overlaps(s.toast, s.center), JSON.stringify(s)).toBe(false);
+      for (const o of s.others) expect(overlaps(s.toast, o), JSON.stringify({ toast: s.toast, o })).toBe(false);
     });
   });
 }
+
+test('pause / finish hide the flight HUD behind them; the countdown digit has a dark outline', async ({ page }) => {
+  await boot(page);
+  await page.evaluate(() => window.__drone.action({ type: 'race' }));
+  await page.waitForFunction(() => document.querySelector('[data-r="center"]')?.textContent === '3', null, { timeout: 3_000 });
+  const shadow = await page.locator('[data-r="center"]').evaluate((e) => getComputedStyle(e).textShadow);
+  expect(shadow).toMatch(/^rgba\(0, 0, 0, 0\.9\)/);
+  await page.waitForFunction(() => window.__drone.race.status === 'racing', null, { timeout: 6_000 });
+  await expect(page.locator('[data-r="time"]')).toBeVisible();
+  await page.evaluate(() => window.__drone.press('pause'));
+  await page.waitForFunction(() => window.__drone.screen === 'pause');
+  for (const sel of ['[data-r="time"]', '.ds-hud__bl', '[data-r="gates"]', '[data-r="armed"]']) await expect(page.locator(sel), sel).toBeHidden();
+  await page.evaluate(() => (window.__drone as unknown as { showScreen: (s: string, d: unknown) => void }).showScreen('finish', { time: 80, best: 80, newBest: false }));
+  await expect(page.locator('.ds-hud__bl')).toBeHidden();
+});
 
 test('bye screen hides the centre banners and race timer', async ({ page }) => {
   await boot(page);

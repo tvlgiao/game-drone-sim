@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { DEFAULT_SETTINGS } from '../../src/core/settings';
 import * as THREE from 'three';
 import { XR_TARGET_FPS, isQuestBrowser, tuneXrSession, xrSessionObscured } from '../../src/core/xr';
-import { XR_CAP_RATIO, XR_CARD_H, XR_CARD_PX, XR_CARD_TEXT_W, XR_CARD_W, XR_HUD_DOWN, layoutCard, wrapHint, xrPanelPose } from '../../src/render/xr-panel';
+import { XR_CAP_RATIO, XR_CARD_H, XR_CARD_PX, XR_CARD_TEXT_W, XR_CARD_W, XR_HUD_DOWN, XR_MENU_HINT_PX, layoutCard, wrapHint, xrPanelPose } from '../../src/render/xr-panel';
 import { InputManager } from '../../src/input/input-manager';
 import { XR_BTN, XR_YAW_SCALE, XrControllers, shapeXrControl, xrExpo, type XrSourceLike } from '../../src/input/xr-controllers';
 import { actualRate, RATE_PRESETS } from '../../src/control/rates';
@@ -247,6 +247,30 @@ describe('VR card layout', () => {
     const paused = layoutCard(xrHudContent(state({ race: race({ status: 'paused' }) })), measure);
     const sub = paused.filter((l) => l.px === XR_CARD_PX.sub && l.weight === 500);
     expect(sub.map((l) => l.text)).toEqual(['L-stick click recentre', 'L-trigger heading arrow']);
+  });
+
+  it('the pause card action line follows the help lines at line rhythm (no extra block gap)', () => {
+    const paused = layoutCard(xrHudContent(state({ race: race({ status: 'paused' }) })), measure);
+    const sub = paused.filter((l) => l.weight === 500);
+    const hint = paused[paused.length - 1]!;
+    const subBottom = sub[sub.length - 1]!.y + (sub[sub.length - 1]!.px * 1.12) / 2;
+    const hintTop = hint.y - (hint.px * 1.12) / 2;
+    expect(hintTop - subBottom).toBeLessThanOrEqual(4);
+    // without a sub line the hint keeps a full gap under the title
+    const [title, solo] = layoutCard({ layout: 'menu', title: 'FINISH 01:00.00', sub: '', hint: 'A Retry · X Menu' }, measure);
+    expect(solo!.y - (solo!.px * 1.12) / 2 - (title!.y + (title!.px * 1.12) / 2)).toBeGreaterThanOrEqual(12);
+  });
+
+  it('menu card hints are smaller and dimmer than the title; flight card hints keep their legible size', () => {
+    const menu = layoutCard(xrHudContent(state({ race: race({ status: 'menu' }) })), measure);
+    const [title] = menu;
+    const hint = menu[menu.length - 1]!;
+    expect(hint.px).toBeLessThan(title!.px * 0.7);
+    expect(hint.colour).not.toBe(title!.colour);
+    const lum = (hex: string): number => [1, 3, 5].reduce((s, i) => s + parseInt(hex.slice(i, i + 2), 16), 0);
+    expect(lum(hint.colour)).toBeLessThan(lum('#7fe3ff'));
+    const flight = layoutCard(xrHudContent(state({ race: race({ status: 'racing' }) })), measure);
+    expect(flight[flight.length - 1]!.px).toBeGreaterThan(XR_MENU_HINT_PX);
   });
 
   it('a single word too wide for the card shrinks uniformly rather than squeezing', () => {

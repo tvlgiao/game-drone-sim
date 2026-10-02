@@ -17,6 +17,7 @@
   --ds-green: #3dffa0;
   --ds-amber: #ffc53d;
   --ds-red: #ff4661;
+  --ds-danger-text: #ff9fb1;
   --ds-text: #eaf6ff;
   --ds-muted: rgba(200, 225, 245, 0.62);
   --ds-panel: linear-gradient(160deg, rgba(14, 24, 40, 0.72), rgba(6, 10, 20, 0.62));
@@ -130,6 +131,11 @@
 
 .ds-ui[data-status='menu'].has-screen .ds-hud {
   opacity: 0;
+}
+
+/* Pause / quit / finish (and menus opened from them) hide the flight HUD like bye / error do. */
+.ds-ui.has-screen .ds-hud > :not(.ds-toasts) {
+  visibility: hidden;
 }
 
 .ds-hud__tl,
@@ -341,6 +347,14 @@
     0 0 calc(24 * var(--ds-u)) rgba(40, 231, 255, 0.8),
     0 0 calc(70 * var(--ds-u)) rgba(40, 231, 255, 0.45);
   will-change: transform, opacity;
+}
+
+.ds-center__big.is-count {
+  text-shadow:
+    0 0 calc(2 * var(--ds-u)) rgba(0, 0, 0, 0.9),
+    0 calc(2 * var(--ds-u)) calc(8 * var(--ds-u)) rgba(0, 0, 0, 0.8),
+    0 0 calc(24 * var(--ds-u)) rgba(40, 231, 255, 0.8),
+    0 0 calc(70 * var(--ds-u)) rgba(40, 231, 255, 0.45);
 }
 
 .ds-center__big.is-go {
@@ -696,6 +710,7 @@
   font-weight: 600;
   letter-spacing: 0.03em;
   text-align: center;
+  text-wrap: balance;
   animation: ds-toast-in 0.35s cubic-bezier(0.2, 0.8, 0.2, 1);
   transition: opacity 0.35s ease, transform 0.35s ease;
 }
@@ -712,6 +727,7 @@
   z-index: 20;
   display: grid;
   place-items: center;
+  --ds-screen-pb: calc(16 * var(--ds-u));
   padding: calc(16 * var(--ds-u));
   overflow-y: auto;
   overscroll-behavior: contain;
@@ -727,6 +743,16 @@
   visibility: visible;
   pointer-events: auto;
   transition: opacity 0.28s ease, visibility 0s;
+}
+
+/* Screens with a sticky footer move their bottom space into a margin: the stuck footer then meets the
+   true bottom edge, with no strip of scrolled content showing under it. */
+.ds-ui .ds-screen:has(> .ds-dialog > .ds-dialog__actions) {
+  padding-bottom: 0;
+}
+
+.ds-screen > .ds-dialog:has(> .ds-dialog__actions) {
+  margin-bottom: var(--ds-screen-pb);
 }
 
 .ds-screen.is-open > * {
@@ -971,8 +997,22 @@ a.ds-btn { text-decoration: none; }
 
 /* dialogs */
 .ds-dialog {
+  --ds-dlg-pad: clamp(calc(18 * var(--ds-u)), 3vw, calc(30 * var(--ds-u)));
   width: min(calc(440 * var(--ds-u)), 100%);
-  padding: clamp(calc(18 * var(--ds-u)), 3vw, calc(30 * var(--ds-u)));
+  padding: var(--ds-dlg-pad);
+}
+
+/* The last footer row sticks to the bottom of the scrolling screen, so Back is always in view. */
+.ds-dialog > .ds-dialog__actions:last-of-type {
+  position: sticky;
+  bottom: 0;
+  z-index: 1;
+  margin-inline: calc(-1 * var(--ds-dlg-pad));
+  margin-bottom: calc(-1 * var(--ds-dlg-pad));
+  padding: calc(14 * var(--ds-u)) var(--ds-dlg-pad);
+  border-top: 1px solid rgba(120, 220, 255, 0.08);
+  border-radius: 0 0 var(--ds-radius) var(--ds-radius);
+  background: linear-gradient(180deg, rgba(8, 13, 25, 0.94), rgba(6, 10, 20, 0.98));
 }
 
 .ds-dialog--wide {
@@ -1035,6 +1075,26 @@ a.ds-btn { text-decoration: none; }
 
 .ds-row__value.is-alert {
   color: var(--ds-amber);
+}
+
+.ds-row.ds-row--link {
+  grid-template-columns: minmax(0, 1fr) auto;
+}
+
+.ds-row__chev {
+  padding-inline: calc(8 * var(--ds-u));
+  font-size: 1.3em;
+  line-height: 1;
+  color: var(--ds-muted);
+}
+
+.ds-row.is-focused .ds-row__chev {
+  color: var(--ds-cyan);
+}
+
+.ds-row--danger .ds-row__label,
+.ds-row--danger .ds-row__chev {
+  color: var(--ds-danger-text);
 }
 
 /* controller setup */
@@ -1382,6 +1442,11 @@ a.ds-btn { text-decoration: none; }
   font-weight: 500;
 }
 
+.ds-rates .ds-ctl__col:last-child {
+  width: min(100%, calc(540 * var(--ds-u)));
+  justify-self: center;
+}
+
 .ds-chart {
   display: grid;
   gap: calc(6 * var(--ds-u));
@@ -1714,6 +1779,20 @@ a.ds-btn { text-decoration: none; }
   color: rgba(220, 232, 255, 0.78);
 }
 
+.ds-about__links {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.ds-dialog__actions.ds-about__links .ds-btn {
+  width: 100%;
+  min-width: 0;
+}
+
+@media (max-width: 640px) {
+  .ds-about__links { grid-template-columns: minmax(0, 1fr); }
+}
+
 .ds-screen--about .ds-table .ds-num {
   font-family: inherit;
 }
@@ -1924,6 +2003,39 @@ a.ds-btn { text-decoration: none; }
   .ds-logo__sub { letter-spacing: 0.3em; }
 }
 
+/* Quest Browser 2D panel: read from ~1 m in a headset, so descriptions ≥ 13 px and micro labels ≥ 11 px. */
+body.is-quest .ds-row__hint,
+body.is-quest .ds-help,
+body.is-quest .ds-tip,
+body.is-quest .ds-dev__warn,
+body.is-quest .ds-remap__status,
+body.is-quest .ds-axes {
+  font-size: max(13px, 0.8em);
+}
+
+body.is-quest .ds-row__hint {
+  white-space: normal;
+}
+
+body.is-quest .ds-label,
+body.is-quest .ds-unit,
+body.is-quest .ds-h3,
+body.is-quest .ds-table thead th,
+body.is-quest .ds-rtable th,
+body.is-quest .ds-cwell-box figcaption,
+body.is-quest .ds-cwell__v,
+body.is-quest .ds-cwell__h,
+body.is-quest .ds-chip,
+body.is-quest .ds-thr .ds-label,
+body.is-quest .ds-thr__val,
+body.is-quest .ds-src,
+body.is-quest .ds-stick__lbl,
+body.is-quest .ds-legend,
+body.is-quest .ds-chan__us,
+body.is-quest .ds-foot {
+  font-size: max(11px, 0.8em);
+}
+
 /* Quit controls */
 .ds-chip--quit {
   pointer-events: auto;
@@ -1943,7 +2055,7 @@ a.ds-btn { text-decoration: none; }
   outline: none;
 }
 .ds-ui.has-screen .ds-chip--quit { visibility: hidden; }
-.ds-btn--quit span { color: #ff9fb1; }
+.ds-btn--quit span { color: var(--ds-danger-text); }
 .ds-dialog__text {
   margin: 0 0 calc(18 * var(--ds-u));
   color: rgba(220, 232, 255, 0.72);

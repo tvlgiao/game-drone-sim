@@ -66,6 +66,8 @@ export class RaceController {
   private mode: Mode = null;
   private pausedFrom: RaceStatus | null = null;
   private time = 0;
+  /** Latches at the first armed step after GO: the lap clock never counts time spent sitting disarmed. */
+  private clockStarted = false;
   private countdownLeft = 0;
   private countdownShown = 0;
   private nextRing = 0;
@@ -161,12 +163,15 @@ export class RaceController {
         break;
       case 'racing':
       case 'freefly':
-        if (this.status === 'racing') this.time += dt;
+        if (this.status === 'racing') {
+          if (state.armed) this.clockStarted = true;
+          if (this.clockStarted) this.time += dt;
+        }
         this.checkRings(prevPos, state.position);
         if (this.status === 'racing' || this.status === 'freefly') this.checkCrash(dt, state, contacts);
         break;
       case 'crashed':
-        if (this.mode === 'race') this.time += dt;
+        if (this.mode === 'race' && this.clockStarted) this.time += dt;
         this.crashTimer -= dt;
         if (this.crashTimer <= 0) this.respawn();
         for (const e of this.pending) ev.push(e);
@@ -213,6 +218,7 @@ export class RaceController {
     this.mode = mode;
     this.pausedFrom = null;
     this.time = 0;
+    this.clockStarted = false;
     this.countdownLeft = 0;
     this.nextRing = 0;
     this.lastPassed = -1;
