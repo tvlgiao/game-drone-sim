@@ -4,6 +4,7 @@
  * without element fullscreen (iPhone Safari), and the phone "Rotate your device" overlay.
  */
 import './mobile.css';
+import { formFactor, readEnv, type FormFactor } from '../core/device';
 
 export const A2HS_DISMISSED_KEY = 'drone-sim.a2hs-dismissed';
 
@@ -15,6 +16,11 @@ export function iosDeviceName(userAgent: string, maxTouchPoints: number): 'iPhon
   return /iPad/.test(userAgent) || (/Macintosh/.test(userAgent) && maxTouchPoints > 1) ? 'iPad' : 'iPhone';
 }
 
+/** Phones are held in landscape (portrait shows the rotate overlay); tablets fly either way up. */
+export function gateHint(form: FormFactor): string {
+  return form === 'phone' ? 'Landscape · two thumbs · sound on' : 'Two thumbs · sound on';
+}
+
 export interface MobileShellOptions {
   storage: Storage | null;
   /** already running as a home-screen app (no fullscreen needed) */
@@ -23,6 +29,8 @@ export interface MobileShellOptions {
   onGateTap: () => void;
   /** Add-to-Home-Screen wording; detected from the user agent when omitted */
   iosDevice?: 'iPhone' | 'iPad';
+  /** gate wording; detected from the screen when omitted */
+  form?: FormFactor;
 }
 
 export class MobileShell {
@@ -36,6 +44,7 @@ export class MobileShell {
   constructor(root: HTMLElement, opts: MobileShellOptions) {
     this.storage = opts.storage;
     const label = opts.standalone ? 'Tap to play' : 'Tap to play full screen';
+    const form = opts.form ?? (typeof window === 'undefined' ? 'phone' : formFactor(readEnv(window)));
     this.gate = this.el(
       root,
       'ds-gate',
@@ -43,7 +52,7 @@ export class MobileShell {
          <span class="ds-gate__ring" aria-hidden="true"></span>
          <span class="ds-gate__title">DRONE SIM</span>
          <span class="ds-gate__cta">${label}</span>
-         <span class="ds-gate__sub">Landscape · two thumbs · sound on</span>
+         <span class="ds-gate__sub">${gateHint(form)}</span>
        </button>`,
     );
     this.gate.querySelector('button')!.addEventListener('click', () => {
