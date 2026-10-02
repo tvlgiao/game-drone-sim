@@ -1,4 +1,4 @@
-import { expect, test, type Page } from '@playwright/test';
+import { devices, expect, test, type Page } from '@playwright/test';
 
 // window.__drone is typed by the global declaration in game.spec.ts.
 
@@ -87,4 +87,105 @@ test('toasts are cleared when the bye screen opens', async ({ page }) => {
   await expect(page.locator('.ds-toast')).toHaveCount(1);
   await page.evaluate(() => (window.__drone as unknown as { showScreen: (s: string) => void }).showScreen('bye'));
   await expect(page.locator('.ds-toast')).toHaveCount(0, { timeout: 500 }); // well before its own 2.8 s expiry
+});
+
+type Box = { top: number; bottom: number; left: number; right: number };
+const overlaps = (a: Box, b: Box) => a.left < b.right && b.left < a.right && a.top < b.bottom && b.top < a.bottom;
+
+/** Union box of the centre title glyphs and its sub-label pill, plus the newest toast's box. */
+const toastVsCenter = (page: Page) =>
+  page.evaluate(() => {
+    const big = document.querySelector<HTMLElement>('[data-r="center"]')!;
+    const range = document.createRange();
+    range.selectNodeContents(big);
+    const boxes = [range.getBoundingClientRect()];
+    const sub = document.querySelector<HTMLElement>('[data-r="centerSub"]')!;
+    if (sub.textContent) boxes.push(sub.getBoundingClientRect());
+    const center = {
+      top: Math.min(...boxes.map((b) => b.top)),
+      bottom: Math.max(...boxes.map((b) => b.bottom)),
+      left: Math.min(...boxes.map((b) => b.left)),
+      right: Math.max(...boxes.map((b) => b.right)),
+    };
+    const t = [...document.querySelectorAll<HTMLElement>('.ds-toast')].pop()!.getBoundingClientRect();
+    return { text: big.textContent ?? '', center, toast: { top: t.top, bottom: t.bottom, left: t.left, right: t.right } };
+  });
+
+const toast = (page: Page, m: string) => page.evaluate((msg) => (window.__drone as unknown as { toast: (s: string) => void }).toast(msg), m);
+
+// Desktop, and a touch phone where the toast lane sits right on the centre title stack (round-2 audit).
+for (const [name, opts] of [
+  ['desktop', {}],
+  ['phone', { viewport: devices['Pixel 7 landscape'].viewport, hasTouch: true, isMobile: true, userAgent: devices['Pixel 7 landscape'].userAgent }],
+] as const) {
+  test.describe(`toast lane (${name})`, () => {
+    test.use(opts);
+
+    const start = async (page: Page) => {
+      await boot(page);
+      const gate = page.getByRole('button', { name: /tap to play/i });
+      if (await gate.isVisible().catch(() => false)) await gate.click();
+      await page.evaluate(() => window.__drone.action({ type: 'race' }));
+    };
+
+    test('a toast never covers the CRASHED title or its sub-label', async ({ page }) => {
+      await start(page);
+      await page.waitForFunction(() => window.__drone.race.status === 'racing', null, { timeout: 6_000 });
+      await page.waitForTimeout(1200);
+      await page.evaluate(() => window.__drone.teleport(-9, 4.5, 5.8, 0));
+      await page.waitForFunction(() => window.__drone.race.status === 'crashed', null, { timeout: 6_000 });
+      await page.waitForTimeout(300);
+      await toast(page, 'Controller connected: Xbox Wireless Controller');
+      await page.waitForTimeout(450); // past the toast entrance and the lane transition
+      const s = await toastVsCenter(page);
+      expect(s.text).toBe('CRASHED');
+      expect(overlaps(s.toast, s.center), JSON.stringify(s)).toBe(false);
+    });
+
+    test('a toast never covers the countdown digit', async ({ page }) => {
+      await start(page);
+      await page.waitForFunction(() => document.querySelector('[data-r="center"]')?.textContent === '3', null, { timeout: 3_000 });
+      await toast(page, 'Controller connected: Xbox Wireless Controller');
+      await page.waitForTimeout(450);
+      const s = await toastVsCenter(page);
+      expect(s.text).toMatch(/^[123]$/);
+      expect(overlaps(s.toast, s.center), JSON.stringify(s)).toBe(false);
+    });
+  });
+}
+
+test('bye screen hides the centre banners and race timer', async ({ page }) => {
+  await boot(page);
+  await page.evaluate(() => window.__drone.action({ type: 'race' }));
+  await page.waitForFunction(() => window.__drone.race.status === 'racing', null, { timeout: 6_000 });
+  await page.evaluate(() => window.__drone.teleport(-9, 4.5, 5.8, 0));
+  await page.waitForFunction(() => window.__drone.race.status === 'crashed', null, { timeout: 6_000 });
+  await page.evaluate(() => (window.__drone as unknown as { showScreen: (s: string) => void }).showScreen('bye'));
+  await expect(page.locator('.ds-screen--bye')).toBeVisible();
+  await expect(page.locator('[data-r="center"]')).toBeHidden();
+  await expect(page.locator('[data-r="centerSub"]')).toBeHidden();
+  await expect(page.locator('[data-r="time"]')).toBeHidden();
+});
+
+test('finish delta is green when faster and amber when slower', async ({ page }) => {
+  await boot(page);
+  const show = (d: object) => page.evaluate((data) => (window.__drone as unknown as { showScreen: (s: string, d: object) => void }).showScreen('finish', data), d);
+  const delta = page.locator('.ds-screen--finish [data-f="delta"]');
+  const color = () => delta.evaluate((el) => getComputedStyle(el).color);
+  await show({ time: 83.456, best: 80.12, newBest: false });
+  await expect(delta).toHaveText(/^\+/);
+  expect(await color()).toBe('rgb(255, 197, 61)');
+  await show({ time: 79.9, best: 79.9, newBest: true, prevBest: 81.1 });
+  await expect(delta).toHaveText(/^−/);
+  expect(await color()).toBe('rgb(61, 255, 160)');
+});
+
+test('free fly shows a running FLIGHT clock instead of a lone ∞', async ({ page }) => {
+  await boot(page);
+  await page.evaluate(() => window.__drone.action({ type: 'freefly' }));
+  await page.waitForFunction(() => window.__drone.race.status === 'freefly');
+  await expect(page.locator('[data-r="timeLabel"]')).toHaveText(/flight/i);
+  await page.waitForTimeout(1200);
+  const t = await page.locator('[data-r="time"]').textContent();
+  expect(t).toMatch(/^00:0[1-9]\.\d\d$/);
 });
