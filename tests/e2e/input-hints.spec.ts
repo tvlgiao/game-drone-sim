@@ -53,6 +53,9 @@ test('keyboard: keycaps beside arm / mode / camera, a reset / pause strip, stick
   await expect(legend).toContainText('centre = hover');
   // the open legend lists every binding: the chip row folds to its toggle, and Recentre (VR only) is not listed
   await expect(legend).not.toContainText('Recentre');
+  // every label on one line ("Heading arrow" used to wrap)
+  const wrapped = await legend.locator('dt').evaluateAll((els) => els.filter((e) => e.getBoundingClientRect().height > Number.parseFloat(getComputedStyle(e).fontSize) * 1.6).map((e) => e.textContent));
+  expect(wrapped).toEqual([]);
   await expect(ui(page, '[data-bind]')).toHaveCount(0);
   await expect(ui(page, '[data-legend]')).toBeVisible();
   await page.keyboard.press('KeyH');

@@ -959,6 +959,8 @@
 .ds-cmap__list {
   margin: 0;
   display: grid;
+  /* labels never wrap ("Heading arrow"); both lists share one label width so their glyphs line up */
+  grid-template-columns: minmax(7em, max-content) 1fr;
   gap: calc(3 * var(--ds-u));
 }
 
@@ -970,13 +972,15 @@
 
 .ds-cmap__row {
   display: grid;
-  grid-template-columns: 6.4em 1fr;
+  grid-column: 1 / -1;
+  grid-template-columns: subgrid;
   align-items: center;
   gap: calc(8 * var(--ds-u));
   min-height: calc(22 * var(--ds-u));
 }
 
 .ds-cmap__row dt {
+  white-space: nowrap;
   color: var(--ds-muted);
   font-weight: 600;
 }
