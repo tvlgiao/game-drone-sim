@@ -51,6 +51,7 @@ test.describe('desktop menus', () => {
     await expect.poll(() => screenOf(page)).toBe('about');
     const about = page.locator('.ds-screen--about');
     await expect(about.locator('[data-f="version"]')).toHaveText(VERSION);
+    await expect(about.locator('[data-f="version"]')).not.toHaveClass(/ds-num/);
     await expect(about).toContainText('COWORK Game Studio');
     await expect(about).toContainText('support@coworkgamestudio.com');
     const privacy = about.getByRole('link', { name: /Privacy policy/ });
@@ -286,11 +287,16 @@ test.describe('desktop menus', () => {
     });
     const fin = page.locator('.ds-screen--finish');
     await expect(fin.locator('[data-f="delta"]')).toHaveText('+3.34 s');
+    await expect(fin.locator('[data-f="delta"]')).toHaveAttribute('data-sign', 'slower');
     await page.evaluate(() => (window as unknown as { __drone: Hook }).__drone.showScreen('finish', { time: 79.9, best: 79.9, newBest: true }));
     await expect(fin.locator('[data-f="badge"]')).toBeVisible();
     await expect(fin.locator('[data-f="bestLabel"]')).toHaveText('Previous best');
     await expect(fin.locator('[data-f="best"]')).toHaveText('01:20.12');
     await expect(fin.locator('[data-f="delta"]')).toHaveText('−0.22 s');
+    await expect(fin.locator('[data-f="delta"]')).toHaveAttribute('data-sign', 'faster');
+    await page.evaluate(() => (window as unknown as { __drone: Hook }).__drone.showScreen('finish', { time: 80.004, best: 80, newBest: false }));
+    await expect(fin.locator('[data-f="delta"]')).toHaveText('0.00 s');
+    await expect(fin.locator('[data-f="delta"]')).toHaveAttribute('data-sign', '');
 
     await page.evaluate(() =>
       (window as unknown as { __drone: Hook }).__drone.showError('WebGL2 is not available on this device/browser (context lost). Enable hardware acceleration.'),
