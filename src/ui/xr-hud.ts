@@ -46,7 +46,7 @@ export function xrHudContent(s: XrHudState): XrPanelContent {
     case 'menu':
       return { layout: 'menu', title: 'DRONE SIM VR', sub: r.bestTime !== null ? `Best ${formatTime(r.bestTime)}` : 'Night Loft', hint: hint(`A Race · X Free fly · ${exit}`), accent: CYAN };
     case 'paused':
-      return { layout: 'menu', title: 'PAUSED', sub: 'L-stick click recentre · L-trigger: heading arrow', hint: hint(`A Resume · X Menu · ${exit}`), accent: AMBER };
+      return { layout: 'menu', title: 'PAUSED', sub: 'L-stick click recentre · L-trigger heading arrow', hint: hint(`A Resume · X Menu · ${exit}`), accent: AMBER };
     case 'finished':
       return { layout: 'menu', title: `FINISH ${formatTime(r.time)}`, sub: r.bestTime !== null ? `Best ${formatTime(r.bestTime)}` : '', hint: hint(`A Retry · X Menu · ${exit}`), accent: GREEN };
     case 'countdown':

@@ -3,6 +3,7 @@
  * arm + take-off latch, altitude hold on the centred thumbstick, camera cycle, pause and leaving VR.
  */
 import { expect, test, type Page } from '@playwright/test';
+import { XR_CARD_PX, XR_CARD_TEXT_W, type XrPanelView } from '../../src/render/xr-panel';
 
 interface Hook {
   state: { position: { x: number; y: number; z: number } };
@@ -12,7 +13,7 @@ interface Hook {
   camera: string;
   screen: string;
   audio: string;
-  xr: { presenting: boolean; source: string; latched: boolean; panelDraws: number; frameRate: number | null; foveation: number | null; panel: { title: string; sub: string; hint: string } | null };
+  xr: { presenting: boolean; source: string; latched: boolean; panelDraws: number; frameRate: number | null; foveation: number | null; panel: XrPanelView | null };
   pixelRatio: number;
   renderScale: number;
   stats: () => { calls: number; triangles: number };
@@ -42,6 +43,20 @@ async function press(page: Page, hand: Hand, button: string): Promise<void> {
 const stick = (page: Page, hand: Hand, x: number, y: number) =>
   page.evaluate(([h, sx, sy]) => (window as unknown as W).__xrDevice.controllers[h as Hand].updateAxes('thumbstick', sx as number, sy as number), [hand, x, y] as const);
 
+/**
+ * The VR card as laid out with the browser's real fonts: every line fits the text width at its own size
+ * (drawn without fillText's maxWidth squeeze), and the flight card keeps sub / hint at full legible size.
+ */
+async function expectCardFits(page: Page, layout: 'menu' | 'hud'): Promise<void> {
+  const panel = await page.evaluate(() => (window as unknown as W).__drone.xr.panel);
+  expect(panel?.layout).toBe(layout);
+  expect(panel!.lines.length).toBeGreaterThanOrEqual(2);
+  for (const l of panel!.lines) {
+    expect(l.width, l.text).toBeLessThanOrEqual(XR_CARD_TEXT_W);
+    if (layout === 'hud' && l.weight !== 700) expect(l.px, l.text).toBe(l.weight === 500 ? XR_CARD_PX.sub : XR_CARD_PX.hint);
+  }
+}
+
 const altitude = (page: Page) => page.evaluate(() => (window as unknown as W).__drone.state.position.y);
 
 test('emulated Quest 2: enter VR, fly with Touch controllers, pause and exit', async ({ page }) => {
@@ -64,6 +79,7 @@ test('emulated Quest 2: enter VR, fly with Touch controllers, pause and exit', a
   await page.waitForFunction(() => (window as unknown as W).__drone.xr.presenting, null, { timeout: 10_000 });
   expect(await page.evaluate(() => (window as unknown as W).__drone.tier)).toBe('low');
   expect(await page.evaluate(() => (window as unknown as W).__drone.stats().calls)).toBeGreaterThan(10);
+  await expectCardFits(page, 'menu');
 
   // Menu card: X = Free fly
   await press(page, 'left', 'x-button');
@@ -87,6 +103,7 @@ test('emulated Quest 2: enter VR, fly with Touch controllers, pause and exit', a
   const draws = (await page.evaluate(() => (window as unknown as W).__drone.xr.panelDraws)) - d0;
   expect(draws).toBeGreaterThan(0);
   expect(draws).toBeLessThanOrEqual(24);
+  await expectCardFits(page, 'hud');
 
   // Centre: altitude hold keeps it in the air
   await stick(page, 'left', 0, 0);
@@ -105,6 +122,10 @@ test('emulated Quest 2: enter VR, fly with Touch controllers, pause and exit', a
   // Y pauses, B leaves VR and the flat-screen pause menu is waiting
   await press(page, 'left', 'y-button');
   await page.waitForFunction(() => (window as unknown as W).__drone.race.status === 'paused');
+  await page.waitForFunction(() => (window as unknown as W).__drone.xr.panel?.title === 'PAUSED');
+  await expectCardFits(page, 'menu');
+  const pauseHelp = await page.evaluate(() => (window as unknown as W).__drone.xr.panel!.lines.filter((l) => l.weight === 500).map((l) => l.text));
+  expect(pauseHelp).toEqual(['L-stick click recentre', 'L-trigger heading arrow']);
   await press(page, 'right', 'b-button');
   await page.waitForFunction(() => !(window as unknown as W).__drone.xr.presenting, null, { timeout: 10_000 });
   expect(await page.evaluate(() => (window as unknown as W).__drone.screen)).toBe('pause');
