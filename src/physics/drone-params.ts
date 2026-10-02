@@ -49,7 +49,8 @@ export const DEFAULT_DRONE: DroneParams = {
   propRadius: 0.038,
   colliderRadius: 0.075,
   propColliderRadius: 0.04,
-  battery: { full: 16.8, empty: 14.0, sagPerThrust: 0.08, capacityS: 300 },
+  // empty = 3.3 V/cell resting: load sag then crosses the HUD's 3.55 V warning (~85 %) and 3.3 V critical (~98 %)
+  battery: { full: 16.8, empty: 13.2, sagPerThrust: 0.08, capacityS: 300 },
   idle: 0.055,
 };
 
