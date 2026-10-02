@@ -1,8 +1,40 @@
 /* Touch devices: virtual sticks + buttons, compact HUD, tap gate, Add-to-Home-Screen sheet, rotate overlay. */
 
+/*
+ * Touch layout geometry. Buttons (touch layer) and HUD panels (HUD layer) live in different trees, so
+ * they share one set of sizes here and every panel is placed from them instead of from magic offsets.
+ * Derived values are declared on .ds-ui itself so the phone overrides below re-derive them.
+ */
+.ds-ui {
+  --ds-stick-r: 60px;
+  --ds-tbtn: 52px;
+  --ds-tbtn-wide: 76px;
+  --ds-tarm: 68px;
+  --ds-tgap: 10px;
+  --ds-tchip: 28px;
+  --ds-ttimer: 9.5em;
+  --ds-tpanel-h: 78px;
+  --ds-safe-l: max(var(--ds-gap), env(safe-area-inset-left));
+  --ds-safe-r: max(var(--ds-gap), env(safe-area-inset-right));
+  --ds-safe-t: max(var(--ds-gap), env(safe-area-inset-top));
+  /* right edge of PAUSE + CAM (top-left row) */
+  --ds-tzone-l: calc(var(--ds-safe-l) + var(--ds-tbtn) + var(--ds-tbtn-wide) + 2 * var(--ds-tgap));
+  /* distance from the right screen edge to the left of RESET / MODE / ARM, plus a gap */
+  --ds-tzone-r: calc(var(--ds-safe-r) + var(--ds-tbtn) + var(--ds-tbtn-wide) + var(--ds-tarm) + 3 * var(--ds-tgap));
+}
+
+@media (max-height: 460px) {
+  .ds-ui {
+    --ds-tbtn: 48px;
+    --ds-tbtn-wide: 68px;
+    --ds-tarm: 60px;
+    --ds-tchip: 24px;
+    --ds-ttimer: 108px;
+  }
+}
+
 /* ---------- touch layer ---------- */
 .ds-touch {
-  --ds-stick-r: 60px;
   position: absolute;
   inset: 0;
   display: none;
@@ -130,18 +162,19 @@
   position: absolute;
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: var(--ds-tgap);
   pointer-events: none;
 }
 
 .ds-tbtns--l {
-  left: max(var(--ds-gap), env(safe-area-inset-left));
-  top: max(var(--ds-gap), env(safe-area-inset-top));
+  left: var(--ds-safe-l);
+  top: var(--ds-safe-t);
 }
 
+/* Below the one-row status chips (ARMED · FPS), never under them. */
 .ds-tbtns--r {
-  right: max(var(--ds-gap), env(safe-area-inset-right));
-  top: calc(max(var(--ds-gap), env(safe-area-inset-top)) + 36px);
+  right: var(--ds-safe-r);
+  top: calc(var(--ds-safe-t) + var(--ds-tchip) + 8px);
   align-items: flex-start;
 }
 
@@ -151,8 +184,8 @@
   place-items: center;
   align-content: center;
   gap: 1px;
-  min-width: 52px;
-  height: 52px;
+  min-width: var(--ds-tbtn);
+  height: var(--ds-tbtn);
   padding: 0 8px;
   font: inherit;
   color: var(--ds-text);
@@ -164,6 +197,13 @@
   -webkit-tap-highlight-color: transparent;
   cursor: pointer;
   transition: transform 0.08s ease, background-color 0.12s ease, border-color 0.12s ease;
+}
+
+/* Fixed width: LOS / FPV / CHASE and ANGLE / ACRO must not shift the neighbours. */
+.ds-tbtn[data-tbtn='cycleCamera'],
+.ds-tbtn[data-tbtn='toggleMode'] {
+  width: var(--ds-tbtn-wide);
+  padding: 0;
 }
 
 .ds-tbtn small {
@@ -192,17 +232,14 @@
 }
 
 .ds-tbtn--arm {
-  width: 68px;
-  height: 68px;
+  width: var(--ds-tarm);
+  height: var(--ds-tarm);
+  padding: 0;
   border-radius: 50%;
   color: var(--ds-amber);
   border: 2px solid rgba(255, 197, 61, 0.75);
   background: radial-gradient(circle at 50% 35%, rgba(90, 60, 8, 0.7), rgba(24, 14, 2, 0.75));
   box-shadow: 0 0 22px rgba(255, 197, 61, 0.25), 0 4px 14px rgba(0, 0, 0, 0.4);
-}
-
-.ds-tbtn--arm {
-  padding: 0;
 }
 
 .ds-tbtn--arm b {
@@ -222,21 +259,42 @@
   box-shadow: 0 0 22px rgba(255, 70, 97, 0.25), 0 4px 14px rgba(0, 0, 0, 0.4);
 }
 
-/* ---------- HUD while the touch sticks are shown ---------- */
+/* ---------- HUD in the touch layout (flight, and dimmed behind pause / finish menus) ---------- */
+/* Stick visualiser, quit, camera and mode chips duplicate the on-screen buttons. */
 .ds-ui.ds-touch-on .ds-hud__br,
 .ds-ui.ds-touch-on .ds-chip--quit,
-.ds-ui.ds-touch-on .ds-chip--cam {
+.ds-ui.ds-touch-on .ds-chip--cam,
+.ds-ui.ds-touch-on .ds-chip--mode {
   display: none;
 }
 
+/* Third item of the PAUSE · CAM · timer row: non-interactive, at least button-sized. */
 .ds-ui.ds-touch-on .ds-hud__tl {
-  left: calc(var(--ds-gap) + 124px);
-  min-width: 0;
-  padding: 6px 12px;
+  top: var(--ds-safe-t);
+  left: var(--ds-tzone-l);
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+  min-width: var(--ds-tbtn);
+  min-height: var(--ds-tbtn);
+  padding: 4px 12px;
+  text-align: center;
 }
 
 .ds-ui.ds-touch-on .ds-timer {
   font-size: 22px;
+}
+
+.ds-ui.ds-touch-on .ds-hud__tr {
+  top: var(--ds-safe-t);
+  right: var(--ds-safe-r);
+  flex-wrap: nowrap;
+  max-width: none;
+}
+
+.ds-ui.ds-touch-on .ds-chip {
+  height: var(--ds-tchip);
 }
 
 .ds-ui.ds-touch-on .ds-hud__bl {
@@ -257,35 +315,81 @@
   font-size: 26px;
 }
 
+/* --ds-tpanel-h is the measured telemetry panel height (TouchControls). */
 .ds-ui.ds-touch-on .ds-hint {
-  bottom: calc(var(--ds-gap) + 78px);
-  max-width: min(60vw, 420px);
+  bottom: calc(var(--ds-gap) + var(--ds-tpanel-h) + 10px);
+  max-width: min(420px, calc(100% - 4 * var(--ds-stick-r) - 2 * var(--ds-safe-l) - 40px));
   padding: 8px 14px;
   font-size: 12px;
   border-radius: 14px;
+  text-wrap: balance;
 }
 
-/* Small landscape phones (≈ 390 px tall and below). */
+/* Between the top-left and top-right button groups, below the top row. */
+.ds-ui.ds-touch-on .ds-toasts {
+  top: calc(var(--ds-safe-t) + var(--ds-tchip) + 8px + var(--ds-tarm) + var(--ds-tgap));
+  left: var(--ds-tzone-l);
+  right: var(--ds-tzone-r);
+  width: auto;
+  transform: none;
+}
+
+.ds-ui.ds-touch-on .ds-toast {
+  max-width: 100%;
+}
+
+/* Countdown digits and GO: big, white and outlined so they read over any part of the scene. */
+.ds-ui.ds-touch-on .ds-center__big.is-count,
+.ds-ui.ds-touch-on .ds-center__big.is-go {
+  font-size: clamp(72px, 26vh, 132px);
+}
+
+.ds-ui.ds-touch-on .ds-center__big.is-count {
+  color: #fff;
+  text-shadow:
+    0 2px 6px rgba(0, 0, 0, 0.75),
+    0 0 24px rgba(40, 231, 255, 0.85),
+    0 0 60px rgba(40, 231, 255, 0.5);
+}
+
+/* Small landscape phones (≈ 430 px tall and below). */
 @media (max-height: 460px) {
   .ds-ui.ds-touch-on .ds-hud__tl .ds-label { display: none; }
   .ds-ui.ds-touch-on .ds-timer { font-size: 18px; }
   .ds-ui.ds-touch-on .ds-sub { font-size: 11px; }
-  .ds-ui.ds-touch-on .ds-hud__tc { top: var(--ds-gap); }
-  .ds-ui.ds-touch-on .ds-gates { padding: 4px 10px 6px; row-gap: 3px; }
-  .ds-ui.ds-touch-on .ds-gates__num { font-size: 16px; }
   .ds-ui.ds-touch-on .ds-pips { display: none; }
-  .ds-ui.ds-touch-on .ds-chip { height: 24px; padding: 0 8px; letter-spacing: 0.08em; font-size: 10px; }
-  .ds-ui.ds-touch-on .ds-hud__tr { max-width: 42vw; }
+  .ds-ui.ds-touch-on .ds-chip { padding: 0 6px; letter-spacing: 0.08em; font-size: 10px; }
+  .ds-ui.ds-touch-on .ds-hud__tr { gap: 4px; }
+  .ds-ui.ds-touch-on .ds-hud__tl { padding: 4px 8px; }
   .ds-ui.ds-touch-on .ds-tele__row { font-size: 11px; }
   .ds-ui.ds-touch-on .ds-big { font-size: 20px; }
   .ds-ui.ds-touch-on .ds-thr__bar { height: 32px; }
   .ds-ui.ds-touch-on .ds-thr .ds-label { display: none; }
-  .ds-ui.ds-touch-on .ds-center__big { font-size: 44px; }
-  .ds-ui.ds-touch-on .ds-toasts { top: calc(var(--ds-gap) + 40px); width: min(360px, 60vw); }
-  .ds-ui.ds-touch-on .ds-hint { bottom: calc(var(--ds-gap) + 58px); }
-  .ds-tbtn { min-width: 48px; height: 48px; }
-  .ds-tbtn--arm { width: 60px; height: 60px; }
-  .ds-tbtns--r { top: calc(max(var(--ds-gap), env(safe-area-inset-top)) + 32px); }
+
+  /* Race: PAUSE · CAM · timer · gates on one row — the centred gate box would sit on the timer. */
+  .ds-ui.ds-touch-on:not([data-status='freefly']) .ds-hud__tl { width: var(--ds-ttimer); }
+  .ds-ui.ds-touch-on .ds-hud__tc {
+    top: var(--ds-safe-t);
+    left: calc(var(--ds-tzone-l) + var(--ds-ttimer) + 8px);
+    transform: none;
+    align-items: flex-start;
+  }
+  .ds-ui.ds-touch-on .ds-gates {
+    grid-template-columns: auto;
+    min-height: var(--ds-tbtn);
+    align-content: center;
+    padding: 4px 8px;
+  }
+  .ds-ui.ds-touch-on .ds-gates .ds-label { display: none; }
+  .ds-ui.ds-touch-on .ds-gates__num { font-size: 18px; }
+
+  /* Toasts take the row under PAUSE · CAM, left of RESET / MODE / ARM. */
+  .ds-ui.ds-touch-on .ds-toasts { top: calc(var(--ds-safe-t) + var(--ds-tbtn) + var(--ds-tgap)); }
+  .ds-ui.ds-touch-on .ds-toast { padding: 7px 12px; font-size: 12px; }
+
+  .ds-ui.ds-touch-on .ds-center__big.is-ok,
+  .ds-ui.ds-touch-on .ds-center__big.is-dim { font-size: 22px; }
+  .ds-ui.ds-touch-on .ds-center__big.is-crash { font-size: 34px; }
 }
 
 /* ---------- menus on touch devices ---------- */
@@ -383,7 +487,7 @@
   background:
     radial-gradient(ellipse at 20% 10%, rgba(255, 61, 232, 0.2), transparent 55%),
     radial-gradient(ellipse at 85% 90%, rgba(40, 231, 255, 0.2), transparent 55%),
-    rgba(2, 4, 10, 0.92);
+    #02040a;
 }
 
 .ds-gate.is-open,
@@ -451,9 +555,11 @@
 /* ---------- Add to Home Screen sheet ---------- */
 .ds-sheet {
   z-index: 45;
-  place-items: end center;
-  padding: 12px max(12px, env(safe-area-inset-right)) max(12px, env(safe-area-inset-bottom)) max(12px, env(safe-area-inset-left));
-  background: rgba(2, 4, 10, 0.55);
+  place-items: center;
+  padding: max(12px, env(safe-area-inset-top)) max(12px, env(safe-area-inset-right)) max(12px, env(safe-area-inset-bottom)) max(12px, env(safe-area-inset-left));
+  background: rgba(2, 4, 10, 0.82);
+  -webkit-backdrop-filter: blur(4px);
+  backdrop-filter: blur(4px);
   overflow-y: auto;
   touch-action: pan-y;
 }
@@ -464,7 +570,7 @@
   border-radius: 18px;
   background: linear-gradient(160deg, rgba(18, 30, 52, 0.96), rgba(8, 12, 24, 0.97));
   border: 1px solid var(--ds-edge);
-  box-shadow: 0 -10px 40px rgba(0, 0, 0, 0.5);
+  box-shadow: 0 18px 50px rgba(0, 0, 0, 0.6);
   animation: ds-rise 0.35s cubic-bezier(0.2, 0.8, 0.2, 1);
 }
 
@@ -538,7 +644,7 @@
   align-content: center;
   gap: 10px;
   text-align: center;
-  background: radial-gradient(ellipse at 50% 40%, rgba(10, 20, 40, 0.96), rgba(2, 4, 10, 0.99));
+  background: radial-gradient(ellipse at 50% 40%, #0a1428, #02040a);
 }
 
 .ds-rotate__phone {
@@ -583,12 +689,38 @@
   100% { transform: rotate(0deg); }
 }
 
-/* Narrow screens: the per-axis rates table scrolls sideways instead of widening the page. */
-@media (max-width: 640px) {
-  .ds-ui.is-touch .ds-rtable {
+/* ---------- rates table on touch: 44 px steppers that fit their cell ---------- */
+.ds-ui.is-touch .ds-cell {
+  grid-template-columns: 44px minmax(3.2em, 1fr) 44px;
+  column-gap: 4px;
+}
+
+.ds-ui.is-touch .ds-cell .ds-arrow {
+  width: 44px;
+  height: 44px;
+}
+
+/* Too narrow for three steppers per row: one block per axis, each stepper labelled. */
+@media (max-width: 540px) {
+  .ds-ui.is-touch .ds-rtable,
+  .ds-ui.is-touch .ds-rtable tbody,
+  .ds-ui.is-touch .ds-rtable tr,
+  .ds-ui.is-touch .ds-rtable td {
     display: block;
-    max-width: 100%;
-    overflow-x: auto;
-    touch-action: pan-x pan-y;
+    width: 100%;
+  }
+  .ds-ui.is-touch .ds-rtable { margin: 2px 0; }
+  .ds-ui.is-touch .ds-rtable thead { display: none; }
+  .ds-ui.is-touch .ds-rtable tr { margin-bottom: 8px; }
+  .ds-ui.is-touch .ds-rtable tbody th { display: block; padding: 4px 2px; }
+  .ds-ui.is-touch .ds-rtable td { padding: 2px 0; }
+  .ds-ui.is-touch .ds-cell::before {
+    content: attr(aria-label);
+    grid-column: 1 / -1;
+    font-size: 0.72em;
+    font-weight: 700;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: var(--ds-muted);
   }
 }

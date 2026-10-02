@@ -58,7 +58,12 @@ export class TouchControls {
   private readonly txt: { cam: HTMLElement; mode: HTMLElement; arm: HTMLElement; armBtn: HTMLElement };
   private readonly cache = new Map<HTMLElement, string>();
   private visible = false;
+  /** `ds-touch-on` on the UI root: the compact touch HUD layout (outlives the sticks while a menu is open) */
+  private touchLayout = false;
   private settingsRef: Settings | null = null;
+  private panel: HTMLElement | null = null;
+  private panelH = -1;
+  private readonly panelObserver: ResizeObserver | null;
 
   constructor(root: HTMLElement, input: TouchInput, radius: number) {
     this.root = root;
@@ -67,7 +72,7 @@ export class TouchControls {
     const wrap = document.createElement('div');
     wrap.innerHTML = HTML;
     const layer = wrap.firstElementChild as HTMLElement;
-    layer.style.setProperty('--ds-stick-r', `${radius}px`);
+    root.style.setProperty('--ds-stick-r', `${radius}px`);
     // Below the HUD (whose panels are pointer-transparent) so the HUD quit chip stays tappable.
     root.prepend(layer);
     this.layer = layer;
@@ -109,7 +114,9 @@ export class TouchControls {
 
     input.attach(layer);
     const relayout = (): void => this.layout();
-    if (typeof ResizeObserver !== 'undefined') new ResizeObserver(relayout).observe(layer);
+    const hasRO = typeof ResizeObserver !== 'undefined';
+    if (hasRO) new ResizeObserver(relayout).observe(layer);
+    this.panelObserver = hasRO ? new ResizeObserver(() => this.measurePanel()) : null;
     window.addEventListener('orientationchange', relayout);
     this.layout();
   }
@@ -118,11 +125,20 @@ export class TouchControls {
     return this.visible;
   }
 
+  /**
+   * Sticks + buttons on/off. The compact touch HUD layout stays while a menu (pause, finish, quit)
+   * covers the flight, so the dimmed HUD behind it does not jump to the desktop layout.
+   */
   setVisible(on: boolean): void {
+    const layout = on || (this.touchLayout && this.root.classList.contains('has-screen'));
+    if (layout !== this.touchLayout) {
+      this.touchLayout = layout;
+      this.root.classList.toggle('ds-touch-on', layout);
+      if (layout) this.watchPanel();
+    }
     if (on === this.visible) return;
     this.visible = on;
     this.layer.classList.toggle('is-on', on);
-    this.root.classList.toggle('ds-touch-on', on);
     this.layer.setAttribute('aria-hidden', on ? 'false' : 'true');
     if (!on) this.input.sticks.releaseAll();
     else this.layout();
@@ -140,6 +156,7 @@ export class TouchControls {
       this.text(this.sticks.r.lbl, stickShort(labels, 'r'));
       this.layer.classList.toggle('is-fixed', settings.touchSticksFixed);
     }
+    this.input.sticks.setArmed(armed);
     if (!this.visible) return;
     const s = this.input.sticks;
     this.moveStick(this.sticks.l, s.l);
@@ -169,6 +186,22 @@ export class TouchControls {
     const y = rect.height - sb - R * 1.5 - EDGE_PAD;
     this.input.layout(rect.left, rect.top, rect.width, { lx: sl + off, ly: y, rx: rect.width - sr - off, ry: y }, R);
     for (const k of ['l', 'r'] as const) this.sticks[k].cx = NaN;
+  }
+
+  /** Publishes the telemetry panel height so the arm hint sits above it whatever its content. */
+  private watchPanel(): void {
+    if (!this.panel) {
+      this.panel = this.root.querySelector<HTMLElement>('.ds-hud__bl');
+      if (this.panel) this.panelObserver?.observe(this.panel);
+    }
+    this.measurePanel();
+  }
+
+  private measurePanel(): void {
+    const h = this.panel?.offsetHeight ?? 0;
+    if (h <= 0 || h === this.panelH) return;
+    this.panelH = h;
+    this.root.style.setProperty('--ds-tpanel-h', `${h}px`);
   }
 
   private moveStick(el: StickEls, t: StickTrack): void {
