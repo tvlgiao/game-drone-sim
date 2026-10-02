@@ -232,7 +232,7 @@ const ROW_DEFS: Row[] = [
     },
   },
   rangeRow('throttleExpo', 'Throttle expo', 'Flattens the curve around mid', (v) => v.toFixed(2)),
-  rangeRow('throttleLimit', 'Throttle limit', 'Scales maximum motor output', (v) => `${Math.round(v * 100)}%`),
+  rangeRow('throttleLimit', 'Throttle limit', 'Caps full-stick output; centre stick still hovers', (v) => `${Math.round(v * 100)}%`),
   rangeRow('angleMaxTiltDeg', 'Max tilt angle', 'Angle mode: tilt at full stick', (v) => `${Math.round(v)}°`),
   rangeRow('cameraTiltDeg', 'Camera tilt', 'FPV camera uptilt', (v) => `${Math.round(v)}°`),
   rangeRow('fovDeg', 'Field of view', FOV_HINT, (v) => `${Math.round(v)}°`),
