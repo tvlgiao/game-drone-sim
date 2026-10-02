@@ -144,7 +144,7 @@ body.ld {
 }
 
 .ld-nav .ld-nav__play {
-  min-height: 40px;
+  min-height: var(--ld-tap);
   margin-inline-start: 0.25rem;
   padding-inline: 1.1rem;
   border: 1px solid var(--ds-edge-hot);

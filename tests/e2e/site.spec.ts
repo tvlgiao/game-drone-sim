@@ -74,6 +74,18 @@ test.describe('landing page', () => {
     expect(errs).toEqual([]);
   });
 
+  test('built pages reference their assets relatively (deployable under a sub-path); nav Play is a full tap target', async ({ page, request }) => {
+    for (const path of ['/', '/play/', '/app/']) {
+      const html = await (await request.get(path)).text();
+      // root-absolute href/src/content ("/icons/...") would 404 under a sub-path such as /game-drone-sim/
+      expect(html.match(/\b(?:href|src|content)="\/(?!\/)[^"]*"/g) ?? [], path).toEqual([]);
+    }
+    await page.setViewportSize({ width: 375, height: 700 });
+    await page.goto('/');
+    const h = await page.locator('.ld-nav__play').evaluate((el) => el.getBoundingClientRect().height);
+    expect(h).toBeGreaterThanOrEqual(44);
+  });
+
   test('an old game link to the root (game query string) lands in the free game with its query', async ({ page }) => {
     await page.goto('/?rotate=0');
     await expect(page).toHaveURL(/\/play\/\?rotate=0$/);
