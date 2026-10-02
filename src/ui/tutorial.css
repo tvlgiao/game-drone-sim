@@ -16,11 +16,18 @@
   transition: border-color 0.25s ease, box-shadow 0.25s ease;
 }
 
-/* Touch layout: under the PAUSE · CAM · timer row, clear of the right-hand button column. */
+/* The first flight opens the Controls legend in the same left column: the card moves right of it. */
+.ds-ui:has(.ds-cmap:not([hidden])) .ds-tut-card {
+  left: calc(2 * var(--ds-gap) + calc(236 * var(--ds-u)));
+}
+
+/* Touch layout: under the PAUSE · CAM · timer row (the timer panel is taller than the buttons), clear of the
+   right-hand button column. Tablets have room above the resting left stick; phones move the card (below). */
 .ds-ui.ds-touch-on .ds-tut-card {
-  top: calc(var(--ds-safe-t) + var(--ds-tbtn) + var(--ds-tgap));
+  top: calc(var(--ds-safe-t) + var(--ds-tbtn) + 2 * var(--ds-tgap) + 4px);
   left: var(--ds-safe-l);
   width: min(360px, calc(100% - var(--ds-safe-l) - var(--ds-tzone-r)));
+  font-size: 15px;
 }
 
 .ds-tut-card[hidden],
@@ -36,7 +43,7 @@
 }
 
 .ds-tut-card__step {
-  font-size: 0.72em;
+  font-size: max(12px, 0.72em);
   font-weight: 700;
   letter-spacing: 0.18em;
   text-transform: uppercase;
@@ -63,7 +70,7 @@
 
 .ds-tut-card__lines p + p {
   color: var(--ds-muted);
-  font-size: 0.92em;
+  font-size: max(12px, 0.92em);
 }
 
 .ds-tut-card__lines p.is-notice {
@@ -88,7 +95,7 @@
   min-height: calc(24 * var(--ds-u));
   padding: 0 calc(10 * var(--ds-u));
   overflow: hidden;
-  font-size: 0.78em;
+  font-size: max(12px, 0.78em);
   font-weight: 700;
   letter-spacing: 0.1em;
   text-transform: uppercase;
@@ -146,7 +153,7 @@
 }
 
 .ds-tut-card__skiphint {
-  font-size: 0.78em;
+  font-size: max(12px, 0.78em);
   color: var(--ds-muted);
   letter-spacing: 0.06em;
 }
@@ -154,6 +161,7 @@
 .ds-tut-card .ds-btn {
   pointer-events: auto;
   width: auto;
+  font-size: max(12px, 0.86em);
 }
 
 .ds-tut-skip {
@@ -163,7 +171,7 @@
   margin-block: calc(-10 * var(--ds-u));
   padding: 0 calc(12 * var(--ds-u));
   font: inherit;
-  font-size: 0.78em;
+  font-size: max(12px, 0.78em);
   font-weight: 700;
   letter-spacing: 0.16em;
   text-transform: uppercase;
@@ -260,8 +268,13 @@
     padding: 10px 14px 12px;
   }
 
+  /* No room above the resting left stick: the card takes the column between the two sticks, right of the
+     left stick's base and its hint glow (anchor = inset + R + 26 px in touch-controls.ts) and left of RESET (whose label makes it wider than --ds-tbtn-wide, hence the extra gaps). */
   .ds-ui.ds-touch-on .ds-tut-card {
-    width: min(320px, calc(100% - var(--ds-safe-l) - var(--ds-tzone-r)));
+    --ds-tut-l: max(var(--ds-tzone-l), calc(env(safe-area-inset-left) + 2 * var(--ds-stick-r) + 26px + var(--ds-tgap) + 6px));
+    left: var(--ds-tut-l);
+    font-size: 13px;
+    width: min(440px, calc(100% - var(--ds-tut-l) - var(--ds-tzone-r) - 3 * var(--ds-tgap)));
   }
 
   .ds-tut-card:not(.is-hint) .ds-tut-card__lines p + p:not(.is-notice) {
@@ -297,6 +310,58 @@
 
   .ds-tut-card__title {
     font-size: 1.15em;
+  }
+
+  /* Phone touch card: as short as the column between the sticks allows (it must end above the arm hint). */
+  .ds-ui.ds-touch-on .ds-tut-card {
+    top: calc(var(--ds-safe-t) + var(--ds-tbtn) + var(--ds-tgap));
+    padding: 8px 12px 10px;
+    gap: 5px;
+  }
+
+  .ds-ui.ds-touch-on .ds-tut-card__lines {
+    gap: 2px;
+  }
+
+  /* the welcome step has no progress; the sub-goal chips fill themselves, so the bar would repeat them */
+  .ds-ui.ds-touch-on .ds-tut-card[data-step='welcome'] .ds-tut-bar,
+  .ds-ui.ds-touch-on .ds-tut-parts:not([hidden]) + .ds-tut-bar {
+    display: none;
+  }
+
+  .ds-ui.ds-touch-on .ds-tut-parts {
+    flex-wrap: nowrap;
+    gap: 5px;
+  }
+
+  .ds-ui.ds-touch-on .ds-tut-part {
+    min-height: 22px;
+    padding: 0 7px;
+    letter-spacing: 0.04em;
+  }
+
+  .ds-ui.ds-touch-on .ds-tut-card__foot {
+    justify-content: flex-end;
+    min-height: 0;
+  }
+
+  .ds-ui.ds-touch-on.ds-tut-running .ds-hint {
+    display: none;
+  }
+}
+
+/* Small phones (iPhone SE): the column between the sticks is too narrow for step · title · skip on one row. */
+@media (max-height: 460px) and (max-width: 740px) {
+  .ds-tut-card__step {
+    white-space: nowrap;
+  }
+
+  .ds-tut-card__title {
+    grid-area: 2 / 1 / 3 / -1;
+  }
+
+  .ds-ui.ds-touch-on .ds-tut-card {
+    width: calc(100% - var(--ds-tut-l) - var(--ds-tzone-r) - 2 * var(--ds-tgap));
   }
 }
 

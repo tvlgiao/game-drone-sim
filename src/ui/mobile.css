@@ -499,6 +499,8 @@
     gap: 8px;
   }
   .ds-ui.is-touch .ds-main .ds-menu .ds-btn--primary { grid-column: 1 / -1; }
+  /* Race + three pairs (Free Fly · Tutorial, Settings · Controls, About · Quit) fit a 375 px tall phone */
+  .ds-ui.is-touch .ds-main .ds-menu [data-act="exit"] { grid-column: auto !important; }
   .ds-ui.is-touch .ds-btn { min-height: 44px; font-size: 0.95em; }
   .ds-ui.is-touch .ds-dialog { --ds-dlg-pad: 14px; padding: 14px 16px; }
   .ds-ui.is-touch .ds-dialog > .ds-dialog__actions:last-of-type { margin-inline: -16px; padding: 10px 16px max(10px, env(safe-area-inset-bottom)); }

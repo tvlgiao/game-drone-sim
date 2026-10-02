@@ -59,7 +59,7 @@ test.describe('desktop (keyboard / gamepad)', () => {
     test(`step card at ${w}×${h}`, async ({ page }) => {
       await page.setViewportSize({ width: w, height: h });
       const card = await open(page, 'step=6&source=keyboard');
-      await expectCardLayout(page, card, ['.ds-hud__tl', '.ds-hud__tc', '.ds-hud__tr', '.ds-hud__br', '.ds-hud__bl']);
+      await expectCardLayout(page, card, ['.ds-hud__tl', '.ds-hud__tc', '.ds-hud__tr', '.ds-hud__br', '.ds-hud__bl', '.ds-cmap']);
       await expect(card.locator('.ds-tut-card__step')).toHaveText('Step 6 / 12');
       await expect(card.locator('.ds-tut-part')).toHaveCount(4);
       await expect(card.locator('.ds-tut-part.is-done')).toHaveCount(1);
@@ -144,7 +144,7 @@ test.describe('phone (touch)', () => {
     await expect(page.locator('.ds-ui')).toHaveClass(/ds-touch-on/);
     await expectCardLayout(page, card, ['.ds-tbtn', '.ds-hud__tl', '.ds-hud__tr']);
     await expect(page.locator('[data-tbtn="arm"]')).toHaveClass(/ds-tut-glow/);
-    await expect(card.locator('.ds-tut-card__lines p').first()).toContainText('tap ARM');
+    await expect(card.locator('.ds-tut-card__lines p').first()).toContainText(/tap ARM/i);
     const skip = await box(card.locator('.ds-tut-skip'));
     expect(skip.width).toBeGreaterThanOrEqual(44);
     expect(skip.height).toBeGreaterThanOrEqual(44);
@@ -166,6 +166,59 @@ test.describe('phone (touch)', () => {
     expect(await page.evaluate(() => window.__tutorialPreview!.log)).toEqual(['confirm']);
     await page.screenshot({ path: `${SHOTS}/phone-welcome.png` });
   });
+
+  // Every touch control the card could cover. Stick bases grow by the hint glow's outline (2 × 3 px at --ds-u ≈ 1).
+  const TOUCH_PARTS: readonly [selector: string, pad: number][] = [
+    ['.ds-tstick__base', 8],
+    ['.ds-tstick__knob', 0],
+    ['.ds-tstick__lbl', 0],
+    ['.ds-tbtn', 8],
+    ['.ds-hud__tl', 0],
+    ['.ds-hud__tr', 0],
+    ['.ds-hud__bl', 0],
+    ['.ds-hint.is-on', 0],
+  ];
+  const STATES = ['step=1', 'step=2&hint=1', 'step=3&armed=0', 'step=3&armed=0&hint=1', 'step=4&hint=1', 'step=6', 'step=6&hint=1', 'step=9&hint=1', 'step=11'];
+
+  for (const [label, size] of [
+    ['iPhone landscape', null],
+    ['iPhone SE landscape', { width: 667, height: 375 }],
+    ['iPad landscape', { width: 1180, height: 820 }],
+  ] as const) {
+    for (const mode of [2, 1]) {
+      test(`card never overlaps a touch control: ${label}, mode ${mode}`, async ({ page }) => {
+        if (size) await page.setViewportSize(size);
+        for (const state of STATES) {
+          const card = await open(page, `${state}&source=touch&mode=${mode}`);
+          await expect(page.locator('.ds-ui')).toHaveClass(/ds-touch-on/);
+          await expect(card).toBeVisible();
+          const c = await box(card);
+          let checked = 0;
+          for (const [sel, pad] of TOUCH_PARTS) {
+            for (const el of await page.locator(sel).all()) {
+              if (!(await el.isVisible())) continue;
+              const b = await box(el);
+              const grown = { x: b.x - pad, y: b.y - pad, width: b.width + 2 * pad, height: b.height + 2 * pad };
+              expect(overlaps(c, grown), `${state}: card ${JSON.stringify(c)} overlaps ${sel} ${JSON.stringify(grown)}`).toBe(false);
+              checked++;
+            }
+          }
+          // both stick bases, both labels, five buttons at least: an empty selector list must not pass
+          expect(checked, state).toBeGreaterThanOrEqual(9);
+          const small = await card.evaluate((el) =>
+            [...el.querySelectorAll<HTMLElement>('p, h2, h3, span, button')]
+              .filter((e) => e.offsetParent && e.textContent?.trim() && Number.parseFloat(getComputedStyle(e).fontSize) < 12)
+              .map((e) => `${e.className}:${getComputedStyle(e).fontSize}`),
+          );
+          expect(small, `${state}: text under 12 px`).toEqual([]);
+          // the step label stays on one line (a narrow card used to break "STEP 1 / 12" over three)
+          const stepLines = await card.locator('.ds-tut-card__step').evaluate((el) => el.getBoundingClientRect().height / Number.parseFloat(getComputedStyle(el).fontSize));
+          expect(stepLines, `${state}: step label wraps`).toBeLessThan(2);
+        }
+        await page.screenshot({ path: `${SHOTS}/touch-${label.replace(/\W+/g, '-')}-mode${mode}-last.png` });
+      });
+    }
+  }
 
   test('first-run prompt and completion card fit a phone', async ({ page }) => {
     await open(page, 'prompt=1&source=touch');
