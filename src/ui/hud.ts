@@ -467,11 +467,15 @@ export class Hud {
    */
   private placeToasts(): void {
     const box = this.refs.toasts;
-    const center = this.refs.center.parentElement!;
+    // default lane ('' = the stylesheet's); styles are only written when the lane actually changes
+    const lane = (top: string, bottom: string): void => {
+      if (box.style.top !== top) box.style.top = top;
+      if (box.style.bottom !== bottom) box.style.bottom = bottom;
+    };
+    const center = this.refs.center.parentElement;
     const up = !!(this.refs.center.textContent || this.refs.centerSub.textContent);
-    box.style.top = '';
-    box.style.bottom = '';
-    if (!up || !box.childElementCount) return;
+    if (!up || !box.childElementCount || !center) return lane('', '');
+    // the lane's width and height don't depend on top/bottom, so it is measured where it currently sits
     const hud = box.offsetParent as HTMLElement | null;
     if (!hud) return;
     const host = hud.getBoundingClientRect();
@@ -480,24 +484,23 @@ export class Hud {
     glyphs.selectNodeContents(this.refs.center);
     const titleBottom = Math.max(center.getBoundingClientRect().bottom, glyphs.getBoundingClientRect().bottom);
     const gap = 12;
-    const lane = box.getBoundingClientRect();
+    const laneBox = box.getBoundingClientRect();
     const floorAbove = (els: (HTMLElement | null)[]): number => {
       let floor = host.bottom - gap;
       for (const el of els) {
         const r = el?.getBoundingClientRect();
-        if (r && r.height > 0 && r.left < lane.right && lane.left < r.right) floor = Math.min(floor, r.top - gap);
+        if (r && r.height > 0 && r.left < laneBox.right && laneBox.left < r.right) floor = Math.min(floor, r.top - gap);
       }
       return floor;
     };
     const tele = hud.querySelector<HTMLElement>('.ds-hud__bl');
     const hint = this.refs.hint.classList.contains('is-on') ? this.refs.hint : null;
     // Short screens: no room above the arm hint, so the toast sits over it (opaque, it hides the hint for its 3 s).
-    const floor = [floorAbove([tele, hint]), floorAbove([tele])].find((f) => f - lane.height >= titleBottom + gap);
+    const floor = [floorAbove([tele, hint]), floorAbove([tele])].find((f) => f - laneBox.height >= titleBottom + gap);
     if (floor !== undefined) {
-      box.style.top = 'auto';
-      box.style.bottom = `${Math.round(host.bottom - floor)}px`;
+      lane('auto', `${Math.round(host.bottom - floor)}px`);
     } else {
-      box.style.top = `${Math.round(titleBottom - host.top + gap)}px`;
+      lane(`${Math.round(titleBottom - host.top + gap)}px`, '');
     }
   }
 
