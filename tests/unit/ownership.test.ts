@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { OWNED_KEY, QUEST_BILLING_SERVICE, checkQuestOwnership, isOwnerId, type OwnershipEnv } from '../../src/core/ownership';
+import { OWNED_CACHE_TTL_MS, OWNED_KEY, QUEST_BILLING_SERVICE, checkQuestOwnership, isOwnerId, type OwnershipEnv } from '../../src/core/ownership';
 
 class MemStorage {
   private m = new Map<string, string>();
@@ -70,9 +70,10 @@ describe('checkQuestOwnership', () => {
     };
     expect(await checkQuestOwnership(env({ getDigitalGoodsService: reject }))).toEqual({ owned: false, via: 'error' });
     const e = env({ getDigitalGoodsService: reject });
-    e.storage.setItem(OWNED_KEY, '123');
+    const recent = String(NOW - 3_600_000);
+    e.storage.setItem(OWNED_KEY, recent);
     expect(await checkQuestOwnership(e)).toEqual({ owned: true, via: 'cache' });
-    expect(e.storage.getItem(OWNED_KEY)).toBe('123');
+    expect(e.storage.getItem(OWNED_KEY)).toBe(recent);
   });
 
   it('a store call that never settles times out instead of hanging the launch', async () => {
@@ -83,7 +84,7 @@ describe('checkQuestOwnership', () => {
   it('offline with a cached success launches without calling the store', async () => {
     const get = vi.fn(async () => ({ getLoggedInUserId: async () => 0 }));
     const e = env({ getDigitalGoodsService: get, online: false });
-    e.storage.setItem(OWNED_KEY, '123');
+    e.storage.setItem(OWNED_KEY, String(NOW - 3_600_000));
     expect(await checkQuestOwnership(e)).toEqual({ owned: true, via: 'cache' });
     expect(get).not.toHaveBeenCalled();
   });
@@ -112,5 +113,22 @@ describe('checkQuestOwnership', () => {
     } as unknown as Storage;
     expect(await checkQuestOwnership(env({ storage: bad }))).toEqual({ owned: true, via: 'store' });
     expect(await checkQuestOwnership(env({ storage: null }))).toEqual({ owned: true, via: 'store' });
+  });
+
+  it('a cached success older than the TTL (or from the future) no longer stands in for the store', async () => {
+    const fail = async () => {
+      throw new Error('network');
+    };
+    for (const stamp of [NOW - OWNED_CACHE_TTL_MS - 1, NOW + 60_000]) {
+      const offline = env({ online: false, getDigitalGoodsService: fail });
+      offline.storage.setItem(OWNED_KEY, String(stamp));
+      expect(await checkQuestOwnership(offline), `offline ${stamp}`).toEqual({ owned: false, via: 'error' });
+      const failing = env({ getDigitalGoodsService: fail });
+      failing.storage.setItem(OWNED_KEY, String(stamp));
+      expect(await checkQuestOwnership(failing), `store error ${stamp}`).toEqual({ owned: false, via: 'error' });
+    }
+    const recent = env({ online: false, getDigitalGoodsService: fail });
+    recent.storage.setItem(OWNED_KEY, String(NOW - OWNED_CACHE_TTL_MS + 1000));
+    expect(await checkQuestOwnership(recent)).toEqual({ owned: true, via: 'cache' });
   });
 });

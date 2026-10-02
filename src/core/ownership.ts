@@ -10,6 +10,11 @@ export const QUEST_BILLING_SERVICE = 'https://quest.meta.com/billing';
 export const OWNED_KEY = 'drone-sim.owned.v1';
 /** A Digital Goods call that never settles must not leave the player on the splash forever. */
 export const OWNERSHIP_TIMEOUT_MS = 5000;
+/**
+ * A cached success stands in for the store (offline, or the store failing) for this long after the last
+ * successful online check; older than that, the store must answer again. Also bounds a refund's reach.
+ */
+export const OWNED_CACHE_TTL_MS = 30 * 24 * 60 * 60 * 1000;
 
 interface QuestDigitalGoodsService {
   /** Meta-specific extension: absent from the standard Digital Goods API */
@@ -73,11 +78,14 @@ function withTimeout<T>(p: Promise<T>, ms: number): Promise<T> {
 }
 
 /**
- * Offline with a cached success: owned without asking. Online: the store decides, and its answer
- * refreshes or clears the cache; a store call that fails or times out falls back to the cache.
+ * Offline with a recent cached success (OWNED_CACHE_TTL_MS): owned without asking. Online: the store
+ * decides, and its answer refreshes or clears the cache; a store call that fails or times out falls back
+ * to a recent cache only.
  */
 export async function checkQuestOwnership(env: OwnershipEnv): Promise<OwnershipResult> {
-  const cached = readCache(env.storage);
+  const stamp = readCache(env.storage);
+  // a stamp from the future (clock moved back, edited storage) or older than the TTL is not trusted
+  const cached = stamp !== null && stamp <= env.now && env.now - stamp <= OWNED_CACHE_TTL_MS ? stamp : null;
   if (!env.online && cached !== null) return { owned: true, via: 'cache' };
   if (typeof env.getDigitalGoodsService !== 'function') return { owned: false, via: 'no-api' };
   const ms = env.timeoutMs ?? OWNERSHIP_TIMEOUT_MS;
