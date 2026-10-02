@@ -268,6 +268,39 @@ describe('auto-centre throttle take-off latch (touch default)', () => {
     expect(t.pos.ly).toBe(0);
   });
 
+  it('disarmed: letting go after a push re-latches, so the springing stick reads zero and ARM is allowed', () => {
+    const t = sticks();
+    t.setArmed(false);
+    t.down('l', 1, 100, 300);
+    t.move(1, 100, 300 - 30); // +0.5 releases the latch
+    expect(t.latched).toBe(false);
+    t.up(1);
+    expect(t.l.y).toBe(0); // knob springs to centre…
+    expect(t.latched).toBe(true);
+    expect(t.pos.ly).toBe(-1); // …but the output idles at zero throttle
+  });
+
+  it('armed: letting go never re-latches (hover, not a throttle cut mid-air)', () => {
+    const t = sticks();
+    t.setArmed(true);
+    t.down('l', 1, 100, 300);
+    t.move(1, 100, 300 - 30);
+    t.up(1);
+    expect(t.latched).toBe(false);
+    expect(t.pos.ly).toBe(0);
+  });
+
+  it('disarmed release of the non-throttle stick leaves the latch alone', () => {
+    const t = sticks();
+    t.setArmed(false);
+    t.down('l', 1, 100, 300);
+    t.move(1, 100, 300 - 30);
+    t.down('r', 2, 700, 300);
+    t.up(2);
+    expect(t.latched).toBe(false); // throttle thumb still holds the stick up
+    expect(t.pos.ly).toBeCloseTo(0.5, 5);
+  });
+
   it('small wiggles below the push threshold keep the latch (no accidental take-off)', () => {
     const t = sticks();
     t.down('l', 1, 100, 300);
