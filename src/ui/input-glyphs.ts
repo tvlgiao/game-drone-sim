@@ -4,7 +4,7 @@
  */
 import type { Settings } from '../core/settings';
 import { GP } from '../input/gamepad';
-import { KEY_BUTTON, KEY_STICKS, LEGEND_KEY, LEGEND_PAD_BUTTON, MOUSE_CENTRE_KEY, PAD_BUTTON, XR_BUTTON, XR_EXTRA, holdsAltitude } from '../input/input-manager';
+import { KEY_BUTTON, KEY_STICKS, LEGEND_KEY, LEGEND_PAD_BUTTON, MOUSE_CENTRE_KEY, PAD_BUTTON, XR_BUTTON, holdsAltitude } from '../input/input-manager';
 import { MODE_TABLE, slotOf, throttleSlot, type Channel, type StickSlot } from '../input/stick';
 import type { XrButtons } from '../input/xr-controllers';
 import type { InputSource } from '../types';
@@ -156,16 +156,14 @@ export function actionGlyphs(scheme: HintScheme, action: HintAction): Glyph[] {
   if (scheme === 'keyboard') {
     if (action === 'legend') return [keyGlyph(LEGEND_KEY)];
     if (action === 'mouseCentre') return [keyGlyph(MOUSE_CENTRE_KEY)];
-    if (action === 'headingArrow' || action === 'recenter') return [];
     return [keyGlyph(KEY_BUTTON[action][0]!)];
   }
   if (scheme === 'quest') {
-    if (action === 'headingArrow' || action === 'recenter') return [XR_GLYPH[XR_EXTRA[action]]];
     if (action === 'legend' || action === 'mouseCentre') return [];
     return [XR_GLYPH[XR_BUTTON[action]]];
   }
   if (action === 'legend') return [padGlyph(scheme, LEGEND_PAD_BUTTON)];
-  if (action === 'headingArrow' || action === 'recenter' || action === 'mouseCentre') return [];
+  if (action === 'mouseCentre') return [];
   return [padGlyph(scheme, PAD_BUTTON[action])];
 }
 

@@ -1,7 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import { Vector3 } from 'three';
 import { DEFAULT_SETTINGS, cloneSettings, type Settings } from '../../src/core/settings';
-import { InputManager, KEY_BUTTON, holdsAltitude, type HintedInputFrame } from '../../src/input/input-manager';
+import { InputManager, KEY_BUTTON, KEY_STICKS, LEGEND_KEY, LEGEND_PAD_BUTTON, PAD_BUTTON, holdsAltitude, type HintedInputFrame } from '../../src/input/input-manager';
+import { GAME_KEYS } from '../../src/input/keyboard';
 import { MOUSE_HOLD_TRAVEL, MouseStick, mouseStickKind, releasePointerLock, type MouseStickOptions } from '../../src/input/mouse';
 import { actionGlyphs, channelHints, glyphHtml, hintScheme, keyCluster, padFamily, type Glyph, type HintScheme } from '../../src/ui/input-glyphs';
 import { Simulation } from '../../src/physics/simulation';
@@ -45,17 +46,18 @@ describe('action glyphs', () => {
       cycleCamera: ['C'],
       reset: ['R'],
       pause: ['Esc'],
-      headingArrow: [],
-      recenter: [],
+      headingArrow: ['V'],
+      recenter: ['Z'],
       legend: ['H'],
       mouseCentre: ['Z'],
     });
+    expect(actionGlyphs('keyboard', 'headingArrow')[0]!.label).toBe(KEY_BUTTON.headingArrow[0]!.replace('Key', ''));
     // read from the input tables, not a copy of them
     expect(actionGlyphs('keyboard', 'arm')[0]!.label).toBe(KEY_BUTTON.arm[0]);
   });
 
   it('Xbox: coloured A/B/X/Y, RB, View / Menu', () => {
-    expect(all('xbox')).toMatchObject({ arm: ['A'], toggleMode: ['Y'], cycleCamera: ['RB'], reset: ['B'], pause: ['☰'], legend: ['⧉'], headingArrow: [] });
+    expect(all('xbox')).toMatchObject({ arm: ['A'], toggleMode: ['Y'], cycleCamera: ['RB'], reset: ['B'], pause: ['☰'], legend: ['⧉'], headingArrow: ['LB'], recenter: ['LS'] });
     expect(actionGlyphs('xbox', 'arm')[0]).toMatchObject({ style: 'face', tone: 'green' });
     expect(actionGlyphs('xbox', 'toggleMode')[0]).toMatchObject({ tone: 'yellow' });
     expect(actionGlyphs('xbox', 'reset')[0]).toMatchObject({ tone: 'red' });
@@ -63,7 +65,7 @@ describe('action glyphs', () => {
   });
 
   it('PlayStation: ✕ ○ □ △ shapes, R1, Create / Options', () => {
-    expect(all('playstation')).toMatchObject({ arm: ['Cross'], toggleMode: ['Triangle'], cycleCamera: ['R1'], reset: ['Circle'], pause: ['Options'], legend: ['Create'] });
+    expect(all('playstation')).toMatchObject({ arm: ['Cross'], toggleMode: ['Triangle'], cycleCamera: ['R1'], reset: ['Circle'], pause: ['Options'], legend: ['Create'], headingArrow: ['L1'], recenter: ['L3'] });
     expect(actionGlyphs('playstation', 'arm')[0]).toMatchObject({ shape: 'cross', label: '' });
   });
 
@@ -241,6 +243,47 @@ function env(s: Settings = settings(LINEAR)) {
   };
   return { doc: doc as unknown as Document, im, key, tap, lock, loseLock, move, polls };
 }
+
+describe('heading arrow / recentre bindings', () => {
+  it('keyboard: V toggles the heading arrow, Z recentres (and still centres the mouse stick)', () => {
+    const e = env();
+    e.tap('KeyV');
+    let f = e.polls(1);
+    expect(f.buttons).toMatchObject({ headingArrow: true, recenter: false, arm: false, toggleMode: false, cycleCamera: false });
+    expect(e.polls(1).buttons.headingArrow).toBe(false);
+    e.lock();
+    e.move(60, -30);
+    expect(e.polls(1).mouseStick!.x).not.toBe(0);
+    e.tap('KeyZ');
+    f = e.polls(1);
+    expect(f.buttons.recenter).toBe(true);
+    expect(f.mouseStick!.x).toBe(0);
+  });
+
+  it('no key or pad button is bound to two flight actions (only the intended confirm / back pairs share)', () => {
+    const SHARED = new Set(['arm|confirm', 'pause|back', 'reset|back']);
+    const flight = Object.keys(KEY_BUTTON) as (keyof typeof KEY_BUTTON)[];
+    for (const [table, key] of [
+      [KEY_BUTTON, (v: readonly string[]) => v],
+      [PAD_BUTTON, (v: number) => [String(v)]],
+    ] as const) {
+      const seen = new Map<string, string>();
+      for (const a of flight) {
+        for (const k of (key as (v: unknown) => string[])((table as Record<string, unknown>)[a])) {
+          const prev = seen.get(k);
+          if (prev) expect(SHARED.has(`${prev}|${a}`), `${k}: ${prev} + ${a}`).toBe(true);
+          else seen.set(k, a);
+        }
+      }
+    }
+    // the stick keys and the legend key are not flight buttons
+    const stickKeys = Object.values(KEY_STICKS).flat();
+    for (const a of flight) for (const k of KEY_BUTTON[a]) expect([...stickKeys, LEGEND_KEY]).not.toContain(k);
+    expect(Object.values(PAD_BUTTON)).not.toContain(LEGEND_PAD_BUTTON);
+    // every bound key is a game key, or the keyboard listener drops it before the input manager sees it
+    for (const a of flight) for (const k of KEY_BUTTON[a]) expect(GAME_KEYS.has(k), k).toBe(true);
+  });
+});
 
 describe('InputManager: keyboard + mouse', () => {
   it('pointer lock + motion makes it the keyboard + mouse scheme: mouse X rolls, mouse Y pitches (mode 2)', () => {

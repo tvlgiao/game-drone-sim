@@ -25,6 +25,10 @@ export interface ButtonEvents {
   reset: boolean;
   pause: boolean;
   confirm: boolean;
+  /** heading-arrow toggle */
+  headingArrow: boolean;
+  /** VR: recentre the view (keyboard: also centres the mouse stick) */
+  recenter: boolean;
 }
 
 export type InputSource = 'gamepad' | 'keyboard' | 'touch' | 'xr' | 'none';

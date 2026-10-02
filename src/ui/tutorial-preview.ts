@@ -99,7 +99,7 @@ const drone: DroneState = {
 const race: RaceSnapshot = { status: 'freefly', time: 0, countdown: 0, nextRing: 0, totalRings: 3, bestTime: null, lastSplit: null };
 const input: InputFrame = {
   control: { throttle: armed ? 0.5 : 0, yaw: 0, pitch: 0, roll: 0 },
-  buttons: { arm: false, toggleMode: false, cycleCamera: false, reset: false, pause: false, confirm: false },
+  buttons: { arm: false, toggleMode: false, cycleCamera: false, reset: false, pause: false, confirm: false, headingArrow: false, recenter: false },
   nav: { up: false, down: false, left: false, right: false, back: false },
   source,
   gamepadId: source === 'gamepad' ? 'Xbox Wireless Controller (STANDARD GAMEPAD)' : null,

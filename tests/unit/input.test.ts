@@ -120,6 +120,19 @@ describe('InputManager (gamepad, Mode 2)', () => {
     expect(im.poll(1 / 60).control.throttle).toBeCloseTo(0.75, 1);
   });
 
+  it('LB toggles the heading arrow, LS click recentres; neither shares a flight button', () => {
+    const pads: (Gamepad | null)[] = [fakePad([0, 1, 0, 0], [4])];
+    const im = new InputManager(fakeWindow(pads), { ...DEFAULT_SETTINGS });
+    let f = im.poll(1 / 60);
+    expect(f.buttons).toMatchObject({ headingArrow: true, recenter: false, arm: false, toggleMode: false, cycleCamera: false, reset: false, pause: false });
+    f = im.poll(1 / 60);
+    expect(f.buttons.headingArrow).toBe(false);
+    pads[0] = fakePad([0, 1, 0, 0], [10]);
+    f = im.poll(1 / 60);
+    expect(f.buttons).toMatchObject({ recenter: true, headingArrow: false, arm: false, cycleCamera: false });
+    im.dispose();
+  });
+
   it('buttons are edge-triggered; A = arm + confirm, B = reset + back', () => {
     const pads: (Gamepad | null)[] = [fakePad([0, 1, 0, 0], [0])];
     const im = new InputManager(fakeWindow(pads), { ...DEFAULT_SETTINGS });

@@ -199,7 +199,7 @@ describe('TouchInput + InputManager', () => {
     expect(f.buttons.arm).toBe(true);
     expect(f.buttons.pause).toBe(true);
     expect(im.poll(1 / 60).buttons.arm).toBe(false);
-    const b: ButtonEvents = { arm: false, toggleMode: false, cycleCamera: false, reset: false, pause: false, confirm: false };
+    const b: ButtonEvents = { arm: false, toggleMode: false, cycleCamera: false, reset: false, pause: false, confirm: false, headingArrow: false, recenter: false };
     im.touch.press('cycleCamera');
     im.touch.drainButtons(b);
     expect(b.cycleCamera).toBe(true);

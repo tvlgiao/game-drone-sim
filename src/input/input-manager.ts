@@ -37,7 +37,7 @@ const FLICK = 0.6;
 /** An Escape tap this close to a lost pointer lock is the same keystroke: one pause, not pause + resume. */
 const ESC_UNLOCK_MS = 500;
 
-export type ButtonName = 'arm' | 'toggleMode' | 'cycleCamera' | 'reset' | 'pause' | 'confirm' | 'back';
+export type ButtonName = 'arm' | 'toggleMode' | 'cycleCamera' | 'reset' | 'pause' | 'confirm' | 'back' | 'headingArrow' | 'recenter';
 export const PAD_BUTTON: Readonly<Record<ButtonName, number>> = {
   arm: GP.A,
   toggleMode: GP.Y,
@@ -46,7 +46,11 @@ export const PAD_BUTTON: Readonly<Record<ButtonName, number>> = {
   pause: GP.START,
   confirm: GP.A,
   back: GP.B,
+  headingArrow: GP.LB,
+  recenter: GP.LS,
 };
+/** Recentres the view in VR; on a flat screen the same key snaps the mouse stick back to centre. */
+const RECENTER_KEY = 'KeyZ';
 export const KEY_BUTTON: Readonly<Record<ButtonName, readonly string[]>> = {
   arm: ['Space'],
   toggleMode: ['KeyM'],
@@ -55,8 +59,10 @@ export const KEY_BUTTON: Readonly<Record<ButtonName, readonly string[]>> = {
   pause: ['Escape'],
   confirm: ['Enter', 'NumpadEnter'],
   back: ['Escape', 'Backspace'],
+  headingArrow: ['KeyV'],
+  recenter: [RECENTER_KEY],
 };
-/** Quest Touch layout: A arm/confirm, B mode/back, X reset, Y pause, right stick click = camera. */
+/** Quest Touch layout: A arm/confirm, B mode/back, X reset, Y pause, right stick click = camera, left stick click = recentre, left trigger = heading arrow. */
 export const XR_BUTTON: Readonly<Record<ButtonName, keyof XrButtons>> = {
   arm: 'a',
   toggleMode: 'b',
@@ -65,9 +71,9 @@ export const XR_BUTTON: Readonly<Record<ButtonName, keyof XrButtons>> = {
   pause: 'y',
   confirm: 'a',
   back: 'b',
+  headingArrow: 'lTrigger',
+  recenter: 'lStick',
 };
-/** Quest-only actions, handled in main.ts while presenting. */
-export const XR_EXTRA = { recenter: 'lStick', headingArrow: 'lTrigger' } as const satisfies Record<string, keyof XrButtons>;
 /** Keyboard virtual sticks: [negative, positive] key per stick axis (WASD = left stick, arrows = right). */
 export const KEY_STICKS: Readonly<Record<StickSlot, readonly [string, string]>> = {
   lx: ['KeyA', 'KeyD'],
@@ -77,7 +83,7 @@ export const KEY_STICKS: Readonly<Record<StickSlot, readonly [string, string]>> 
 };
 export const LEGEND_KEY = 'KeyH';
 /** Snaps the mouse stick back to centre (the middle mouse button does too). */
-export const MOUSE_CENTRE_KEY = 'KeyZ';
+export const MOUSE_CENTRE_KEY = RECENTER_KEY;
 export const LEGEND_PAD_BUTTON = GP.BACK;
 const BUTTON_NAMES = Object.keys(PAD_BUTTON) as ButtonName[];
 
@@ -132,7 +138,7 @@ export class InputManager {
   private readonly xrOpts: StickMapOptions;
   private readonly frame: HintedInputFrame = {
     control: { throttle: 0, yaw: 0, pitch: 0, roll: 0 },
-    buttons: { arm: false, toggleMode: false, cycleCamera: false, reset: false, pause: false, confirm: false },
+    buttons: { arm: false, toggleMode: false, cycleCamera: false, reset: false, pause: false, confirm: false, headingArrow: false, recenter: false },
     nav: { up: false, down: false, left: false, right: false, back: false },
     source: 'none',
     gamepadId: null,
