@@ -622,6 +622,11 @@ function boot(): void {
       hasInjected = true;
     },
     action: onAction,
+    /** UI audit / e2e: open any menu screen directly (finish needs its time data) */
+    showScreen: (name: Parameters<Hud['showScreen']>[0], data?: Parameters<Hud['showScreen']>[1]) => hud.showScreen(name, data),
+    /** UI audit: render the fatal-error screen */
+    showError: (msg: string) => hud.setError(msg),
+    toast: (msg: string) => toast(msg),
     teleport(x: number, y: number, z: number, yaw = 0) {
       placeDrone(new Vector3(x, y, z), yaw);
     },
