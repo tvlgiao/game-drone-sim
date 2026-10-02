@@ -215,6 +215,10 @@ test.describe('touch devices', () => {
     await expect(page.locator('.ds-ui')).toHaveClass(/ds-touch-on/); // dimmed HUD keeps the touch layout
     await expect(page.locator('.ds-touch')).toBeHidden();
     await expect(page.locator('.ds-hud__br')).toBeHidden();
+    // back at the main menu there is no flight behind it: the touch HUD layout is dropped
+    await page.evaluate(() => (window as unknown as { __drone: { action: (a: { type: string }) => void } }).__drone.action({ type: 'menu' }));
+    await expect.poll(() => hook(page, (d) => d.screen)).toBe('main');
+    await expect(page.locator('.ds-ui')).not.toHaveClass(/ds-touch-on/);
     expect(errors).toEqual([]);
   });
 

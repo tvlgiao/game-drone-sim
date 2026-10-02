@@ -126,11 +126,12 @@ export class TouchControls {
   }
 
   /**
-   * Sticks + buttons on/off. The compact touch HUD layout stays while a menu (pause, finish, quit)
-   * covers the flight, so the dimmed HUD behind it does not jump to the desktop layout.
+   * Sticks + buttons on/off. With `overFlight` (pause / finish and the menus opened from them cover a
+   * flight) the compact touch HUD layout stays, so the dimmed HUD behind does not jump to the desktop
+   * layout; back at the main menu it is dropped.
    */
-  setVisible(on: boolean): void {
-    const layout = on || (this.touchLayout && this.root.classList.contains('has-screen'));
+  setVisible(on: boolean, overFlight = false): void {
+    const layout = on || (this.touchLayout && overFlight);
     if (layout !== this.touchLayout) {
       this.touchLayout = layout;
       this.root.classList.toggle('ds-touch-on', layout);
