@@ -14,6 +14,8 @@ export interface GamepadConnectionEvent {
   connected: boolean;
   id: string;
   name: string;
+  /** a disconnect of the pad that was flying (the active source), so the game can pause */
+  wasActive: boolean;
 }
 
 const FLICK = 0.6;
@@ -92,11 +94,12 @@ export class InputManager {
     xr: null,
   };
 
-  private readonly onConnected = (e: Event): void => this.emitConnection(e, true);
+  private readonly onConnected = (e: Event): void => this.emitConnection(e, true, false);
   private readonly onDisconnected = (e: Event): void => {
     const gp = (e as GamepadEvent).gamepad;
+    const wasActive = this.source === 'gamepad' && !!gp && gp.index === this.pad.selectedIndex;
     if (gp) this.pad.forget(gp.index);
-    this.emitConnection(e, false);
+    this.emitConnection(e, false, wasActive);
   };
 
   constructor(win: Window | null, settings: Settings, touchDevice = false) {
@@ -127,10 +130,15 @@ export class InputManager {
     this.xr.setThrottleSlot(throttleSlot(s.stickMode));
   }
 
-  /** Re-arms the take-off latch of the centring throttles (touch auto-centre, XR thumbstick). */
+  /**
+   * Throttle back to the bottom for a fresh take-off (respawn, disarm, new flight): re-arms the latch of
+   * the centring throttles (touch auto-centre, XR thumbstick) and drops the keyboard's held throttle,
+   * which would otherwise launch the respawned quad at the old setting.
+   */
   latchTakeoff(): void {
     this.touch.sticks.latchTakeoff();
     this.xr.latchTakeoff();
+    this.vsticks.setThrottle(0);
   }
 
   /** The active source's throttle is still latched at the bottom (armed but not yet pushed up). */
@@ -142,11 +150,6 @@ export class InputManager {
   /** Current source (last used device). */
   get activeSource(): InputSource {
     return this.source;
-  }
-
-  /** Current keyboard throttle (0..1); lets the game zero it on respawn/disarm. */
-  setKeyboardThrottle(v: number): void {
-    this.vsticks.setThrottle(v);
   }
 
   /**
@@ -292,10 +295,10 @@ export class InputManager {
     this.onConnection = null;
   }
 
-  private emitConnection(e: Event, connected: boolean): void {
+  private emitConnection(e: Event, connected: boolean, wasActive: boolean): void {
     const gp = (e as GamepadEvent).gamepad;
     const id = gp?.id ?? 'Gamepad';
     if (connected && this.source === 'none') this.source = 'gamepad';
-    this.onConnection?.({ connected, id, name: prettyPadName(id) });
+    this.onConnection?.({ connected, id, name: prettyPadName(id), wasActive });
   }
 }
