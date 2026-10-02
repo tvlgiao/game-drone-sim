@@ -731,7 +731,6 @@ function boot(): void {
   if (selftest) void import('./ui/selftest').then((m) => m.runSelfTest(hook, settings.stickMode));
 }
 
-// `?xremu=1` emulates a Quest 2 (IWER) before boot so navigator.xr is the emulated runtime.
 /** A boot that throws must not leave the splash covering the page. */
 function safeBoot(): void {
   try {
