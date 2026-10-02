@@ -3,7 +3,11 @@ import { chromium } from '@playwright/test';
 const OUT = new URL('../store/screenshots', import.meta.url).pathname;
 const b = await chromium.launch({ args: ['--use-angle=metal', '--enable-gpu', '--ignore-gpu-blocklist'] });
 const p = await b.newPage({ viewport: { width: 1280, height: 720 }, deviceScaleFactor: 2 });
-await p.goto('http://localhost:4173/?xremu=1');
+// /app/ boots only for a Meta Horizon Store owner: stub the Digital Goods API as the installed app sees it
+await p.addInitScript(() => {
+  window.getDigitalGoodsService = async () => ({ getLoggedInUserId: async () => '4815162342' });
+});
+await p.goto('http://localhost:4173/app/?xremu=1');
 await p.waitForFunction(() => window.__drone && window.__xrDevice);
 await p.getByRole('button', { name: 'Enter VR' }).click();
 await p.waitForFunction(() => window.__drone.xr.presenting);

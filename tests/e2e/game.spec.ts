@@ -33,7 +33,7 @@ async function boot(page: Page): Promise<void> {
     if (m.type() === 'error') errors.push(m.text());
   });
   page.on('pageerror', (e) => errors.push(e.message));
-  await page.goto('/');
+  await page.goto('/play/');
   await page.waitForFunction(() => !!window.__drone, null, { timeout: 20_000 });
 }
 
@@ -253,7 +253,7 @@ for (const quality of ['ultra', 'medium']) {
     const ctx = await browser.newContext({ viewport: { width: 2560, height: 1440 } });
     await ctx.addInitScript((q) => localStorage.setItem('drone-sim.settings', JSON.stringify({ quality: q })), quality);
     const page = await ctx.newPage();
-    await page.goto('/');
+    await page.goto('/play/');
     await page.waitForFunction(() => !!window.__drone, null, { timeout: 20_000 });
     await page.waitForTimeout(1200);
     await page.evaluate(() => {

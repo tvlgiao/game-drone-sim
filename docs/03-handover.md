@@ -6,7 +6,7 @@ Version 0.1.0 · 2026-09-26 · ~9.9k lines TypeScript
 
 ```bash
 npm install
-npm run dev          # http://localhost:5173  (game)
+npm run dev          # http://localhost:5173  (landing page; game at /play/, Quest app at /app/?owned=1)
                      # /render-preview.html   renderer alone, scripted drone
                      # /ui-preview.html?screen=main|hud|settings|controls|pause|finish
 npm run build && npm run preview   # production build on :4173

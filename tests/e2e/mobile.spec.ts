@@ -37,7 +37,7 @@ interface Hook {
 
 const errors: string[] = [];
 
-async function boot(page: Page, path = '/'): Promise<void> {
+async function boot(page: Page, path = '/play/'): Promise<void> {
   errors.length = 0;
   page.on('console', (m) => {
     if (m.type() === 'error') errors.push(m.text());
@@ -574,7 +574,7 @@ test.describe('touch devices', () => {
   });
 
   test('?selftest=1 flies the scripted touch flight and reports PASS', async ({ page }, info) => {
-    await boot(page, '/?selftest=1');
+    await boot(page, '/play/?selftest=1');
     await page.waitForFunction(() => (window as unknown as { __selftest?: { done: boolean } }).__selftest?.done, null, { timeout: 30_000 });
     const r = await page.evaluate(() => (window as unknown as { __selftest: { pass: boolean; fps: number; checks: { name: string; ok: boolean; detail: string; soft?: boolean }[] } }).__selftest);
     console.log(`[${info.project.name}] selftest ${r.pass ? 'PASS' : 'FAIL'} fps ${r.fps.toFixed(1)}: ${r.checks.map((c) => `${c.name}=${c.detail}`).join('; ')}`);

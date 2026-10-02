@@ -1,9 +1,12 @@
 /**
  * VR path on an emulated Meta Quest 2 (IWER via `?xremu=1`): Enter VR, Touch-controller menus,
  * arm + take-off latch, altitude hold on the centred thumbstick, camera cycle, pause and leaving VR.
+ * VR lives in the Quest app page (/app/), which boots only for a store owner: every test stubs the
+ * Meta Digital Goods API with an owner's account.
  */
 import { expect, test, type Page } from '@playwright/test';
 import { XR_CARD_PX, XR_CARD_TEXT_W, type XrPanelView } from '../../src/render/xr-panel';
+import { questOwnerStub } from './quest-owner';
 
 interface Hook {
   state: { position: { x: number; y: number; z: number } };
@@ -30,6 +33,10 @@ interface EmuController {
 type W = { __drone: Hook; __xrDevice: { controllers: Record<Hand, EmuController>; updateVisibilityState(s: 'visible' | 'visible-blurred' | 'hidden'): void } };
 
 const errors: string[] = [];
+
+test.beforeEach(async ({ context }) => {
+  await context.addInitScript(questOwnerStub);
+});
 
 /** Tap a Touch button: held for a few frames, then released. */
 async function press(page: Page, hand: Hand, button: string): Promise<void> {
@@ -66,7 +73,7 @@ test('emulated Quest 2: enter VR, fly with Touch controllers, pause and exit', a
   page.on('pageerror', (e) => errors.push(e.message));
   // fixed quality: 'auto' resizes on its own as the frame rate moves, which would hide a stale DPR
   await page.addInitScript(() => localStorage.setItem('drone-sim.settings', JSON.stringify({ quality: 'high' })));
-  await page.goto('/?xremu=1');
+  await page.goto('/app/?xremu=1');
   await page.waitForFunction(() => !!(window as unknown as Partial<W>).__drone && !!(window as unknown as Partial<W>).__xrDevice, null, { timeout: 20_000 });
 
   const flatTier = await page.evaluate(() => (window as unknown as W).__drone.tier);
@@ -140,7 +147,7 @@ test('emulated Quest 2: enter VR, fly with Touch controllers, pause and exit', a
 test('two Enter VR requests in one tick start one working session (controllers still fly)', async ({ page }) => {
   const errs: string[] = [];
   page.on('pageerror', (e) => errs.push(e.message));
-  await page.goto('/?xremu=1');
+  await page.goto('/app/?xremu=1');
   await page.waitForFunction(() => !!(window as unknown as Partial<W>).__drone && !!(window as unknown as Partial<W>).__xrDevice, null, { timeout: 20_000 });
   // two requests in the same tick: the second must neither start nor tear down a session
   await page.evaluate(() => {
@@ -160,7 +167,7 @@ test('two Enter VR requests in one tick start one working session (controllers s
 test('Quest immersive app launch: sessiongranted enters VR without a click', async ({ page }) => {
   const errs: string[] = [];
   page.on('pageerror', (e) => errs.push(e.message));
-  await page.goto('/?xremu=1');
+  await page.goto('/app/?xremu=1');
   await page.waitForFunction(() => !!(window as unknown as Partial<W>).__drone && !!(window as unknown as Partial<W>).__xrDevice, null, { timeout: 20_000 });
   expect(await page.evaluate(() => (window as unknown as W).__drone.xr.presenting)).toBe(false);
   // what Quest Browser fires when the Horizon OS app is launched in immersive mode
@@ -172,7 +179,7 @@ test('Quest immersive app launch: sessiongranted enters VR without a click', asy
 test('sessiongranted with a refused session: no unhandled rejection, toast, Enter VR still offered', async ({ page }) => {
   const errs: string[] = [];
   page.on('pageerror', (e) => errs.push(e.message));
-  await page.goto('/?xremu=1');
+  await page.goto('/app/?xremu=1');
   await page.waitForFunction(() => !!(window as unknown as Partial<W>).__drone && !!(window as unknown as Partial<W>).__xrDevice, null, { timeout: 20_000 });
   await expect(page.getByRole('button', { name: 'Enter VR' })).toBeVisible();
   await page.evaluate(() => {
@@ -192,6 +199,7 @@ const QUEST_UA = 'Mozilla/5.0 (X11; Linux x86_64; Quest 2) AppleWebKit/537.36 (K
 for (const installed of [true, false]) {
   test(`Quest ${installed ? 'installed app (standalone) enters VR at launch' : 'browser tab does not auto-enter VR'}`, async ({ browser }) => {
     const ctx = await browser.newContext({ userAgent: QUEST_UA });
+    await ctx.addInitScript(questOwnerStub);
     if (installed) {
       // the Horizon OS app shows the page in display-mode standalone
       await ctx.addInitScript(() => {
@@ -202,7 +210,7 @@ for (const installed of [true, false]) {
     const page = await ctx.newPage();
     const errs: string[] = [];
     page.on('pageerror', (e) => errs.push(e.message));
-    await page.goto('/?xremu=1');
+    await page.goto('/app/?xremu=1');
     await page.waitForFunction(() => !!(window as unknown as Partial<W>).__drone && !!(window as unknown as Partial<W>).__xrDevice, null, { timeout: 20_000 });
     if (installed) {
       await page.waitForFunction(() => (window as unknown as W).__drone.xr.presenting, null, { timeout: 10_000 });
@@ -227,7 +235,7 @@ for (const installed of [true, false]) {
 test('Quest system menu / headset off: the flight pauses and the sound stops; back in view the sound returns', async ({ page }) => {
   const errs: string[] = [];
   page.on('pageerror', (e) => errs.push(e.message));
-  await page.goto('/?xremu=1');
+  await page.goto('/app/?xremu=1');
   await page.waitForFunction(() => !!(window as unknown as Partial<W>).__drone && !!(window as unknown as Partial<W>).__xrDevice, null, { timeout: 20_000 });
   await page.getByRole('button', { name: 'Enter VR' }).click();
   await page.waitForFunction(() => (window as unknown as W).__drone.xr.presenting, null, { timeout: 10_000 });
@@ -256,7 +264,7 @@ test('Quest system menu / headset off: the flight pauses and the sound stops; ba
 test('VR session runs at 72 Hz with fixed foveation; the browser card offers B Exit VR and the full flight hints', async ({ page }) => {
   const errs: string[] = [];
   page.on('pageerror', (e) => errs.push(e.message));
-  await page.goto('/?xremu=1');
+  await page.goto('/app/?xremu=1');
   await page.waitForFunction(() => !!(window as unknown as Partial<W>).__drone && !!(window as unknown as Partial<W>).__xrDevice, null, { timeout: 20_000 });
   // record what the game asks the runtime for (IWER starts at 72 Hz already)
   await page.evaluate(() => {

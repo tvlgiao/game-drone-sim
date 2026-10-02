@@ -4,14 +4,38 @@ App ID on every store: **`com.cowork.dronesim`** (cannot change after the first 
 
 | Target | Shell | Why |
 |---|---|---|
-| iPhone / iPad (App Store) | Capacitor `ios/` (WKWebView) | offline bundle of `dist/`, touch + gamepad |
+| iPhone / iPad (App Store) | Capacitor `ios/` (WKWebView) | offline bundle of `dist-native/`, touch + gamepad |
 | Android phones / tablets (Google Play) | Capacitor `android/` (WebView) | same |
-| Meta Quest (Horizon Store) | PWA packaged as APK | Android WebView has no WebXR; the Quest Browser engine does |
+| Meta Quest (Horizon Store) | PWA packaged as APK, start URL `/app/` | Android WebView has no WebXR; the Quest Browser engine does |
+
+## Website layout (since 1.0.3)
+
+| URL | Page | Edition (`src/core/edition.ts`) |
+|---|---|---|
+| `/` | landing page (`index.html`, `src/landing/`): pitch, screenshots, store badges, Play button | — |
+| `/play/` | free web game, every level on a flat screen, **never VR** (no Enter VR, `sessiongranted` ignored) | `web-free` |
+| `/app/` | the Quest store app (TWA start URL): full game with VR, only after the store ownership check | `quest-app` |
+| `dist-native/` index | the iOS / Android apps: the game page at the root, no landing, no gate, no VR UI | `native` |
+
+Store badges on the landing page and the Quest gate come from `STORE_LINKS` in `src/site/stores.ts`:
+a `null` url renders as "Coming soon". Paste each listing URL there once it is live.
+
+`/app/` ownership check (`src/core/ownership.ts`, client-only): `window.getDigitalGoodsService('https://quest.meta.com/billing')`
+must resolve and its Meta-specific `getLoggedInUserId()` must return a non-zero id. Success is cached in
+`localStorage['drone-sim.owned.v1']` (a timestamp, never the id), so the app launches offline after one
+online check; online launches re-check. A plain browser tab (no API), id 0, or a failed check with no cache
+shows the full-screen store gate (store link + "Play free on the web" → `../play/`). `?owned=1` skips the
+check in `npm run dev` only.
+
+Old links: the root used to be the game. `src/landing/legacy.ts` sends a root URL with a game query
+(`?selftest=1`, `?xremu=1`, `?rotate=0`, `?owned=…`) to `./play/` with the query kept, and a standalone
+(installed) launch of the root to `./app/` on a Quest (Quest APK ≤ 1.0.2, start URL `/`) or `./play/`
+elsewhere (old home-screen PWAs).
 
 ## Build
 
 ```bash
-npm run cap:sync        # vite build + copy dist/ into both native projects
+npm run cap:sync        # build:native (vite --mode native → dist-native/) + copy into both native projects
 npm run ios             # sync + open Xcode
 npm run android         # sync + open Android Studio
 npm run android:apk     # sync + debug APK → android/app/build/outputs/apk/debug/
@@ -66,14 +90,16 @@ bubblewrap update --skipVersionUpgrade && bubblewrap build --skipPwaValidation
 # → app-release-signed.apk (sideload / Horizon upload), app-release-bundle.aab
 ```
 
-`quest/twa-manifest.json`: `isMetaQuest`, `horizonOSAppMode: "immersive"` (a 2D app cannot open a WebXR
+`quest/twa-manifest.json`: `startUrl: "/app/"`, `webManifestUrl` …`/app/manifest.webmanifest`, `isMetaQuest`, `horizonOSAppMode: "immersive"` (a 2D app cannot open a WebXR
 session on Quest; the game enters VR on the browser's `sessiongranted` event, Enter VR stays as a fallback),
 landscape, minSdk 32. Bump `appVersionCode` for every upload. Builds are kept in `quest/dist/`
 (git-ignored).
 
 Store: Meta Developer Dashboard → organisation → new Meta Horizon Store app → upload the APK to the
 ALPHA channel → listing (screenshots 2560×1440, cover art), IARC age rating, data-use checkup →
-submit for review.
+submit for review. The Data Use Checkup must declare the **User ID** platform feature: `/app/` calls
+`getLoggedInUserId()` to confirm ownership (used on the device only, not stored or sent). Then paste the
+store URL into `STORE_LINKS` (`src/site/stores.ts`).
 
 The Capacitor Android APK is **not** for Quest (no VR there). Do not install both on one headset:
 they share the package name with different signatures.

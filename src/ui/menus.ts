@@ -1290,7 +1290,8 @@ export class Menus {
   }
 
   private buildAbout(): HTMLElement {
-    const base = this.native ? SITE_URL : './';
+    // the web game lives one level down (/play/, /app/); privacy and licences sit at the site root
+    const base = this.native ? SITE_URL : '../';
     // Inline style: links styled as buttons must not show the anchor underline (no CSS rule in this module's scope).
     const link = (href: string, label: string, ext: boolean): string =>
       `<a class="ds-btn ds-btn--sm ds-btn--ghost" data-nav href="${href}"${ext ? ' target="_blank" rel="noopener"' : ''}><span>${label}</span></a>`;

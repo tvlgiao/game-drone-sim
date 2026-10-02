@@ -3,7 +3,7 @@ import { devices, expect, test, type Page } from '@playwright/test';
 // window.__drone is typed by the global declaration in game.spec.ts.
 
 async function boot(page: Page): Promise<void> {
-  await page.goto('/');
+  await page.goto('/play/');
   await page.waitForFunction(() => !!window.__drone, null, { timeout: 20_000 });
 }
 
@@ -20,7 +20,7 @@ const centerState = (page: Page) =>
   });
 
 test('boot splash is removed once the first frame is up', async ({ page }) => {
-  await page.goto('/');
+  await page.goto('/play/');
   await expect(page.locator('#splash')).toBeAttached();
   await page.waitForFunction(() => !!window.__drone, null, { timeout: 20_000 });
   // main.ts signals the first drawn frame itself; the splash's 20 s fallback must not be what clears it
