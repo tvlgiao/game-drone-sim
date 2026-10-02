@@ -22,7 +22,8 @@ async function box(l: Locator): Promise<Box> {
 async function open(page: Page, query: string): Promise<Locator> {
   await page.goto(`/tutorial-preview.html?${query}`);
   // the HUD fades in from the menu state: screenshots wait for it
-  await expect(page.locator('.ds-hud')).toHaveCSS('opacity', '1');
+  // (the completion card hides the frozen HUD instead)
+  if (!query.includes('step=12')) await expect(page.locator('.ds-hud')).toHaveCSS('opacity', '1');
   const card = page.locator('.ds-tut-card');
   return card;
 }

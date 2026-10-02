@@ -31,6 +31,10 @@ async function fakePad(page: Page, id: string): Promise<void> {
 }
 
 const ui = (page: Page, sel: string) => page.locator(`#ui ${sel}`);
+/** The legend opens on the first flight and then folds the chip row: specs about the chips start with it closed. */
+async function legendClosed(page: Page): Promise<void> {
+  await page.addInitScript(() => localStorage.setItem('drone-sim.controls-legend', 'closed'));
+}
 const control = (page: Page) => page.evaluate(() => (window.__drone as unknown as Ctl).control!);
 
 test('keyboard: keycaps beside arm / mode / camera, a reset / pause strip, stick key clusters and the legend', async ({ page }) => {
@@ -40,8 +44,6 @@ test('keyboard: keycaps beside arm / mode / camera, a reset / pause strip, stick
   await expect(ui(page, '[data-r="gArm"] .ds-g--key')).toHaveText('Space');
   await expect(ui(page, '[data-r="gMode"] .ds-g--key')).toHaveText('M');
   await expect(ui(page, '[data-r="gCam"] .ds-g--key')).toHaveText('C');
-  await expect(ui(page, '[data-bind="reset"]')).toHaveText(/R\s*Reset/);
-  await expect(ui(page, '[data-bind="pause"]')).toHaveText(/Esc\s*Pause/);
   await expect(ui(page, '[data-r="keysL"] .ds-g')).toHaveText(['W', 'A', 'S', 'D']);
   await expect(ui(page, '[data-r="keysR"] .ds-g')).toHaveText(['↑', '←', '↓', '→']);
   await expect(ui(page, '[data-r="hint"]')).toHaveText(/press\s*Space\s*to arm/);
@@ -49,9 +51,18 @@ test('keyboard: keycaps beside arm / mode / camera, a reset / pause strip, stick
   await expect(legend).toBeVisible(); // first flight
   await expect(legend).toContainText('Throttle');
   await expect(legend).toContainText('centre = hover');
+  // the open legend lists every binding: the chip row folds to its toggle, and Recentre (VR only) is not listed
+  await expect(legend).not.toContainText('Recentre');
+  await expect(ui(page, '[data-bind]')).toHaveCount(0);
+  await expect(ui(page, '[data-legend]')).toBeVisible();
+  await page.keyboard.press('KeyH');
+  await expect(legend).toBeHidden();
+  await expect(ui(page, '[data-bind="reset"]')).toHaveText(/R\s*Reset/);
+  await expect(ui(page, '[data-bind="pause"]')).toHaveText(/Esc\s*Pause/);
 });
 
 test('Xbox pad: coloured A / Y face buttons, RB, Menu', async ({ page }) => {
+  await legendClosed(page);
   await fakePad(page, XBOX);
   await fly(page);
   await expect(page.locator('#ui')).toHaveAttribute('data-scheme', 'xbox');
@@ -63,6 +74,7 @@ test('Xbox pad: coloured A / Y face buttons, RB, Menu', async ({ page }) => {
 });
 
 test('DualSense: ✕ △ ○ shapes, R1, Options / Create', async ({ page }) => {
+  await legendClosed(page);
   await fakePad(page, DUALSENSE);
   await fly(page);
   await expect(page.locator('#ui')).toHaveAttribute('data-scheme', 'playstation');
@@ -121,6 +133,7 @@ test('keyboard: hold W climbs, release springs to hover and holds altitude, S la
 });
 
 test('keyboard + mouse: clicking the view captures the mouse, motion tilts, Z centres, losing the lock pauses', async ({ page }) => {
+  await legendClosed(page);
   await fly(page);
   await page.keyboard.press('KeyA');
   await expect(ui(page, '[data-bind="mouse"]')).toContainText('Click view');

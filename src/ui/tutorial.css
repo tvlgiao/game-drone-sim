@@ -51,7 +51,7 @@
 .ds-tut-card__tag {
   margin-right: auto;
   padding: 1px calc(7 * var(--ds-u));
-  font-size: max(11px, 0.66em);
+  font-size: max(12px, 0.66em);
   font-weight: 800;
   letter-spacing: 0.14em;
   text-transform: uppercase;
@@ -374,9 +374,6 @@
   .ds-tut-card__title {
     grid-area: 1 / 3;
     min-width: 0;
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
   }
 
   .ds-tut-skip {
@@ -410,13 +407,14 @@
 
   .ds-ui.ds-touch-on .ds-tut-parts {
     flex-wrap: nowrap;
-    gap: 5px;
+    gap: 4px;
   }
 
   .ds-ui.ds-touch-on .ds-tut-part {
     min-height: 22px;
-    padding: 0 7px;
-    letter-spacing: 0.04em;
+    padding: 0 4px;
+    font-size: 12px;
+    letter-spacing: 0;
   }
 
   .ds-ui.ds-touch-on .ds-tut-card__foot {
