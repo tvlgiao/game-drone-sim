@@ -181,7 +181,7 @@
 .ds-gates {
   display: grid;
   grid-template-columns: auto auto;
-  align-items: baseline;
+  align-items: center;
   column-gap: calc(12 * var(--ds-u));
   row-gap: calc(6 * var(--ds-u));
   padding: calc(8 * var(--ds-u)) calc(16 * var(--ds-u)) calc(10 * var(--ds-u));
@@ -673,9 +673,11 @@
 }
 
 /* toasts */
+/* hud.ts moves the lane under the centre title stack (inline top) while CRASHED / a countdown digit is up. */
 .ds-toasts {
   position: absolute;
   top: calc(var(--ds-gap) + calc(130 * var(--ds-u)));
+  transition: top 0.25s ease;
   left: 50%;
   transform: translateX(-50%);
   display: grid;
@@ -764,7 +766,8 @@
   left: 50%;
   width: clamp(calc(220 * var(--ds-u)), 44vw, calc(420 * var(--ds-u)));
   aspect-ratio: 1;
-  transform: translate(-50%, -56%);
+  /* lifted so the tilted ellipse frames the title and its lower arc clears the subtitle */
+  transform: translate(-50%, -64%);
   perspective: calc(900 * var(--ds-u));
   pointer-events: none;
 }
@@ -809,13 +812,17 @@
 }
 
 .ds-logo__sub {
-  margin: calc(10 * var(--ds-u)) 0 0;
+  position: relative;
+  margin: calc(26 * var(--ds-u)) 0 0;
   font-size: 0.85em;
   font-weight: 700;
   letter-spacing: 0.5em;
   text-transform: uppercase;
-  color: var(--ds-muted);
+  color: rgba(225, 240, 255, 0.86);
   padding-left: 0.5em;
+  text-shadow:
+    0 0 calc(4 * var(--ds-u)) rgba(2, 4, 10, 0.95),
+    0 0 calc(12 * var(--ds-u)) rgba(2, 4, 10, 0.8);
 }
 
 .ds-main__best {
@@ -971,12 +978,15 @@
   width: min(calc(760 * var(--ds-u)), 100%);
 }
 
+/* One look for every dialog / screen title; tracking kept moderate so sentence titles don't break mid-phrase. */
 .ds-dialog__title {
   margin: 0 0 calc(18 * var(--ds-u));
   font-size: clamp(calc(20 * var(--ds-u)), 2.2vw, calc(28 * var(--ds-u)));
   font-weight: 800;
-  letter-spacing: 0.24em;
+  line-height: 1.2;
+  letter-spacing: 0.12em;
   text-transform: uppercase;
+  text-wrap: balance;
 }
 
 .ds-dialog__title small {
@@ -1012,12 +1022,14 @@
   border-color: rgba(120, 220, 255, 0.16);
 }
 
-.ds-btn--sm {
-  min-height: calc(38 * var(--ds-u));
-  padding: 0 calc(12 * var(--ds-u));
-  font-size: 0.78em;
-  letter-spacing: 0.08em;
-  text-transform: none;
+/* Footer rows mix ghost, small and plain buttons (and button-styled links): one height, case and tracking. */
+.ds-btn--sm,
+.ds-dialog__actions .ds-btn {
+  min-height: calc(44 * var(--ds-u));
+  padding: 0 calc(18 * var(--ds-u));
+  font-size: 0.86em;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
 }
 
 .ds-row__value.is-alert {
@@ -1678,6 +1690,33 @@
   font-weight: 600;
 }
 
+/* Rows with key chips were taller than rows without: one row height. */
+.ds-table tbody tr {
+  height: calc(36 * var(--ds-u));
+}
+
+.ds-table th,
+.ds-table td {
+  vertical-align: middle;
+}
+
+.ds-table + .ds-h3 {
+  margin-top: calc(18 * var(--ds-u));
+}
+
+.ds-h3 + .ds-help {
+  margin-top: calc(6 * var(--ds-u));
+}
+
+.ds-screen--about .ds-help {
+  font-size: 0.88em;
+  color: rgba(220, 232, 255, 0.78);
+}
+
+.ds-screen--about .ds-table .ds-num {
+  font-family: inherit;
+}
+
 .ds-tip {
   margin: calc(12 * var(--ds-u)) 0 0;
   padding: calc(10 * var(--ds-u)) calc(12 * var(--ds-u));
@@ -1717,6 +1756,14 @@
   color: var(--ds-muted);
 }
 
+.ds-finish__best [data-sign='faster'] {
+  color: var(--ds-green);
+}
+
+.ds-finish__best [data-sign='slower'] {
+  color: var(--ds-amber);
+}
+
 .ds-badge-new {
   display: inline-block;
   margin-top: calc(10 * var(--ds-u));
@@ -1743,8 +1790,19 @@
   white-space: pre-line;
 }
 
-.ds-ui.ds-fatal .ds-hud {
+.ds-ui.ds-fatal .ds-hud,
+.ds-ui:has(.ds-screen--bye.is-open) .ds-hud,
+.ds-ui:has(.ds-screen--error.is-open) .ds-hud {
   display: none;
+}
+
+.ds-error {
+  width: min(calc(560 * var(--ds-u)), 100%);
+}
+
+/* Auto margins centre the dialog when it fits and never push it above the scroll top when it doesn't. */
+.ds-screen--error > .ds-dialog {
+  margin-block: auto;
 }
 
 /* ---------- animations ---------- */
@@ -1869,7 +1927,8 @@
 .ds-chip--quit {
   pointer-events: auto;
   cursor: pointer;
-  font: inherit;
+  font-family: inherit;
+  text-transform: uppercase;
   color: #ffb4c0;
   border-color: rgba(255, 90, 120, 0.45);
   background: rgba(60, 10, 22, 0.55);
@@ -1890,14 +1949,6 @@
   font-size: calc(14 * var(--ds-u));
   line-height: 1.5;
   text-wrap: pretty;
-}
-
-/* Sentence-length titles: wide tracking breaks them mid-phrase ("CAN'T START THE / SIMULATOR"). */
-.ds-error .ds-dialog__title,
-.ds-screen--bye .ds-dialog__title,
-.ds-screen--confirm-quit .ds-dialog__title {
-  letter-spacing: 0.08em;
-  text-wrap: balance;
 }
 
 .ds-error .ds-error__msg {
