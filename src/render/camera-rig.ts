@@ -15,6 +15,14 @@ const LOS_MARGIN_PITCH = 0.55;
 /** head turn spring (rad/s natural frequency) and relax-back-to-overview rate */
 const LOS_HEAD_OMEGA = 4.5;
 const LOS_RELAX = 0.35;
+/**
+ * FPV under the ceiling: within this clearance (m) the camera's uptilt eases off (to FPV_CEILING_TILT
+ * of the setting at contact), otherwise a quad pressed to the unlit ceiling sees nothing but black.
+ */
+const FPV_CEILING_RELIEF = 0.6;
+const FPV_CEILING_TILT = 0.3;
+/** lens kept this far below the ceiling plane so the near plane never cuts into it */
+const FPV_CEILING_GAP = 0.04;
 
 const _pos = new THREE.Vector3();
 const _q = new THREE.Quaternion();
@@ -65,6 +73,7 @@ export class CameraRig {
   private fovV = 70;
   private readonly pilot: THREE.Vector3;
   private readonly bounds: THREE.Box3;
+  private readonly ceiling: number;
   /** exposed for FX: FPV-ness 0..1 (1 while fully in FPV) */
   fpvWeight = 0;
   /** camera shake / impact trauma; off in a headset, where shaking the view causes nausea */
@@ -81,6 +90,7 @@ export class CameraRig {
       new THREE.Vector3(-roomSize[0] / 2 + m, 0.12, -roomSize[2] / 2 + m),
       new THREE.Vector3(roomSize[0] / 2 - m, roomSize[1] - m, roomSize[2] / 2 - m),
     );
+    this.ceiling = roomSize[1];
     this.camera.position.copy(this.pilot);
     // Resting gaze: centre of the room at chest height, so the whole course is in view.
     this.overview = new THREE.Vector3(0, roomSize[1] * 0.28, -roomSize[2] * 0.08);
@@ -171,11 +181,13 @@ export class CameraRig {
   private pose(mode: CameraMode, f: RigInput, outPos: THREE.Vector3, outQuat: THREE.Quaternion): void {
     const aspect = this.camera.aspect;
     if (mode === 'fpv') {
-      const tilt = THREE.MathUtils.degToRad(f.cameraTiltDeg);
-      _qt.setFromAxisAngle(_x, tilt);
-      _v.set(0, 0, -LENS_OFFSET - 0.004).applyQuaternion(_qt).add(CAMERA_PIVOT);
-      outPos.copy(_v).applyQuaternion(f.drone.orientation).add(f.drone.position);
-      outQuat.copy(f.drone.orientation).multiply(_qt);
+      const setTilt = THREE.MathUtils.degToRad(f.cameraTiltDeg);
+      this.fpvLens(f.drone, setTilt, outPos);
+      const relief = 1 - THREE.MathUtils.clamp((this.ceiling - outPos.y) / FPV_CEILING_RELIEF, 0, 1);
+      const tilt = setTilt * (1 - (1 - FPV_CEILING_TILT) * relief);
+      if (relief > 0) this.fpvLens(f.drone, tilt, outPos);
+      outPos.y = Math.min(outPos.y, this.ceiling - FPV_CEILING_GAP);
+      outQuat.copy(f.drone.orientation).multiply(_qt.setFromAxisAngle(_x, tilt));
       // settings FOV is horizontal-ish (like a real FPV camera); convert to vertical for three.
       const h = THREE.MathUtils.degToRad(THREE.MathUtils.clamp(f.fovDeg, 60, 150));
       this.fovV = THREE.MathUtils.clamp(THREE.MathUtils.radToDeg(2 * Math.atan(Math.tan(h / 2) / aspect)), 35, 110);
@@ -232,7 +244,19 @@ export class CameraRig {
     this.headPitch += this.headPitchV * dt;
   }
 
+  /** FPV lens position in world space for an uptilt of `tilt` rad → `out`. */
+  private fpvLens(d: DroneState, tilt: number, out: THREE.Vector3): void {
+    _qt.setFromAxisAngle(_x, tilt);
+    _v.set(0, 0, -LENS_OFFSET - 0.004).applyQuaternion(_qt).add(CAMERA_PIVOT);
+    out.copy(_v).applyQuaternion(d.orientation).add(d.position);
+  }
+
+  /**
+   * Keeps the chase camera inside the room. The ceiling only lowers it (horizontal offset kept): pulling
+   * it back along drone→camera would park it on the quad, looking up at its belly.
+   */
   private pullInside(from: THREE.Vector3, cam: THREE.Vector3): void {
+    if (cam.y > this.bounds.max.y) cam.y = this.bounds.max.y;
     pullInsideBox(this.bounds, from, cam);
   }
 

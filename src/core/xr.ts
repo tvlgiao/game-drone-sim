@@ -37,3 +37,36 @@ export function requestVrSession(nav: Navigator): Promise<XRSession> {
   if (!xr) return Promise.reject(new Error('WebXR is not available'));
   return xr.requestSession('immersive-vr', SESSION_INIT);
 }
+
+/** Quest's native refresh rate: the game holds it at Quest 2 budget instead of chasing 90/120 Hz. */
+export const XR_TARGET_FPS = 72;
+
+/** The session parts tuneXrSession touches (optional: older runtimes lack the frame-rate API). */
+export interface TunableXrSession {
+  supportedFrameRates?: ArrayLike<number> | null;
+  updateTargetFrameRate?: (rate: number) => Promise<void>;
+}
+
+/**
+ * Pins the headset to XR_TARGET_FPS where the runtime offers it and asks for maximum fixed foveation
+ * (edges at lower resolution). Never throws: unsupported runtimes simply keep their defaults.
+ */
+export async function tuneXrSession(session: TunableXrSession, xr: { setFoveation(v: number): void }): Promise<void> {
+  try {
+    xr.setFoveation(1);
+  } catch {
+    /* no fixed foveation on this layer type */
+  }
+  const rates = session.supportedFrameRates;
+  if (typeof session.updateTargetFrameRate !== 'function' || !rates || !Array.prototype.includes.call(rates, XR_TARGET_FPS)) return;
+  try {
+    await session.updateTargetFrameRate(XR_TARGET_FPS);
+  } catch {
+    /* the runtime refused the rate: its own default stays */
+  }
+}
+
+/** The pilot cannot see or reach the game (system menu over it, headset taken off): pause and mute. */
+export function xrSessionObscured(state: XRVisibilityState | undefined): boolean {
+  return state === 'hidden' || state === 'visible-blurred';
+}

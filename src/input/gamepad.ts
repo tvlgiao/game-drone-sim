@@ -103,6 +103,11 @@ export class GamepadInput {
     return this.snap;
   }
 
+  /** Gamepad index of the selected pad, −1 when none. */
+  get selectedIndex(): number {
+    return this.activeIndex;
+  }
+
   /** The live Gamepad object currently selected (for haptics). */
   activePad(): Gamepad | null {
     if (!this.getPads || this.activeIndex < 0) return null;
