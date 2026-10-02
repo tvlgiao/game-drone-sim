@@ -50,6 +50,12 @@ const ALT_I_LIMIT = 4; // m/s²
 const BARO_NOISE = 0.03; // m/s vertical-speed estimate noise
 const ALT_POS_KP = 1.5; // (m/s)/m: altitude error → climb rate while the stick is centred
 const ALT_POS_MAX_V = 1; // m/s
+/**
+ * Airmode collective boost cap (thrust fraction) in Angle mode and under altitude hold. Uncapped, full-stick
+ * reversals keep the rate PIDs saturated and airmode lifts the collective to ≈ half thrust: the quad climbed
+ * ~10 m/s with the throttle at zero. Acro without altitude hold keeps Betaflight's uncapped airmode.
+ */
+export const AIRMODE_BOOST_LIMIT = 0.06;
 /** Position hold (DJI 'P' with GPS/optical flow): pitch/roll stick → horizontal speed, centre brakes. */
 export const POS_MAX_SPEED = 4; // m/s at full stick
 const POS_KV = 1.6; // (m/s²)/(m/s) speed error → acceleration
@@ -237,7 +243,8 @@ export class FlightController {
     const u = throttleOutput(input.throttle, this.throttleMid, this.throttleExpo, this.throttleLimit);
     const idle = this.params.idle;
     const collective = this.altitudeHold ? this.altitudeCollective(dt, input.throttle, state) : u * u;
-    const thrust = this.mixer.mix(collective, r, p, y, idle * idle);
+    const boost = this.mode === 'acro' && !this.altitudeHold ? Infinity : AIRMODE_BOOST_LIMIT;
+    const thrust = this.mixer.mix(collective, r, p, y, idle * idle, boost);
     // thrust fraction → normalised rpm command (T ∝ u²): linear torque authority at any throttle
     for (let i = 0; i < 4; i++) out[i] = Math.sqrt(thrust[i]);
     return out;

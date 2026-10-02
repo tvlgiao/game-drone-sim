@@ -108,6 +108,20 @@ describe('quad-X mixer with airmode', () => {
     expect(o[1] - o[0]).toBeCloseTo(0.3, 12); // rear − front = 2·pitch
   });
 
+  it('a boost cap limits how far airmode lifts the collective; the differential shrinks to fit instead', () => {
+    const m = new Mixer();
+    const o = [...m.mix(0, 0, 0.5, 0, floor, 0.06)];
+    expect(m.saturated).toBe(true);
+    expect(Math.min(...o)).toBeCloseTo(floor, 12);
+    expect(o.reduce((a, b) => a + b, 0) / 4).toBeCloseTo(floor + 0.06, 12);
+    expect(o[1] - o[0]).toBeGreaterThan(0.1); // rear − front: still pitching
+    // uncapped (Infinity, the default) the same command lifts the mean to half thrust
+    const u = [...m.mix(0, 0, 0.5, 0, floor)];
+    expect(u.reduce((a, b) => a + b, 0) / 4).toBeCloseTo((1 + floor) / 2, 12);
+    // a cap that is not reached changes nothing
+    expect([...m.mix(0, 0.02, 0, 0, floor, 0.06)]).toEqual([...m.mix(0, 0.02, 0, 0, floor)]);
+  });
+
   it('oversized commands are scaled keeping the roll:pitch ratio; yaw is sacrificed first', () => {
     const m = new Mixer();
     const o = [...m.mix(0.5, 0.6, 0.3, 0.4, floor)];

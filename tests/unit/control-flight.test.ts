@@ -331,6 +331,40 @@ describe('altitude hold (touch auto-centre, DJI A/Atti style)', () => {
     expect(sim.world.state.velocity.y).toBeCloseTo(-2.5, 0);
   });
 
+  // touch QA: thumbs bashing yaw + pitch with the throttle at the bottom climbed y 5 → 37 (airmode lifting the collective)
+  it.each([
+    ['angle', true],
+    ['angle', false],
+    ['acro', true],
+  ] as const)('%s, altitude hold %s: full-stick yaw + pitch reversals at zero throttle never climb', (mode, hold) => {
+    for (const period of [0.05, 0.1, 0.2]) {
+      const sim = airborne(mode, 1, 5);
+      sim.fc.altitudeHold = hold;
+      let maxY = sim.world.state.position.y;
+      const y0 = maxY;
+      const n = Math.round(4 / DT);
+      for (let i = 0; i < n; i++) {
+        const s = Math.floor((i * DT) / period) % 2 === 0 ? 1 : -1;
+        sim.step(DT, input(0, 0, s, s));
+        maxY = Math.max(maxY, sim.world.state.position.y);
+      }
+      expect(maxY - y0, `period ${period}s`).toBeLessThan(0.3);
+    }
+  });
+
+  it('with the stick centred, the same reversals keep the held height', () => {
+    const sim = airborne('angle', 1, 5);
+    sim.fc.altitudeHold = true;
+    run(sim, 1, input(0.5));
+    const y0 = sim.world.state.position.y;
+    const n = Math.round(4 / DT);
+    for (let i = 0; i < n; i++) {
+      const s = Math.floor((i * DT) / 0.1) % 2 === 0 ? 1 : -1;
+      sim.step(DT, input(0.5, 0, s, s));
+    }
+    expect(Math.abs(sim.world.state.position.y - y0)).toBeLessThan(1);
+  });
+
   it('holds altitude while tilted forward (tilt compensation)', () => {
     const sim = airborne('angle', 1, 10);
     sim.fc.altitudeHold = true;
