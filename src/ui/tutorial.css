@@ -378,6 +378,7 @@
 
   .ds-tut-skip {
     grid-area: 1 / 4;
+    justify-self: end;
   }
 
   .ds-tut-card > :not(.ds-tut-card__head, .ds-tut-card__title) {
@@ -420,6 +421,24 @@
   .ds-ui.ds-touch-on .ds-tut-card__foot {
     justify-content: flex-end;
     min-height: 0;
+  }
+
+  /* welcome: Continue sits beside the controls line, not on a row of its own (the card stays one row shorter) */
+  .ds-ui.ds-touch-on .ds-tut-card[data-step='welcome'] .ds-tut-card__lines {
+    min-height: 44px;
+    align-content: center;
+    padding-right: 124px;
+  }
+
+  .ds-ui.ds-touch-on .ds-tut-card[data-step='welcome'] .ds-tut-card__foot {
+    position: absolute;
+    right: 12px;
+    bottom: 8px;
+  }
+
+  .ds-ui.ds-touch-on .ds-tut-continue {
+    padding: 0 12px;
+    letter-spacing: 0.1em;
   }
 
 }
