@@ -24,8 +24,9 @@ varying vec3 vFLocal;
 varying vec3 vFN;
 varying vec3 vFSize;
 varying float vFBase;
-float fh( float n ) { return fract( sin( n * 12.9898 + 4.1414 ) * 43758.5453 ); }
-float fh3( vec3 p ) { return fract( sin( dot( p, vec3( 12.9898, 78.233, 37.719 ) ) ) * 43758.5453 ); }
+float fh( float n ) { return fract( sin( mod( n, 251.0 ) * 12.9898 + 4.1414 ) * 43758.5453 ); }
+// sin-hash arguments stay small (|p| < ~1000): a large argument collapses to the same value on GPUs
+float fh3( vec3 p ) { return fract( sin( dot( mod( p, 251.0 ), vec3( 12.9898, 78.233, 37.719 ) ) ) * 43758.5453 ); }
 vec3 srgb( float r, float g, float b ) { return pow( vec3( r, g, b ), vec3( 2.2 ) ); }
 vec3 pick4( float t, vec3 a, vec3 b, vec3 c, vec3 d ) { return t < 0.25 ? a : t < 0.5 ? b : t < 0.75 ? c : d; }
 float fRough;
@@ -94,7 +95,8 @@ if ( n.y > 0.5 ) {
   float floorI = floor( cv );
   float colI = floor( cu );
   float faceI = n.x * 3.0 + n.z * 7.0;
-  float rnd = fh3( vec3( floorI, colI, seed + faceI ) );
+  float seedK = h4 * 211.0;
+  float rnd = fh3( vec3( floorI, colI, seedK + faceI ) );
   float win = step( 0.5 - winW * 0.5, fu ) * step( fu, 0.5 + winW * 0.5 ) * step( winV0, fv ) * step( fv, winV1 );
   // a frame of ~8 cm inside each window opening
   float fx = min( fu - ( 0.5 - winW * 0.5 ), ( 0.5 + winW * 0.5 ) - fu ) * colW;
@@ -121,7 +123,7 @@ if ( n.y > 0.5 ) {
   // glass: dark interiors (some with lighter blinds) behind a reflective pane
   vec3 glass = style == 0.0 ? glassTint * ( 0.75 + 0.5 * rnd ) : mix( srgb( 0.05, 0.055, 0.065 ) * ( 0.6 + 0.9 * rnd ), srgb( 0.42, 0.39, 0.34 ), step( 0.86, rnd ) * ( 1.0 - isStore ) );
   float litP = isStore > 0.5 ? 0.12 + 0.75 * uDusk : uDusk * uDusk * 0.55 + 0.01;
-  float lit = step( fh3( vec3( floorI + 17.0 * isStore, colI, seed * 1.37 + faceI ) ), litP );
+  float lit = step( fh3( vec3( floorI + 17.0 * isStore, colI + 3.7, seedK * 1.37 + faceI ) ), litP );
   vec3 warm = mix( vec3( 1.0, 0.7, 0.4 ), vec3( 0.85, 0.9, 1.0 ), step( 0.75, rnd ) );
   vec3 litCol = warm * ( 0.7 + 0.6 * rnd ) * ( isStore > 0.5 ? 1.3 : 0.9 );
   // weathering: vertical streaks, a darker base
@@ -136,7 +138,7 @@ if ( n.y > 0.5 ) {
   fRough = mix( 0.88, style == 0.0 ? 0.05 : 0.14, g );
   fMetal = mix( 0.0, style == 0.0 ? 0.3 : 0.05, g );
   // the sky probe has no buildings in it: windows reflect it dimmed, as if half the view were other facades
-  fRefl = mix( 1.0, style == 0.0 ? 0.7 : 0.22, g );
+  fRefl = mix( 1.0, style == 0.0 ? 0.7 : 0.35, g );
   emit = litCol * mix( lit * win * ( 1.0 - frame ), litP * cover, far ) * uLit;
 }
 diffuseColor.rgb = col;
