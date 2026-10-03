@@ -33,19 +33,21 @@ class MemStorage implements Storage {
 }
 
 describe('level registry', () => {
-  it('lists Training first and Night Loft, with no tier or lock fields', () => {
-    expect(LEVELS.map((l) => l.id)).toEqual(['training', 'night-loft']);
+  it('lists Training first, then Night Loft, City, Alpine Valley and Infinite, with no tier or lock fields', () => {
+    expect(LEVELS.map((l) => l.id)).toEqual(['training', 'night-loft', 'city', 'alpine', 'infinite']);
+    expect(LEVELS.find((l) => l.id === 'infinite')!.kind).toBe('seeded');
     for (const l of LEVELS) expect(l).not.toHaveProperty('tier');
   });
 
   it('buildLevel wraps each definition with colliders, surfaces and a resolved ready promise', async () => {
     for (const l of LEVELS) {
-      const rt = buildLevel(l.id);
+      const rt = buildLevel(l.id, l.id === 'infinite' ? 42 : undefined);
       expect(rt.def.id).toBe(l.id);
       await expect(rt.ready).resolves.toBeUndefined();
       expect(rt.colliders.length).toBeGreaterThan(0);
+      rt.dispose?.();
     }
-    expect(() => buildLevel('city')).toThrow(/Unknown level/);
+    expect(() => buildLevel('tutorial')).toThrow(/Unknown level/);
   });
 
   it('Night Loft is LOFT_LEVEL unchanged plus identity, environment and room bounds', () => {
@@ -63,18 +65,20 @@ describe('level registry', () => {
     expect(loadLastLevel(s)).toBe('training');
     saveLastLevel(s, 'night-loft');
     expect(loadLastLevel(s)).toBe('night-loft');
-    s.setItem(LAST_LEVEL_KEY, 'city');
+    s.setItem(LAST_LEVEL_KEY, 'tutorial');
     expect(loadLastLevel(s)).toBe(DEFAULT_LEVEL);
     expect(loadLastLevel(null)).toBe(DEFAULT_LEVEL);
     const throwing = { getItem: () => { throw new Error('denied'); } } as unknown as Storage;
     expect(loadLastLevel(throwing)).toBe(DEFAULT_LEVEL);
-    expect(isPlayableLevel('alpine')).toBe(false);
+    expect(isPlayableLevel('alpine')).toBe(true);
+    expect(isPlayableLevel('tutorial')).toBe(false);
   });
 
   it('nextLevel cycles through the list both ways', () => {
     expect(nextLevel('training')).toBe('night-loft');
-    expect(nextLevel('night-loft')).toBe('training');
-    expect(nextLevel('training', -1)).toBe('night-loft');
+    expect(nextLevel('night-loft')).toBe('city');
+    expect(nextLevel('infinite')).toBe('training');
+    expect(nextLevel('training', -1)).toBe('infinite');
   });
 });
 

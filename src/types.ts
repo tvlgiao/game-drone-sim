@@ -249,6 +249,8 @@ export interface LevelBase {
   pilot: [number, number, number];
   /** XR deck height above ground (loft 2.4, outdoor 2.0) */
   pilotPlatform: number;
+  /** best-time storage key when it is not the level id (Infinite: one per world code) */
+  bestKey?: string;
 }
 
 export interface IndoorLevel extends LevelBase {

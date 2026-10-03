@@ -6,6 +6,9 @@ import type { LevelId } from '../types';
 import { NIGHT_LOFT } from './night-loft';
 import { createRuntime, type LevelRuntime } from './runtime';
 import { TRAINING_LEVEL } from './training';
+import { cityRuntime } from './city';
+import { alpineRuntime } from './alpine';
+import { infiniteRuntime, randomSeed } from './infinite';
 
 export type { LevelRuntime } from './runtime';
 
@@ -32,6 +35,27 @@ export const LEVELS: readonly LevelEntry[] = [
     kind: 'authored',
     blurb: 'Tight indoor course at night: twelve rings, beams and a ceiling fan.',
     build: () => createRuntime(NIGHT_LOFT),
+  },
+  {
+    id: 'city',
+    name: 'City',
+    kind: 'authored',
+    blurb: 'Downtown towers at golden hour: eighteen rings through street canyons, over roofs and under skybridges.',
+    build: () => cityRuntime(),
+  },
+  {
+    id: 'alpine',
+    name: 'Alpine Valley',
+    kind: 'authored',
+    blurb: 'Mountains, pine forest and a glacial lake: sixteen rings up the valley and along the ridge.',
+    build: () => alpineRuntime(),
+  },
+  {
+    id: 'infinite',
+    name: 'Infinite World',
+    kind: 'seeded',
+    blurb: 'Endless countryside from a seed: hills, rivers, villages and roads. Share the code, fly it again.',
+    build: (arg) => infiniteRuntime(arg?.seed ?? randomSeed()),
   },
 ];
 
