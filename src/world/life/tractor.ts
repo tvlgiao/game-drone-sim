@@ -36,7 +36,9 @@ export class Tractor implements MoverSource {
     const zEnd = field.halfL - ROW / 2;
     const push = (x: number, z: number): void => {
       const n = this.px.length;
-      const s = n === 0 ? 0 : this.ps[n - 1]! + Math.sqrt((x - this.px[n - 1]!) ** 2 + (z - this.pz[n - 1]!) ** 2);
+      const ex = n === 0 ? 0 : x - this.px[n - 1]!;
+      const ez = n === 0 ? 0 : z - this.pz[n - 1]!;
+      const s = n === 0 ? 0 : this.ps[n - 1]! + Math.sqrt(ex * ex + ez * ez);
       this.px.push(x);
       this.pz.push(z);
       this.ps.push(s);

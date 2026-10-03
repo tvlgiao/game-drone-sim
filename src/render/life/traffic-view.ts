@@ -230,12 +230,9 @@ export class TrafficView {
 
     // light pools and beams (additive, no depth write)
     const gb = new GeoBuilder();
-    const pool = (x0: number, x1: number, z0: number, z1: number, kind: number, flip: number): void => {
-      gb.tri([x0, 0.05, z0], [x1, 0.05, z0], [x1 * 2.2, 0.05, z1], 0xffffff, kind, 0, 0, 1);
-      gb.tri([x0, 0.05, z0], [x1 * 2.2, 0.05, z1], [x0 * 2.2, 0.05, z1], 0xffffff, kind, 0, 1, 1);
-      void flip;
-    };
-    pool(-0.95, 0.95, 0.2, 12, 0, 1);
+    // the pool ahead: widening from the bumper to ~12 m
+    gb.tri([-0.95, 0.05, 0.2], [0.95, 0.05, 0.2], [2.09, 0.05, 12], 0xffffff, 0, 0, 0, 1);
+    gb.tri([-0.95, 0.05, 0.2], [2.09, 0.05, 12], [-2.09, 0.05, 12], 0xffffff, 0, 0, 1, 1);
     // beams: two flat wedges from the lamps, slightly down
     for (const s of [-1, 1]) {
       gb.tri([s * 0.62, 0.7, 0.05], [s * 0.62 + 1.4, 0.15, 9], [s * 0.62 - 1.4, 0.15, 9], 0xffffff, 1, 0, 1, 1);
@@ -263,14 +260,15 @@ export class TrafficView {
 
     // traffic lights
     const hm = instancedMaterials({ key: 'signal-housing', roughness: 0.6 }, shared);
-    this.housings = new InstanceLayer(signalModel(true), hm.material, hm.depth, 'signal-housings');
-    this.housingsShort = new InstanceLayer(signalModel(false), hm.material, hm.depth, 'signal-housings-short');
+    const fullModel = signalModel(true);
+    const shortModel = signalModel(false);
+    this.housings = new InstanceLayer(fullModel, hm.material, hm.depth, 'signal-housings');
+    this.housingsShort = new InstanceLayer(shortModel, hm.material, hm.depth, 'signal-housings-short');
     const lampBox = new GeoBuilder().box(0, 0, 0, 0.19, 0.19, 0.03, 0xffffff).build();
     const lm = instancedMaterials({ key: 'signal-lamp', roughness: 0.3, fragment: LAMP_FRAGMENT }, shared);
     this.lamps = new InstanceLayer(lampBox, lm.material, null, 'signal-lamps');
     this.lamps.mesh.castShadow = false;
-    this.owned.push(this.housings, this.housingsShort, this.lamps, hm.material, hm.depth, lm.material, lm.depth, lampBox);
-    this.owned.push({ dispose: () => this.housings.mesh.geometry.dispose() });
+    this.owned.push(this.housings, this.housingsShort, this.lamps, hm.material, hm.depth, lm.material, lm.depth, lampBox, fullModel, shortModel);
     this.group.add(this.housings.mesh, this.housingsShort.mesh, this.lamps.mesh);
     this.applyOptions();
   }
