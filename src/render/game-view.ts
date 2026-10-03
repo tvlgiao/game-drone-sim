@@ -11,6 +11,7 @@ import { IndoorLevelView } from './indoor-level-view';
 import type { LevelView } from './level-view';
 import { Materials } from './materials';
 import { OutdoorLevelView } from './outdoor/outdoor-level-view';
+import { WorldLevelView } from './outdoor/world-level-view';
 import { PostFX } from './post';
 import { RingsView } from './rings-view';
 import { ContactShadow } from './vfx/contact-shadow';
@@ -55,6 +56,9 @@ const _ye = new THREE.Euler(0, 0, 0, 'YXZ');
 const Y_AXIS = new THREE.Vector3(0, 1, 0);
 /** Quest 2 budget (72 Hz, two eyes on a mobile GPU): no post FX, no shadow maps, small particle pools. */
 const XR_TIER: QualityTier = 'low';
+/** seconds at the minimum render scale before generated levels shorten their view distance (07 §7) */
+const VIEW_SCALE_AFTER = 3;
+const VIEW_SCALE_STEP = 0.75;
 /** head height used until the headset reports a pose (local-floor space) */
 const XR_DEFAULT_HEAD = new THREE.Vector3(0, 1.6, 0);
 
@@ -91,6 +95,9 @@ export class GameView {
   private shownFade = 0;
   private ringFlash = 0;
   private readonly ledColor = new THREE.Color();
+  /** seconds the render scale has sat at its 0.5 floor */
+  private lowScaleFor = 0;
+  private viewScaled = false;
 
   private readonly form: FormFactor;
 
@@ -158,7 +165,7 @@ export class GameView {
     scene.add(this.xrDolly);
 
     this.level = level.def;
-    this.levelView = this.buildLevelView(level.def);
+    this.levelView = this.buildLevelView(level);
     this.rings = new RingsView(level.def.rings);
     this.attachLevel(level);
 
@@ -176,16 +183,27 @@ export class GameView {
     this.rings.group.removeFromParent();
     this.rings.dispose();
     this.level = level.def;
-    this.levelView = this.buildLevelView(level.def);
+    this.levelView = this.buildLevelView(level);
     this.rings = new RingsView(level.def.rings);
     this.attachLevel(level);
     this.applyQuality();
   }
 
-  private buildLevelView(def: LevelDef): LevelView {
-    return def.kind === 'indoor'
-      ? new IndoorLevelView(def, this.renderer, this.mats, this.form)
-      : new OutdoorLevelView(def, this.renderer, this.renderer.capabilities.getMaxAnisotropy());
+  private buildLevelView(level: LevelRuntime): LevelView {
+    const def = level.def;
+    if (def.kind === 'indoor') return new IndoorLevelView(def, this.renderer, this.mats, this.form);
+    if (level.content) return new WorldLevelView(level, this.renderer, this.form);
+    return new OutdoorLevelView(def, this.renderer, this.renderer.capabilities.getMaxAnisotropy());
+  }
+
+  /** The scenery's far plane (generated levels see further than the rig's default). */
+  private applyCameraFar(): void {
+    const far = this.levelView.cameraFar;
+    if (far === undefined || far === this.rig.camera.far) return;
+    this.rig.camera.far = far;
+    this.rig.camera.updateProjectionMatrix();
+    this.xrCam.far = far;
+    this.xrCam.updateProjectionMatrix();
   }
 
   private attachLevel(level: LevelRuntime): void {
@@ -198,6 +216,9 @@ export class GameView {
     this.rig.setLevel(level);
     this.xrCam.far = this.rig.camera.far;
     this.xrCam.updateProjectionMatrix();
+    this.applyCameraFar();
+    this.lowScaleFor = 0;
+    this.viewScaled = false;
     this.ringFlash = 0;
     this.recenter = true;
     this.xrMode = null;
@@ -225,6 +246,7 @@ export class GameView {
     }
 
     const xr = r.xr.isPresenting;
+    this.adaptViewDistance(f.still ? 0 : dt);
     // outdoor LOS: the pilot watches the next ring, the course overview between laps
     this.rig.setFocus(f.nextRing >= 0 && f.nextRing < this.rings.count ? this.rings.ringPosition(f.nextRing, _focus) : null);
     this.rig.shake = !xr;
@@ -540,6 +562,26 @@ export class GameView {
     }
   }
 
+  /** Render scale pinned at 0.5 for VIEW_SCALE_AFTER s: generated levels shorten fog and streaming radius once. */
+  private adaptViewDistance(dt: number): void {
+    if (this.viewScaled || !this.levelView.setViewScale) return;
+    this.lowScaleFor = this.renderScale <= 0.5 + 1e-3 ? this.lowScaleFor + dt : 0;
+    if (this.lowScaleFor < VIEW_SCALE_AFTER) return;
+    this.viewScaled = true;
+    this.levelView.setViewScale(VIEW_SCALE_STEP);
+    this.applyCameraFar();
+  }
+
+  /** the level's scenery is still streaming in */
+  get levelBusy(): boolean {
+    return this.levelView.busy === true;
+  }
+
+  /** streaming / instancing numbers of generated levels (debug hook) */
+  levelStats(): Record<string, unknown> | null {
+    return this.levelView.stats?.() ?? null;
+  }
+
   setQuality(tier: QualityTier): void {
     if (tier === this.profile.tier) return;
     this.profile = qualityProfile(tier, this.form);
@@ -553,6 +595,7 @@ export class GameView {
     r.shadowMap.enabled = p.shadows;
     this.levelView.setQuality(p);
     this.levelView.refreshShadows();
+    this.applyCameraFar();
     this.scene.environment = p.envMap ? this.levelView.environment : null;
     if (p.post) {
       if (!this.post) this.post = new PostFX(r, this.scene, this.rig.camera);

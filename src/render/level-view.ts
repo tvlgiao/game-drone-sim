@@ -33,4 +33,12 @@ export interface LevelView {
   refreshShadows(): void;
   /** frees every GPU resource the level created; the shared Materials stay */
   dispose(): void;
+  /** camera far plane the scenery needs (default: the camera rig's) */
+  readonly cameraFar?: number;
+  /** adaptive view distance: < 1 shrinks fog and streaming radius (render scale stuck at its floor) */
+  setViewScale?(k: number): void;
+  /** still streaming: main keeps drawing still frames behind menus so chunks upload */
+  readonly busy?: boolean;
+  /** streaming / instancing numbers for the debug hook */
+  stats?(): Record<string, unknown>;
 }
