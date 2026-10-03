@@ -19,6 +19,7 @@ import { countrysideAround } from '../../world/life/countryside';
 import { buildRuralNetwork } from '../../world/traffic/rural-roads';
 import { TrafficSim } from '../../world/traffic/traffic-sim';
 import { CountrysideView } from './countryside-view';
+import { CityLifeView } from './city-life';
 
 export class WorldLife {
   readonly group = new THREE.Group();
@@ -29,6 +30,7 @@ export class WorldLife {
   private readonly birds: BirdsView;
   private readonly origin: WorldOrigin;
   private countryside: CountrysideView | null = null;
+  private cityLife: CityLifeView | null = null;
   /** where the countryside placement / the rural road network were last built around */
   private readonly placedAt = new THREE.Vector3(Infinity, 0, Infinity);
   private readonly roadsAt = new THREE.Vector3(Infinity, 0, Infinity);
@@ -79,6 +81,12 @@ export class WorldLife {
       this.traffic = new TrafficView(t.sim, t.signals, t.roads.signals, shared, this.trafficOptions());
       this.group.add(this.traffic.group);
       this.applyTrafficBudget();
+    }
+    if (c?.kind === 'city') {
+      this.cityLife = new CityLifeView(c.city, shared, rt.grid);
+      this.cityLife.setBudget(this.budget);
+      this.cityLife.setWind(wind);
+      this.group.add(this.cityLife.group);
     }
     if (c?.kind === 'terrain') {
       this.countryside = new CountrysideView(shared, rt.life ?? null, rt.grid, ground);
@@ -136,6 +144,7 @@ export class WorldLife {
     this.applyTrafficBudget();
     this.birds.setBudget(this.budget.flocks, this.budget.birds);
     this.countryside?.setBudget(this.budget);
+    this.cityLife?.setBudget(this.budget);
     if (this.rural) this.rural.target = this.budget.ruralCars;
     this.ruralView?.setOptions({ generic: this.budget.genericCars, glow: false, shadows: this.budget.carShadows, signalRange: 0 });
   }
@@ -158,6 +167,7 @@ export class WorldLife {
     this.birds.origin.x = this.origin.x;
     this.birds.origin.z = this.origin.z;
     this.birds.update(f.dt, f.drone);
+    this.cityLife?.update(f.time, f.drone, this.wind, this.fogDensity, this.fogColor);
     if (this.countryside) {
       this.follow(f.drone);
       this.countryside.setOrigin(this.origin.x, this.origin.z);
@@ -192,6 +202,7 @@ export class WorldLife {
     }
     out.birds = this.birds.count;
     if (this.countryside) out.countryside = this.countryside.counts();
+    if (this.cityLife) out.city = this.cityLife.counts();
     if (this.rural) out.ruralCars = this.rural.count;
     out.placeMs = Math.round(this.placeMs * 100) / 100;
     return out;
@@ -202,6 +213,7 @@ export class WorldLife {
     this.traffic?.dispose();
     this.birds.dispose();
     this.countryside?.dispose();
+    this.cityLife?.dispose();
     if (this.rural) this.rt.life?.removeTraffic(this.rural);
     this.ruralView?.dispose();
     this.group.clear();

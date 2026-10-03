@@ -20,6 +20,7 @@ import type { MaterialLibrary, MaterialScope } from './materials/library';
 import { DETAIL_SUFFIX, buildProps, type LiveProps } from './props';
 import { buildRoom } from './room';
 import { Atmosphere } from './vfx/atmosphere';
+import { LoftLife } from './life/loft-life';
 
 /** rain that came in under the east and south windows, and a drip from the roof */
 const PUDDLES = [
@@ -55,6 +56,8 @@ export class IndoorLevelView implements LevelView {
   private readonly pools: MoonPools;
   private readonly atmos: Atmosphere;
   private standIn: THREE.Texture | null = null;
+  /** neon stutter, the tired bulb, the router's LEDs (docs/12) */
+  private readonly life: LoftLife;
   private readonly renderer: THREE.WebGLRenderer;
 
   constructor(level: IndoorLevel, renderer: THREE.WebGLRenderer, library: MaterialLibrary, form: FormFactor) {
@@ -94,6 +97,26 @@ export class IndoorLevelView implements LevelView {
       .map((p) => new THREE.Vector3(p.position[0], p.position[1] + (p.kind === 'lamp-floor' ? p.size[1] - 0.2 : 0), p.position[2]));
     this.atmos = new Atmosphere(windows, MOON_DIR, warm, qualityProfile('ultra', form).particles);
     this.group.add(this.atmos.shafts, this.atmos.dust);
+
+    // the tired bulb: the first one hanging on its own light (else the last bulb)
+    const bulbs = level.props.filter((p) => p.kind === 'bulb-hanging');
+    const tired = bulbs[Math.min(5, bulbs.length - 1)];
+    let haloIndex = -1;
+    let bulbLight: THREE.PointLight | null = null;
+    if (tired) {
+      const at = new THREE.Vector3(tired.position[0], tired.position[1], tired.position[2]);
+      bulbLight = this.lights.practicalNear(at);
+      let bd = Infinity;
+      this.live.lamps.forEach((l, i) => {
+        const d = l.position.distanceToSquared(at);
+        if (d < bd) {
+          bd = d;
+          haloIndex = i;
+        }
+      });
+    }
+    this.life = new LoftLife({ neon: this.mats.neon, bulbLight, halos: this.halos.mesh, haloIndex });
+    this.group.add(this.life.group);
   }
 
   /** Fallback only (the capture failed): the old hand-built dark-loft stand-in, made on first use. */
@@ -112,6 +135,7 @@ export class IndoorLevelView implements LevelView {
 
   update(f: LevelFrame): void {
     this.lights.update(f.time);
+    this.life.update(f.time);
     if (this.live.fan) this.live.fan.rotation.y = f.fanAngle;
     if (this.live.tvScreen) this.live.tvScreen.material.uniforms.uTime.value = f.time;
     this.atmos.update(f.time, f.px, f.drone, f.wash);
@@ -143,6 +167,7 @@ export class IndoorLevelView implements LevelView {
     this.halos.dispose();
     this.pools.dispose();
     this.atmos.dispose();
+    this.life.dispose();
     this.lights.dispose();
     this.scope.dispose();
     this.group.clear();
