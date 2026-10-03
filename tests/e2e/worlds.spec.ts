@@ -28,6 +28,8 @@ interface Hook {
   world: { id: string; seed: number | null; code: string | null } | null;
   stats: () => Stats;
   levelStats: () => Record<string, unknown> | null;
+  census: () => Record<string, { draws: number; tris: number }>;
+  hold: (on: boolean) => void;
   heightAt: (x: number, z: number) => number;
   action: (a: Record<string, unknown>) => void;
   teleport: (x: number, y: number, z: number, yaw?: number) => void;
@@ -87,6 +89,36 @@ for (const id of ['city', 'alpine', 'infinite'] as const) {
     expect(errors).toEqual([]);
   });
 }
+
+/** Scenery share of the XR budget (07 §7, per frame = both eyes): what the generated level itself adds. */
+const LOW_SCENERY_DRAWS = 12;
+const LOW_SCENERY_TRIS = 50_000;
+
+test.describe('low tier (Quest XR budget)', () => {
+  test.skip(({ isMobile }) => isMobile, 'desktop Chromium with the low tier forced');
+  test.beforeEach(({ context }) => context.addInitScript(() => localStorage.setItem('drone-sim.settings', JSON.stringify({ v: 3, quality: 'low' }))));
+
+  for (const id of ['city', 'alpine', 'infinite'] as const) {
+    test(`${id}: the scenery stays within ${LOW_SCENERY_DRAWS} draws and ${LOW_SCENERY_TRIS / 1000}k triangles per eye`, async ({ page }) => {
+      await boot(page);
+      await fly(page, id, 'freefly', id === 'infinite' ? 21 : undefined);
+      expect(await hook(page, (d) => (d as unknown as { tier: string }).tier)).toBe('low');
+      await page.waitForTimeout(2_000);
+      const census = await hook(page, (d) => d.census());
+      let draws = 0;
+      let tris = 0;
+      for (const [k, v] of Object.entries(census)) {
+        if (!k.startsWith('world/')) continue;
+        draws += v.draws;
+        tris += v.tris;
+      }
+      test.info().annotations.push({ type: 'scenery', description: `${id}: ${draws} draws, ${tris} tris` });
+      expect(draws).toBeLessThanOrEqual(LOW_SCENERY_DRAWS);
+      expect(tris).toBeLessThanOrEqual(LOW_SCENERY_TRIS);
+      expect(errors).toEqual([]);
+    });
+  }
+});
 
 test.describe('desktop', () => {
   test.skip(({ isMobile }) => isMobile, 'desktop only');

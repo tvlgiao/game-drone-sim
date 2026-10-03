@@ -121,44 +121,48 @@ export function coniferLod0(): Geo {
   return mergeParts(parts);
 }
 
-/** Conifer LOD1: a 4-sided pyramid down to the ground (4 triangles), trunk-coloured at the foot. */
-export function coniferLod1(): Geo {
-  const d = TREE_DIMENSIONS[0]!;
-  const H = d.height;
-  const g = new THREE.ConeGeometry(d.crownRadius * 0.92, H, 4, 1, true);
-  g.translate(0, H / 2, 0);
-  g.rotateY(Math.PI / 4);
-  return mergeParts([colorize(g, (_x, y) => (y < 0.5 ? TRUNK : shadeHex(CONIFER, 0.7 + 0.35 * (y / H))))]);
+/** Lumpy crown blob: a displaced icosphere scaled to (rx, ry, rz) at (x, y, z). */
+function blob(rx: number, ry: number, rz: number, x: number, y: number, z: number, hex: number, y0: number, h: number, amount = 0.3, detail = 1): Geo {
+  const g = displace(new THREE.IcosahedronGeometry(1, detail), amount);
+  g.scale(rx, ry, rz);
+  g.translate(x, y, z);
+  return colorize(g, (_x, yy, _z, nx, ny, nz) => {
+    const facing = 0.5 + 0.5 * (nx * 0.4 + ny * 0.8 + nz * 0.2);
+    return shadeHex(hex, (0.58 + 0.46 * ((yy - y0) / h)) * (0.8 + 0.32 * facing));
+  });
 }
 
-/** Broadleaf LOD0: trunk + a lumpy icosphere crown (≈ 90 triangles). */
+/** Broadleaf LOD0: trunk with a fork and a crown of three overlapping lumps (≈ 260 triangles). */
 export function broadleafLod0(): Geo {
   const d = TREE_DIMENSIONS[1]!;
   const H = d.height;
   const R = d.crownRadius;
-  const crownH = H * (1 - d.crownBase);
-  const crown = displace(new THREE.IcosahedronGeometry(1, 1), 0.32);
-  crown.scale(R, crownH / 2, R);
-  crown.translate(0, H - crownH / 2, 0);
-  const top = H;
-  const crownC = colorize(crown, (_x, y, _z, nx, ny, nz) => {
-    const facing = 0.5 + 0.5 * (nx * 0.4 + ny * 0.8 + nz * 0.2);
-    return shadeHex(BROADLEAF, (0.62 + 0.42 * ((y - (H - crownH)) / crownH)) * (0.82 + 0.3 * facing) * (y > top ? 1 : 1));
-  });
-  return mergeParts([trunk(H * d.crownBase + 1.2, d.trunkRadius, 5), crownC]);
+  const y0 = H * d.crownBase;
+  const crownH = H - y0;
+  return mergeParts([
+    trunk(y0 + 1.6, d.trunkRadius, 5),
+    blob(R * 0.85, crownH * 0.38, R * 0.8, -R * 0.25, y0 + crownH * 0.4, 0.15 * R, BROADLEAF, y0, crownH),
+    blob(R * 0.75, crownH * 0.36, R * 0.78, R * 0.3, y0 + crownH * 0.5, -0.2 * R, BROADLEAF, y0, crownH, 0.34, 0),
+    blob(R * 0.62, crownH * 0.32, R * 0.6, 0, y0 + crownH * 0.72, 0, BROADLEAF, y0, crownH, 0.28, 0),
+  ]);
 }
 
-/** Broadleaf LOD1: a squat octahedron crown on a 3-sided trunk (14 triangles), the silhouette of LOD0. */
-export function broadleafLod1(): Geo {
-  const d = TREE_DIMENSIONS[1]!;
+const BIRCH = 0x7f9a46;
+
+/** Birch LOD0: a slender white trunk under a narrow, airy crown of two lumps (≈ 110 triangles). */
+export function birchLod0(): Geo {
+  const d = TREE_DIMENSIONS[3]!;
   const H = d.height;
-  const crownH = H * (1 - d.crownBase);
-  const crown = new THREE.OctahedronGeometry(1, 0);
-  crown.rotateY(Math.PI / 4);
-  crown.scale(d.crownRadius * 1.05, crownH / 2, d.crownRadius * 1.05);
-  crown.translate(0, H - crownH / 2, 0);
-  const crownC = colorize(crown, (_x, y, _z, _nx, ny) => shadeHex(BROADLEAF, (0.6 + 0.4 * ((y - (H - crownH)) / crownH)) * (ny < 0 ? 0.75 : 1)));
-  return mergeParts([trunk(H * d.crownBase + 1, d.trunkRadius * 1.3, 3), crownC]);
+  const R = d.crownRadius;
+  const y0 = H * d.crownBase;
+  const crownH = H - y0;
+  const bark = new THREE.CylinderGeometry(d.trunkRadius * 0.55, d.trunkRadius, y0 + crownH * 0.6, 5, 1, true);
+  bark.translate(0, (y0 + crownH * 0.6) / 2, 0);
+  return mergeParts([
+    colorize(bark, (_x, y) => (Math.floor(y * 2.3) % 3 === 0 ? 0x3a3632 : 0xd8d4c8)),
+    blob(R * 0.9, crownH * 0.3, R * 0.85, 0.2, y0 + crownH * 0.35, 0, BIRCH, y0, crownH, 0.4),
+    blob(R * 0.7, crownH * 0.28, R * 0.7, -0.15, y0 + crownH * 0.68, 0.1, BIRCH, y0, crownH, 0.4, 0),
+  ]);
 }
 
 /** Scrub: a low lumpy bush (LOD0 20 triangles, LOD1 8). */
@@ -243,4 +247,136 @@ export function unitCylinder(hex: number, sides = 10): Geo {
   const g = new THREE.CylinderGeometry(0.5, 0.5, 1, sides, 1, false);
   g.translate(0, 0.5, 0);
   return mergeParts([colorize(g, (_x, _y, _z, _nx, ny) => shadeHex(hex, ny > 0.5 ? 1.05 : 0.9))]);
+}
+
+/** Billboard atlas columns, in TREE_SPECIES order (conifer, broadleaf, scrub, birch). */
+export const BILLBOARD_SPECIES = 4;
+const ATLAS_W = 64;
+const ATLAS_H = 128;
+
+/**
+ * Far-tree impostors: one RGBA atlas, a column per species (64 × 128 px), drawn procedurally: lit crown
+ * silhouettes with noisy edges and a trunk. Alpha-tested; DataTexture, so it also builds in Node.
+ */
+export function treeBillboardAtlas(): THREE.DataTexture {
+  const W = ATLAS_W * BILLBOARD_SPECIES;
+  const data = new Uint8Array(W * ATLAS_H * 4);
+  const crown: [number, number, number][] = [
+    [0x2d, 0x4c, 0x2c],
+    [0x46, 0x70, 0x2f],
+    [0x6d, 0x7a, 0x3a],
+    [0x7f, 0x9a, 0x46],
+  ];
+  const trunkC: [number, number, number][] = [
+    [0x5a, 0x41, 0x30],
+    [0x5a, 0x41, 0x30],
+    [0x5a, 0x41, 0x30],
+    [0xd8, 0xd4, 0xc8],
+  ];
+  for (let sp = 0; sp < BILLBOARD_SPECIES; sp++) {
+    for (let py = 0; py < ATLAS_H; py++) {
+      // v = 0 at the ground (texture rows bottom-up)
+      const v = py / (ATLAS_H - 1);
+      for (let px = 0; px < ATLAS_W; px++) {
+        const u = px / (ATLAS_W - 1) - 0.5;
+        const n = jitter(px * 3 + sp * 101, py * 3, 7) * 0.16;
+        let inside = false;
+        let shade = 1;
+        if (sp === 0) {
+          // conifer: a cone with three tier bulges from 0.18 up
+          const t = (v - 0.18) / 0.82;
+          const tier = 1 - 0.25 * ((t * 3) % 1);
+          inside = t >= 0 && t <= 1 && Math.abs(u) < 0.46 * (1 - t) * tier + n * 0.5;
+          shade = 0.65 + 0.45 * t;
+        } else if (sp === 2) {
+          const dy = (v - 0.45) / 0.45;
+          inside = u * u / 0.22 + dy * dy < 1 + n;
+          shade = 0.7 + 0.35 * v;
+        } else {
+          const cy = sp === 3 ? 0.66 : 0.62;
+          const ry = sp === 3 ? 0.32 : 0.36;
+          const rx = sp === 3 ? 0.36 : 0.47;
+          const dy = (v - cy) / ry;
+          const dx = u / rx;
+          inside = dx * dx + dy * dy < 1 + n * 2.2;
+          shade = 0.6 + 0.5 * ((v - (cy - ry)) / (2 * ry));
+        }
+        const trunkHere = !inside && sp !== 2 && Math.abs(u) < (sp === 3 ? 0.035 : 0.05) && v < (sp === 0 ? 0.3 : 0.5);
+        const i = (py * W + sp * ATLAS_W + px) * 4;
+        if (inside) {
+          const c = crown[sp]!;
+          const k = Math.min(1.25, Math.max(0.45, shade * (1 + n)));
+          data[i] = Math.min(255, c[0] * k);
+          data[i + 1] = Math.min(255, c[1] * k);
+          data[i + 2] = Math.min(255, c[2] * k);
+          data[i + 3] = 255;
+        } else if (trunkHere) {
+          const c = trunkC[sp]!;
+          data[i] = c[0];
+          data[i + 1] = c[1];
+          data[i + 2] = c[2];
+          data[i + 3] = 255;
+        }
+      }
+    }
+  }
+  const t = new THREE.DataTexture(data, W, ATLAS_H, THREE.RGBAFormat);
+  t.colorSpace = THREE.SRGBColorSpace;
+  t.magFilter = THREE.LinearFilter;
+  t.minFilter = THREE.LinearMipmapLinearFilter;
+  t.generateMipmaps = true;
+  t.needsUpdate = true;
+  return t;
+}
+
+/**
+ * Unit impostor: two crossed quads 1 m wide and 1 m tall (stretched per instance to the tree's crown width and
+ * height), uv over one atlas column (the shader offsets it by species), normals straight up so both quads
+ * light alike. 4 triangles.
+ */
+export function billboardModel(): Geo {
+  const pos: number[] = [];
+  const uv: number[] = [];
+  const quad = (ax: number, az: number): void => {
+    const v = [
+      [-ax, 0, -az, 0, 0],
+      [ax, 0, az, 1, 0],
+      [ax, 1, az, 1, 1],
+      [-ax, 0, -az, 0, 0],
+      [ax, 1, az, 1, 1],
+      [-ax, 1, -az, 0, 1],
+    ];
+    for (const [x, y, z, u, w] of v) {
+      pos.push(x!, y!, z!);
+      uv.push(u!, w!);
+    }
+  };
+  quad(0.5, 0);
+  quad(0, 0.5);
+  const g = new THREE.BufferGeometry();
+  g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+  g.setAttribute('uv', new THREE.Float32BufferAttribute(uv, 2));
+  const n = new Float32Array(pos.length);
+  for (let i = 0; i < n.length; i += 3) n[i + 1] = 1;
+  g.setAttribute('normal', new THREE.BufferAttribute(n, 3));
+  g.setAttribute('color', new THREE.BufferAttribute(new Float32Array(pos.length).fill(1), 3));
+  return g;
+}
+
+/** Marker colour of a street light's lamp (the shader lights it at dusk). */
+export const LAMP_HEX = 0xfff4d0;
+
+/** Street light, 8 m pole with an arm reaching 2.2 m over the street along local +Z (20 triangles). */
+export function streetLightModel(): Geo {
+  const pole = new THREE.CylinderGeometry(0.07, 0.11, 8, 4, 1, true);
+  pole.translate(0, 4, 0);
+  const arm = box(0.08, 0.08, 2.3, 0, 7.9, 1.1, 0x4e5256);
+  const lamp = box(0.3, 0.1, 0.6, 0, 7.82, 2.1, LAMP_HEX);
+  // the arm's and lamp's bottom faces only: a light seen from below / the side
+  return mergeParts([colorize(pole, () => 0x4e5256), arm, lamp]);
+}
+
+/** Parked car: body (instance colour, white here) and a glass cabin (24 triangles). */
+export function carModel(): Geo {
+  return mergeParts([box(1.86, 0.75, 4.3, 0, 0.45, 0, 0xffffff), box(1.6, 0.5, 2.2, 0, 1.07, -0.2, 0x1d2329)]);
 }

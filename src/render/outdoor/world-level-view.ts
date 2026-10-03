@@ -23,10 +23,18 @@ import { WorldOrigin } from './world-origin';
 
 /** sky fill: low enough that slopes facing away from a low sun stay dark */
 const HEMI = 0.62;
-/** sun-follow shadow box (07 §1.6): 90 m around the drone; the City's towers need a wider, deeper one */
-const FOLLOW_HALF = 45;
+/**
+ * Sun-follow shadow box, fitted to the view: it reaches FOLLOW_HALF around a point pushed ahead of the drone along
+ * the camera → drone direction, so its edge lies beyond the detailed trees (impostors cast no shadow) instead of
+ * a few metres in front of the chase camera. The City's towers need a wider, deeper box.
+ */
+const FOLLOW_HALF = 120;
+/** share of the box half the centre is pushed ahead of the drone */
+const FOLLOW_AHEAD = 0.6;
 const FOLLOW_DEPTH = 600;
 const CITY_FOLLOW_HALF = 300;
+/** City trees switch detail around the drone after it moved this far, m */
+const CITY_TREE_REBUILD = 40;
 const CITY_FOLLOW_DEPTH = 1600;
 
 const _v = new THREE.Vector3();
@@ -65,6 +73,12 @@ export class WorldLevelView implements LevelView {
   private scatterTerrainVersion = -1;
   private scatterOrigin = -1;
   private followShadow = false;
+  private cityTrees: Float32Array | null = null;
+  /** drone position of the last City tree rebuild (detail follows the drone) */
+  private readonly cityTreesAt = new THREE.Vector3();
+  /** last horizontal camera → drone direction (FPV has none: keep the previous) */
+  private readonly viewDir = new THREE.Vector3(0, 0, -1);
+  private readonly shadowAt = new THREE.Vector3();
   private readonly form: FormFactor;
   cameraFar: number;
 
@@ -111,12 +125,14 @@ export class WorldLevelView implements LevelView {
       const s = this.level.spawn.position;
       this.origin.set(Math.floor(s[0] / 128) * 128, Math.floor(s[2] / 128) * 128);
     } else {
-      this.city = new CityView(c.city, c.outskirts, rt.terrain ?? { heightAt: () => 0 }, this.detail, this.shared, { outskirts: this.profile.outskirts, facadeDetail: this.profile.facadeDetail });
+      this.city = new CityView(c.city, c.outskirts, c.furniture, rt.terrain ?? { heightAt: () => 0 }, this.detail, this.shared, { outskirts: this.profile.outskirts, facadeDetail: this.profile.facadeDetail });
       this.city.setDusk(dusk);
       this.river = new THREE.Mesh(cityRiverGeometry(), this.waterMat);
       this.river.name = 'river';
       this.group.add(this.city.group, this.river, this.scatter.group);
-      this.scatter.rebuild(new Map(), this.city.parkTrees);
+      this.cityTrees = this.city.trees;
+      this.cityTreesAt.set(this.level.spawn.position[0], 0, this.level.spawn.position[2]);
+      this.scatter.rebuild(new Map(), this.cityTrees, this.cityTreesAt);
     }
     this.placeSun(new THREE.Vector3(...this.level.spawn.position));
   }
@@ -128,7 +144,8 @@ export class WorldLevelView implements LevelView {
   private farPlane(): number {
     const fog = this.fogDistance();
     const reach = this.content.kind === 'terrain' ? Math.max(farReach(this.profile.stream.radius), this.profile.farRadius > 0 ? farReach(this.profile.farRadius) : 0) : fog;
-    return Math.max(600, Math.min(fog * 1.05, reach + 200));
+    // short fog (Quest): a near far plane culls the rings and chunks the fog hides anyway
+    return Math.max(fog < 500 ? fog * 1.1 : 600, Math.min(fog * 1.05, reach + 200));
   }
 
   update(f: LevelFrame): void {
@@ -146,7 +163,22 @@ export class WorldLevelView implements LevelView {
         this.scatter.rebuild(this.terrain.shown);
       }
     }
-    if (this.followShadow) this.placeSun(d);
+    if (this.cityTrees && (d.x - this.cityTreesAt.x) ** 2 + (d.z - this.cityTreesAt.z) ** 2 > CITY_TREE_REBUILD * CITY_TREE_REBUILD) {
+      this.cityTreesAt.set(d.x, 0, d.z);
+      this.scatter.rebuild(new Map(), this.cityTrees, this.cityTreesAt, this.profile.furnitureRange);
+      this.city?.setFurniture(this.profile.furnitureRange, d.x, d.z);
+    }
+    if (this.followShadow) this.placeSun(this.shadowCentre(f.camera, d));
+  }
+
+  /** Shadow box centre: ahead of the drone along the horizontal camera → drone direction. */
+  shadowCentre(camera: THREE.Vector3, drone: THREE.Vector3): THREE.Vector3 {
+    const dx = drone.x - camera.x;
+    const dz = drone.z - camera.z;
+    const l = Math.sqrt(dx * dx + dz * dz);
+    if (l > 0.5) this.viewDir.set(dx / l, 0, dz / l);
+    const half = this.city ? CITY_FOLLOW_HALF : FOLLOW_HALF;
+    return this.shadowAt.copy(drone).addScaledVector(this.viewDir, half * FOLLOW_AHEAD);
   }
 
   /** Sun light over `at`; with follow shadows the box is snapped to whole shadow texels (no shimmer). */
@@ -185,7 +217,8 @@ export class WorldLevelView implements LevelView {
     this.fog.density = 2.15 / this.fogDistance();
     this.cameraFar = this.farPlane();
     this.waterMat.uniforms.uDetailOn!.value = prof.waterDetail ? 1 : 0;
-    this.scatter.caps = { treesLod0: prof.treesLod0, treesLod1: prof.treesLod1 };
+    this.scatter.caps = { treesLod0: prof.treesLod0, treesLod1: prof.treesLod1, rocks: prof.rocks };
+    if (this.cityTrees) this.scatter.rebuild(new Map(), this.cityTrees, this.cityTreesAt, prof.furnitureRange);
     const c = this.content;
     if (c.kind === 'terrain' && this.terrain) {
       c.stream.configure(prof.stream);
@@ -203,6 +236,7 @@ export class WorldLevelView implements LevelView {
     }
     if (this.city) {
       this.city.setOutskirts(prof.outskirts);
+      this.city.setFurniture(prof.furnitureRange, this.cityTreesAt.x, this.cityTreesAt.z);
       this.city.setFacadeDetail(prof.facadeDetail);
     }
     if (!q) return;

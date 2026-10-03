@@ -89,9 +89,10 @@ function boot(caps: EditionCaps): void {
   let tier = resolveTier(settings);
   migrateBestTimes(storage);
   /** the Infinite world played last (saved worlds store), so a relaunch returns to it */
-  const lastWorldSeed = (): number | undefined => lastPlayedWorld(loadWorlds(storage))?.seed;
+  const lastWorld = (): { seed: number; gen: number } | null => lastPlayedWorld(loadWorlds(storage));
   const firstLevel = loadLastLevel(storage);
-  let level: LevelRuntime = buildLevel(firstLevel, firstLevel === 'infinite' ? lastWorldSeed() : undefined);
+  const firstWorld = firstLevel === 'infinite' ? lastWorld() : null;
+  let level: LevelRuntime = buildLevel(firstLevel, firstWorld?.seed, firstWorld?.gen);
 
   let view: GameView;
   try {
@@ -324,7 +325,7 @@ function boot(caps: EditionCaps): void {
    * remember it, and park the drone on its spawn. `seed` picks the Infinite world (default: the last one played,
    * else a new random world); the same level with the same seed is a no-op. Resolves false when superseded.
    */
-  async function startLevel(id: LevelId, opts: { seed?: number } = {}): Promise<boolean> {
+  async function startLevel(id: LevelId, opts: { seed?: number; genVersion?: number } = {}): Promise<boolean> {
     const seq = ++levelSeq;
     const seed = opts.seed === undefined ? undefined : opts.seed >>> 0;
     if (id === level.def.id && (seed === undefined || seed === level.content?.seed)) return true;
@@ -339,7 +340,8 @@ function boot(caps: EditionCaps): void {
         await new Promise((r) => requestAnimationFrame(() => r(null)));
         if (seq !== levelSeq) return false;
       }
-      next = buildLevel(id, seed ?? (id === 'infinite' ? lastWorldSeed() : undefined));
+      const last = seed === undefined && id === 'infinite' ? lastWorld() : null;
+      next = buildLevel(id, seed ?? last?.seed, seed === undefined ? last?.gen : opts.genVersion);
     } catch (err) {
       // building failed (e.g. GPU context lost): keep the current level, tell the pilot, never reject
       console.error('Level failed to load', id, err);
@@ -520,7 +522,7 @@ function boot(caps: EditionCaps): void {
         break;
       case 'level': {
         const mode = a.mode;
-        void startLevel(a.id, { seed: a.seed }).then((ok) => {
+        void startLevel(a.id, { seed: a.seed, genVersion: a.genVersion }).then((ok) => {
           if (ok) newSession(mode);
         });
         break;
@@ -1073,7 +1075,7 @@ function boot(caps: EditionCaps): void {
       return level.def.id;
     },
     /** switch level without starting a run (resolves false when superseded); `seed` picks the Infinite world */
-    startLevel: (id: LevelId, opts?: { seed?: number }) => startLevel(id, opts),
+    startLevel: (id: LevelId, opts?: { seed?: number; genVersion?: number }) => startLevel(id, opts),
     /** generated level in play: id, seed and (Infinite) world code */
     get world() {
       return level.content ? activeLevel(level) : null;
@@ -1084,6 +1086,8 @@ function boot(caps: EditionCaps): void {
     },
     /** ground height of the loaded level (seed determinism probes) */
     heightAt: (x: number, z: number) => (level.terrain ? level.terrain.heightAt(x, z) : 0),
+    /** visible drawables per scene group (perf audits) */
+    census: () => view.census(),
     /** streaming / instancing numbers of a generated level */
     levelStats: () => view.levelStats(),
     /** the loaded level's `ready` has resolved (chunks around the spawn built) */

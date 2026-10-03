@@ -186,7 +186,7 @@ describe('level events', () => {
 describe('outdoor budgets (07 §7)', () => {
   it('Quest / low: 2-chunk radius, 350 m fog, no backdrop, no lit windows; phones never above medium', () => {
     const low = OUTDOOR_PROFILES.low;
-    expect([low.stream.radius, low.fog, low.farRadius, low.facadeDetail, low.treesLod0]).toEqual([2, 350, 0, false, 300]);
+    expect([low.stream.radius, low.fog, low.farRadius, low.facadeDetail, low.treesLod0]).toEqual([2, 350, 0, false, 0]);
     expect(outdoorProfile('ultra', 'phone')).toBe(OUTDOOR_PROFILES.medium);
     expect(outdoorProfile('ultra', 'tablet')).toBe(OUTDOOR_PROFILES.ultra);
     expect(OUTDOOR_PROFILES.ultra.stream.radius).toBe(5);

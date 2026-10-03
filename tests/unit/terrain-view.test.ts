@@ -186,12 +186,12 @@ describe('ScatterView', () => {
     const n = scatter.counts();
     // every fake chunk has one broadleaf tree: 4 detailed (nearest LOD0 chunks), 10 simplified, 11 dropped
     expect(n.broadleaf0).toBe(4);
-    expect(n.broadleaf1).toBe(10);
+    expect(n.billboards).toBe(10);
     expect(scatter.drawCount).toBe(2);
     scatter.caps = { treesLod0: 9, treesLod1: 100 };
     scatter.rebuild(v.shown);
     expect(scatter.counts().broadleaf0).toBe(9);
-    expect(scatter.counts().broadleaf1).toBe(16);
+    expect(scatter.counts().billboards).toBe(16);
     // a big detailed budget is still only spent on LOD0 chunks
     scatter.caps = { treesLod0: 20, treesLod1: 100 };
     scatter.rebuild(v.shown);

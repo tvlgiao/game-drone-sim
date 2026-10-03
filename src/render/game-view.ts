@@ -577,6 +577,26 @@ export class GameView {
     return this.levelView.busy === true;
   }
 
+  /** Visible drawables per top-level scene child (perf audits: what the draw calls are). */
+  census(): Record<string, { draws: number; tris: number }> {
+    const out: Record<string, { draws: number; tris: number }> = {};
+    for (const top of this.scene.children) {
+      top.traverseVisible((o) => {
+        const m = o as THREE.Mesh;
+        if (!m.isMesh && !(o as THREE.Points).isPoints && !(o as THREE.Line).isLine && !(o as THREE.Sprite).isSprite) return;
+        const key = `${top.name || top.type}/${o.name || o.type}`;
+        const e = out[key] ?? (out[key] = { draws: 0, tris: 0 });
+        e.draws++;
+        const g = m.geometry as THREE.BufferGeometry | undefined;
+        if (!g || !m.isMesh) return;
+        const n = g.index ? Math.min(g.index.count, g.drawRange.count) : (g.getAttribute('position')?.count ?? 0);
+        const inst = (g as THREE.InstancedBufferGeometry).isInstancedBufferGeometry ? (g as THREE.InstancedBufferGeometry).instanceCount : 1;
+        e.tris += Math.round((n / 3) * inst);
+      });
+    }
+    return out;
+  }
+
   /** streaming / instancing numbers of generated levels (debug hook) */
   levelStats(): Record<string, unknown> | null {
     return this.levelView.stats?.() ?? null;

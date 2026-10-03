@@ -3,14 +3,16 @@
  * unit box drawn in a single call; a facade shader derives floors, window columns, storefronts, roofs and lit
  * windows from the instance size and seed. The ground is one mesh following the river channel, with asphalt,
  * lane markings, crosswalks, sidewalks, plazas and the park drawn in its shader. Roof props are instanced boxes
- * and cylinders, park trees use the shared tree instancing, the river the shared water shader.
+ * and cylinders (antennas blink), park and street trees use the shared tree instancing, the river the shared
+ * water shader; street lights, parked cars and kerbs are one instanced draw each.
  */
 import * as THREE from 'three';
 import type { Outskirts } from '../../levels/city-outskirts';
 import { BUILDING_STRIDE, CITY_BLOCKS, CITY_HALF, CITY_RIVER, ROOF_PROP_STRIDE, type City } from '../../world/city-gen';
 import { InstanceLayer } from './scatter-view';
 import { instancedMaterials, type InstanceUniforms } from './terrain-materials';
-import { unitBox, unitCylinder } from './scatter-models';
+import { carModel, LAMP_HEX, streetLightModel, unitBox, unitCylinder } from './scatter-models';
+import { CAR_STRIDE, KERB_STRIDE, LIGHT_STRIDE, type CityFurniture } from '../../levels/city-furniture';
 
 /** packed instance code: kind in the high bits, the building seed below (exact in float32) */
 const KIND_SHIFT = 1048576;
@@ -236,6 +238,28 @@ export interface GroundField {
   heightAt(x: number, z: number): number;
 }
 
+/** Aircraft warning light on the antenna tip: 1 s red flash every 2 s, phase per antenna. */
+const ANTENNA_BLINK = /* glsl */ `
+if ( vAntY > 0.94 ) {
+  float on = step( 0.5, fract( uTime * 0.5 + vTint ) );
+  diffuseColor.rgb = vec3( 0.25, 0.02, 0.02 );
+  totalEmissiveRadiance += vec3( 3.0, 0.12, 0.05 ) * on;
+}`;
+
+/** Street lamps glow at dusk (the lamp is the LAMP_HEX vertex colour). */
+const LAMP_GLOW = /* glsl */ `
+if ( distance( vColor.rgb, pow( vec3( ${((LAMP_HEX >> 16) & 255) / 255}, ${((LAMP_HEX >> 8) & 255) / 255}, ${(LAMP_HEX & 255) / 255} ), vec3( 2.2 ) ) ) < 0.05 ) {
+  totalEmissiveRadiance += vec3( 1.0, 0.82, 0.55 ) * ( 0.15 + 2.5 * uDusk );
+}`;
+
+/** Car bodies (white in the model) take the instance colour packed in the tint. */
+const CAR_PAINT = /* glsl */ `
+if ( vColor.r > 0.98 && vColor.g > 0.98 && vColor.b > 0.98 ) {
+  float c = vTint;
+  vec3 paint = vec3( floor( c / 65536.0 ), mod( floor( c / 256.0 ), 256.0 ), mod( c, 256.0 ) ) / 255.0;
+  diffuseColor.rgb = pow( paint, vec3( 2.2 ) );
+}`;
+
 export interface CityViewOptions {
   /** share of the outskirts drawn (profile.outskirts), 0..1 */
   outskirts: number;
@@ -252,12 +276,14 @@ export class CityView {
   private readonly lit = { value: 1 };
   private readonly city: City;
   private readonly outskirts: Outskirts;
+  private readonly furniture: CityFurniture;
 
-  constructor(city: City, outskirts: Outskirts, field: GroundField, detail: THREE.Texture, shared: InstanceUniforms, opts: CityViewOptions) {
+  constructor(city: City, outskirts: Outskirts, furniture: CityFurniture, field: GroundField, detail: THREE.Texture, shared: InstanceUniforms, opts: CityViewOptions) {
     this.group.name = 'city';
     this.lit.value = opts.facadeDetail ? 1 : 0;
     this.city = city;
     this.outskirts = outskirts;
+    this.furniture = furniture;
     const box = unitBox(0xffffff);
     const { material, depth } = instancedMaterials(
       {
@@ -279,21 +305,30 @@ export class CityView {
     this.group.add(this.buildings.mesh);
     this.setOutskirts(opts.outskirts);
 
-    const mkProps = (model: THREE.BufferGeometry, key: string): InstanceLayer => {
-      const m = instancedMaterials({ key, roughness: 0.7 }, shared);
-      const layer = new InstanceLayer(model, m.material, m.depth, key);
+    const mkProps = (model: THREE.BufferGeometry, key: string, extra: { fragment?: string; fragmentPars?: string; vertex?: string; vertexPars?: string; shadow?: boolean } = {}): InstanceLayer => {
+      const m = instancedMaterials({ key, roughness: 0.7, ...extra, uniforms: { uDusk: this.dusk } }, shared);
+      const layer = new InstanceLayer(model, m.material, extra.shadow === false ? null : m.depth, key);
       this.owned.push(model, m.material, m.depth);
       this.group.add(layer.mesh);
       return layer;
     };
-    this.props = [mkProps(unitBox(0x9a9c9e), 'roof-ac'), mkProps(unitCylinder(0x8a7a66), 'roof-tank'), mkProps(unitBox(0xb8b8b8), 'roof-antenna')];
+    this.props = [
+      mkProps(unitBox(0x9a9c9e), 'roof-ac'),
+      mkProps(unitCylinder(0x8a7a66, 6), 'roof-tank'),
+      mkProps(unitBox(0xb8b8b8), 'roof-antenna', { vertexPars: 'varying float vAntY;', vertex: 'vAntY = position.y;', fragmentPars: 'uniform float uTime;\nvarying float vAntY;', fragment: ANTENNA_BLINK }),
+      mkProps(streetLightModel(), 'street-lights', { fragmentPars: 'uniform float uDusk;', fragment: LAMP_GLOW }),
+      mkProps(carModel(), 'cars', { fragment: CAR_PAINT }),
+      mkProps(unitBox(0xb4ada0), 'kerbs', { shadow: false }),
+    ];
     for (const l of this.props) l.begin();
     const rp = city.roofProps;
     for (let k = 0; k < rp.length; k += ROOF_PROP_STRIDE) {
       const kind = Math.min(2, Math.max(0, rp[k]! | 0));
-      this.props[kind]!.push(rp[k + 1]!, rp[k + 2]!, rp[k + 3]!, 0, rp[k + 4]!, rp[k + 5]!, rp[k + 6]!, 0);
+      // tint: the antenna's blink phase
+      this.props[kind]!.push(rp[k + 1]!, rp[k + 2]!, rp[k + 3]!, 0, rp[k + 4]!, rp[k + 5]!, rp[k + 6]!, (rp[k + 1]! * 0.137 + rp[k + 3]! * 0.071) % 1);
     }
     for (const l of this.props) l.end();
+    this.setFurniture(Infinity, 0, 0);
 
     this.ground = new THREE.Mesh(cityGroundGeometry(field), groundMaterial(detail, city, this.dusk));
     this.ground.name = 'city-ground';
@@ -324,6 +359,22 @@ export class CityView {
     b.end();
   }
 
+  /**
+   * Street lights, parked cars and kerbs within `range` of (x, z). Everything the drone can reach is drawn: on the
+   * Quest tier the range sits inside the fog, and the view refills as the drone moves.
+   */
+  setFurniture(range: number, x: number, z: number): void {
+    const [, , , lights, cars, kerbs] = this.props as [InstanceLayer, InstanceLayer, InstanceLayer, InstanceLayer, InstanceLayer, InstanceLayer];
+    for (const l of [lights, cars, kerbs]) l.begin();
+    const r2 = range * range;
+    const near = (px: number, pz: number): boolean => (px - x) * (px - x) + (pz - z) * (pz - z) <= r2;
+    const f = this.furniture;
+    for (let k = 0; k < f.lights.length; k += LIGHT_STRIDE) if (near(f.lights[k]!, f.lights[k + 1]!)) lights.push(f.lights[k]!, 0, f.lights[k + 1]!, f.lights[k + 2]!, 1, 1, 1, 0);
+    for (let k = 0; k < f.cars.length; k += CAR_STRIDE) if (near(f.cars[k]!, f.cars[k + 2]!)) cars.push(f.cars[k]!, f.cars[k + 1]!, f.cars[k + 2]!, f.cars[k + 3]!, 1, 1, 1, f.cars[k + 4]!);
+    for (let k = 0; k < f.kerbs.length; k += KERB_STRIDE) if (near(f.kerbs[k]!, f.kerbs[k + 1]!)) kerbs.push(f.kerbs[k]!, 0, f.kerbs[k + 1]!, f.kerbs[k + 3]!, 0.3, 0.15, f.kerbs[k + 2]!, 0);
+    for (const l of [lights, cars, kerbs]) l.end();
+  }
+
   /** Quest: no lit windows (07 §7). */
   setFacadeDetail(on: boolean): void {
     this.lit.value = on ? 1 : 0;
@@ -334,9 +385,14 @@ export class CityView {
     this.dusk.value = k;
   }
 
-  /** park trees (absolute coordinates) for the shared tree instancing */
-  get parkTrees(): Float32Array {
-    return this.city.trees;
+  /** park and street trees (absolute coordinates) for the shared tree instancing */
+  get trees(): Float32Array {
+    const a = this.city.trees;
+    const b = this.furniture.trees;
+    const out = new Float32Array(a.length + b.length);
+    out.set(a);
+    out.set(b, a.length);
+    return out;
   }
 
   dispose(): void {
