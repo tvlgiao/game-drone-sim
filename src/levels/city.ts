@@ -1,7 +1,8 @@
 /**
  * City (design 07 §3): 1.2 × 1.2 km of streets and towers from generateCity at dusk, an 18-ring route through
- * street canyons, over rooftops and under the skybridges; pilot on a low roof at the south edge, ceiling
- * 250 m AGL, no pilot relocation. Every building, roof prop and park tree is a static collider in the grid.
+ * street canyons, over rooftops and under the skybridges; the pilot starts at the start line, ceiling 250 m AGL,
+ * pilot relocation on (a clear street or roof spot near the drone). Every building, roof prop and park tree is a
+ * static collider in the grid.
  */
 import type { OutdoorLevel } from '../types';
 import { CITY_HALF, cityTerrainField, generateCity, type City } from '../world/city-gen';
@@ -30,6 +31,7 @@ export function cityLevel(city: City, outskirts: Outskirts, furniture: CityFurni
     world: { gen: 'city', genVersion: GEN_VERSION, seed: city.seed },
     props: [],
     statics: [...city.colliders, ...furniture.colliders, ...outskirts.colliders],
+    relocatePilot: true,
   };
 }
 

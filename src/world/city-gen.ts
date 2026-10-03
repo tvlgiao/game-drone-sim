@@ -42,7 +42,7 @@ export interface City {
   trees: Float32Array;
   colliders: Collider[];
   blockClass: (i: number, j: number) => BlockClass;
-  /** LOS spot on a low roof at the south edge (y = roof + 1.7) */
+  /** LOS spot in the start intersection, behind the take-off (street level, eye 1.7 m) */
   pilot: [number, number, number];
   spawn: { position: [number, number, number]; yaw: number };
   rings: RingDef[];
@@ -70,7 +70,12 @@ const SKYBRIDGE_BLOCKS: readonly [readonly [number, number], readonly [number, n
   ],
 ];
 const SLAB_BLOCK = [4, 9] as const;
+/** low block on the south edge (the pilot's roof before the pilot moved to the start line) */
 const PILOT_BLOCK = [7, 0] as const;
+/** pilot offset from the spawn (m): behind it along the slalom street, and to its right */
+const PILOT_BEHIND = 4;
+const PILOT_ASIDE = 4;
+const PILOT_EYE = 1.7;
 const PARK_CANDIDATES: readonly (readonly [number, number])[] = [
   [10, 4],
   [4, 4],
@@ -227,9 +232,9 @@ export function generateCity(seed: number): City {
     addBox(`skybridge-${k}`, x, y0, z, w, 4, d);
   });
 
-  const pilotTop = tops.get(`${PILOT_BLOCK[0]},${PILOT_BLOCK[1]}`)!;
-  const pilot: [number, number, number] = [pilotTop.box.x, pilotTop.top + 1.7, pilotTop.box.z];
   const spawn = { position: [streetLine(1), 0.06, streetLine(5)] as [number, number, number], yaw: yawFacing(1, 0) };
+  // the pilot stands in the start intersection a few metres behind the take-off, looking down the slalom street
+  const pilot: [number, number, number] = [spawn.position[0] - PILOT_BEHIND, PILOT_EYE, spawn.position[2] - PILOT_ASIDE];
 
   const city: City = {
     seed,

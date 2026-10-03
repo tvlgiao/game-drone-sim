@@ -67,10 +67,17 @@ export function seesOver(f: TerrainField, ax: number, ay: number, az: number, bx
   return true;
 }
 
+export interface LookoutOptions {
+  /** farthest search ring from the spawn (m), default 110 */
+  maxRadius?: number;
+  /** the lookout stays within this horizontal distance (m) of `watch` (LOS range to the first ring) */
+  maxWatchRange?: number;
+}
+
 /**
- * A lookout for the LOS pilot within 25–110 m of the spawn, on the side towards `toward`: a raised, dry,
- * walkable (slope < 0.3) spot clear of objects that sees the spawn and `watch` over the terrain, at most 25 m
- * above the spawn (a knoll, not the mountain flank). Eye at ground + 1.7 m.
+ * A lookout for the LOS pilot within 25–110 m (`maxRadius`) of the spawn, on the side towards `toward`: a raised,
+ * dry, walkable (slope < 0.3) spot clear of objects that sees the spawn and `watch` over the terrain (within
+ * `maxWatchRange` of it), at most 25 m above the spawn (a knoll, not the mountain flank). Eye at ground + 1.7 m.
  */
 export function findLookout(
   f: TerrainField,
@@ -79,14 +86,17 @@ export function findLookout(
   sz: number,
   toward: readonly [number, number],
   watch?: readonly [number, number, number],
+  opts: LookoutOptions = {},
 ): [number, number, number] {
+  const maxRadius = opts.maxRadius ?? 110;
+  const maxWatch = opts.maxWatchRange ?? Infinity;
   const sy = f.heightAt(sx, sz);
   const ax = toward[0] - sx;
   const az = toward[1] - sz;
   const al = Math.sqrt(ax * ax + az * az) || 1;
   let best: [number, number, number] | null = null;
   let bestScore = -Infinity;
-  for (let r = 25; r <= 110; r += 7) {
+  for (let r = 25; r <= maxRadius; r += 7) {
     for (let k = 0; k < 24; k++) {
       const a = (k / 24) * Math.PI * 2;
       const dx = Math.cos(a);
@@ -95,6 +105,7 @@ export function findLookout(
       if ((dx * ax + dz * az) / al < 0.2) continue;
       const x = sx + dx * r;
       const z = sz + dz * r;
+      if (watch && Math.hypot(watch[0] - x, watch[2] - z) > maxWatch) continue;
       const h = f.heightAt(x, z);
       if (h > sy + 25 || !dry(f, x, z) || slope(f, x, z) > 0.3 || !clear(obstacles, x, h + EYE, z, 2.5)) continue;
       if (!seesOver(f, x, h + EYE, z, sx, sy + 1, sz)) continue;

@@ -1,7 +1,7 @@
 /**
  * Alpine Valley (design 07 §3): 3 × 3 km of ridged mountains around a U-valley with a stream, a lake and a
  * hamlet; 16 rings along ALPINE_ROUTE (valley floor, forest, lake, saddle, ridge, back). Golden hour, pilot
- * on a knoll at the valley mouth, relocation on, ceiling 400 m AGL.
+ * on a knoll between the take-off and the first ring, relocation on, ceiling 400 m AGL.
  */
 import type { OutdoorLevel } from '../types';
 import { ALPINE_HALF } from '../world/base-terrain';
@@ -14,6 +14,8 @@ import { streamedRuntime, type StreamedLevelOptions } from './world-runtime';
 
 export const ALPINE_SEED = 20261003;
 export const ALPINE_CEILING = 400;
+/** the LOS pilot starts within this distance (m) of the first ring */
+export const ALPINE_PILOT_RANGE = 140;
 /** long golden-hour views down the valley (desktop; the quality profile caps it on phones and Quest) */
 const ALPINE_VIEW = 5000;
 
@@ -23,8 +25,9 @@ export function alpineLevel(world: World): OutdoorLevel {
   const first = ALPINE_ROUTE[0]!;
   // on the valley floor a little south of the first waypoint, nose up the valley (towards ring 0)
   const spawn = findSpawn(world.field, obstacles, first.x, first.z + 45, rings[0]!.position);
-  // a knoll behind the spawn: the pilot sees the take-off and the route climbing up the valley
-  const pilot = findLookout(world.field, obstacles, spawn.position[0], spawn.position[2], [spawn.position[0], spawn.position[2] + 300], rings[0]!.position);
+  // a knoll between the take-off and the first ring (the run-up is ≈ 250 m): the pilot sees both, ≤ 140 m from ring 0
+  const r0 = rings[0]!.position;
+  const pilot = findLookout(world.field, obstacles, spawn.position[0], spawn.position[2], [r0[0], r0[2]], r0, { maxRadius: 180, maxWatchRange: ALPINE_PILOT_RANGE });
   return {
     id: 'alpine',
     kind: 'outdoor',
