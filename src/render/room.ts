@@ -1,5 +1,5 @@
 /**
- * Loft shell: polished slab, reclaimed brick (north / west), painted brick (east) and plaster (south) with real
+ * Loft shell: polished slab, reclaimed brick (north / west) and painted brick (east / south) with real
  * window openings, riveted steel factory windows with dirty glass, timber deck ceiling, a sliding barn
  * door, conduit runs, the neon sign and wall / floor decals. Everything on a wall stays within 5 cm of it
  * (the room shell is a hard plane in physics), so nothing visible sticks out where the drone can fly.
@@ -68,10 +68,10 @@ export function buildRoom(room: RoomDef, mats: LoftMaterials, batch: StaticBatch
   const brickWalls = new Set<WindowInfo['wall']>(['north', 'west']);
   for (const wall of walls) {
     const f = wallFrame(wall, sx, sz);
-    // reclaimed brick north / west, limewashed brick east, the renovated south wall skimmed in plaster
-    const key = brickWalls.has(wall) ? 'brick' : wall === 'east' ? 'paintedBrick' : 'plaster';
+    // reclaimed brick north / west, the same courses limewashed east / south
+    const key = brickWalls.has(wall) ? 'brick' : 'paintedBrick';
     const mat = mats[key];
-    const uvTile = key === 'plaster' ? LOFT_UV.plaster : LOFT_UV.brick;
+    const uvTile = LOFT_UV.brick;
     const half = f.length / 2 + (wall === 'north' || wall === 'south' ? WALL_T : 0);
     const wins = room.windows
       .filter((w) => w.wall === wall)

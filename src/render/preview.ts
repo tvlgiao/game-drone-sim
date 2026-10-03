@@ -2,7 +2,7 @@
  * Standalone render preview (render-preview.html): GameView with a scripted drone flying a smooth
  * loop through the rings, so rendering/VFX can be judged without physics, input or UI.
  * Query params: ?tier=ultra|high|medium|low  &cam=fpv|chase|los  &t=<start seconds>  &pause  &level=training|night-loft
- *   &tm=agx|aces|neutral (tone-mapper look test)  &gallery[=x,y,z] (material library swatches)
+ *   &tm=agx|aces|neutral (tone-mapper look test)  &gallery[=x,y,z] (material library swatches)  &analog=0..1
  */
 import * as THREE from 'three';
 import { DynamicResolution, pickTier, probeGpu } from '../core/quality';
@@ -23,6 +23,8 @@ const view = new GameView(canvas, runtime, tier);
 const tm = params.get('tm');
 if (tm === 'agx' || tm === 'aces' || tm === 'neutral') view.setToneMapping(tm);
 if (params.has('gallery')) addGallery(params.get('gallery') ?? '');
+// the game's default analog FPV feed (Settings → Analog FPV feed); &analog=0 turns it off
+view.setAnalogVideo(params.has('analog') ? Number(params.get('analog')) || 0 : 0.35);
 
 /** Material library swatches in a row (x = 0 centred), at `at` = "x,y,z" (default: in front of the training pilot). */
 function addGallery(at: string): void {

@@ -129,7 +129,8 @@ export function buildProps(props: readonly PropDef[], mats: LoftMaterials, batch
 }
 
 function pillar(f: PropFrame, m: LoftMaterials, r: number, h: number): void {
-  f.add('concrete', m.concrete, new THREE.CylinderGeometry(r - 0.004, r - 0.004, h, 32, 1), 0, h / 2, 0, 0, 0, 0, { uvTile: 1.4 });
+  // cast columns skimmed in plaster and painted (library plaster: the CC0 scan where the tier loads it)
+  f.add('plaster', m.plaster, new THREE.CylinderGeometry(r - 0.004, r - 0.004, h, 32, 1), 0, h / 2, 0, 0, 0, 0, { uvTile: 1.4 });
   const steel = finish('steelDark');
   for (const y of [0.42, h - 0.55]) f.add('props', m.props, new THREE.CylinderGeometry(r, r, 0.07, 32, 1, true), 0, y, 0, 0, 0, 0, steel);
   f.add('props', m.props, new THREE.CylinderGeometry(r * 0.98, r, 0.1, 32), 0, 0.05, 0, 0, 0, 0, steel);

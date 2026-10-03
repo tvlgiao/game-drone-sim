@@ -4,7 +4,7 @@
  * whole room draws in ~20 calls. Floor and glass reflect a box-projected probe of the room itself (the
  * GameView's captured environment, `setProbe`).
  *
- * Surfaces with a CC0 scan (slab and sills: concrete, walls: brick / painted brick / plaster, deck and
+ * Surfaces with a CC0 scan (slab and sills: concrete, walls: brick / painted brick, columns: plaster, deck and
  * door: wood) are library presets, so the scans replace the procedural maps on tiers that load them; the
  * loft's own patches (floor macro + puddles, wall grime, box projection, dirty glass) ride on top.
  */
@@ -49,7 +49,7 @@ export const FINISH = {
 export const WOOD = { oak: 0xd9a46c, walnut: 0x7d5238, pine: 0xf0cf98, deck: 0x5a3f2c, crate: 0xc9a06a } as const;
 
 /** UV metres the room builders map each surface with (batcher `uvTile`): the library scales the set to it. */
-export const LOFT_UV = { floor: 4, brick: 1.2, plaster: 2, concrete: 1.5, wood: 1 } as const;
+export const LOFT_UV = { floor: 4, brick: 1.2, plaster: 1.4, concrete: 1.5, wood: 1 } as const;
 
 export class LoftMaterials {
   readonly floor: THREE.MeshStandardMaterial;
@@ -103,7 +103,7 @@ export class LoftMaterials {
     const wallPatch: EnvPatch = { grime };
     this.brick = lib.material('brick', { uvMeters: LOFT_UV.brick, envMapIntensity: 0.4, patch: wallPatch });
     this.paintedBrick = lib.material('paintedBrick', { uvMeters: LOFT_UV.brick, color: 0xd9d2c8, envMapIntensity: 0.45, patch: wallPatch });
-    this.plaster = lib.material('plaster', { uvMeters: LOFT_UV.plaster, albedo: 0x9a948c, normalScale: 0.5, envMapIntensity: 0.45, patch: wallPatch });
+    this.plaster = lib.material('plaster', { uvMeters: LOFT_UV.plaster, albedo: 0xa7a199, normalScale: 0.7, envMapIntensity: 0.45, patch: wallPatch });
     this.concrete = lib.material('concrete', { uvMeters: LOFT_UV.concrete, albedo: 0x8c877f, envMapIntensity: 0.5, patch: wallPatch });
     this.wood = lib.material('wood', { uvMeters: LOFT_UV.wood, vertexColors: true, normalScale: 0.7, envMapIntensity: 0.7 });
 
