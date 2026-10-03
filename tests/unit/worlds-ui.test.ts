@@ -9,7 +9,7 @@ import { bearingDeg, headingFromQuat, headingText, tapeMarker, tapeOffsetPct, ta
 import { formatDistance, heightValue, speedUnit, speedValue } from '../../src/ui/format';
 import { cardModes, isSeededCard, levelAct, levelCardsHtml, parseLevelAct } from '../../src/ui/level-select';
 import { clampToDisc, MAP_BUILDING, terrainMinimapSampler, worldToMap } from '../../src/ui/minimap';
-import { lastPlayedText, parseWorldParam, playWorld, randomSeed, resumeOrNewWorld, seedFieldStatus, SITE_URL, stripWorldParam, worldShareUrl } from '../../src/ui/worlds-model';
+import { gatePlayHref, lastPlayedText, parseWorldParam, playWorld, randomSeed, resumeOrNewWorld, seedFieldStatus, SITE_URL, stripWorldParam, worldShareUrl } from '../../src/ui/worlds-model';
 import { xrHudContent, xrOutdoorLine, type XrHudState } from '../../src/ui/xr-hud';
 import { BIOME, type BiomeSample, type TerrainField } from '../../src/world/terrain-field';
 import { encodeSeed, fnv1a32 } from '../../src/world/seed-code';
@@ -108,11 +108,21 @@ describe('plays and random worlds', () => {
 describe('share links and the deep link', () => {
   it('links the edition the pilot is on, under the same site prefix', () => {
     expect(worldShareUrl(CODE, { origin: 'https://x.dev', pathname: '/play/' }, false)).toBe(`https://x.dev/play/?world=${CODE}`);
-    expect(worldShareUrl(CODE, { origin: 'https://x.dev', pathname: '/app/index.html' }, false)).toBe(`https://x.dev/app/?world=${CODE}`);
+    // the Quest app shares the free web game: anyone can open it (the app itself still reads /app/?world=)
+    expect(worldShareUrl(CODE, { origin: 'https://x.dev', pathname: '/app/index.html' }, false)).toBe(`https://x.dev/play/?world=${CODE}`);
+    expect(worldShareUrl(CODE, { origin: 'https://x.github.io', pathname: '/drone-sim/app/' }, false)).toBe(`https://x.github.io/drone-sim/play/?world=${CODE}`);
     expect(worldShareUrl(CODE, { origin: 'https://x.github.io', pathname: '/drone-sim/play/' }, false)).toBe(`https://x.github.io/drone-sim/play/?world=${CODE}`);
     expect(worldShareUrl(CODE, { origin: 'http://localhost:5173', pathname: '/worlds-preview.html' }, false)).toBe(`http://localhost:5173/play/?world=${CODE}`);
     expect(worldShareUrl(CODE, { origin: 'capacitor://localhost', pathname: '/' }, false)).toBe(`${SITE_URL}play/?world=${CODE}`);
     expect(worldShareUrl(CODE, { origin: 'https://x.dev', pathname: '/app/' }, true)).toBe(`${SITE_URL}play/?world=${CODE}`);
+  });
+
+  it("the Quest store gate's web link keeps a valid ?world= (and nothing else)", () => {
+    expect(gatePlayHref('')).toBe('../play/');
+    expect(gatePlayHref(`?world=${CODE}`)).toBe(`../play/?world=${CODE}`);
+    expect(gatePlayHref(`?xremu=1&world=${CODE.toLowerCase()}&owned=1`)).toBe(`../play/?world=${CODE}`);
+    expect(gatePlayHref('?world=%3Cscript%3E')).toBe('../play/');
+    expect(gatePlayHref('?foo=bar')).toBe('../play/');
   });
 
   it('parses ?world= from a search string, a Location or a full URL', () => {

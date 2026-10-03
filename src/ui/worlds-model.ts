@@ -114,8 +114,18 @@ export function resumeOrNewWorld(storage: Storage | null, now: number, seed: () 
 export function worldShareUrl(code: string, loc: { origin: string; pathname: string }, native: boolean): string {
   const q = `?${WORLD_PARAM}=${encodeURIComponent(code)}`;
   if (native || !/^https?:/.test(loc.origin)) return `${SITE_URL}play/${q}`;
+  // the Quest app (/app/) shares the free web game too: anyone can open the link, owner or not
   const m = /^(.*\/)(app|play)\/(?:index\.html)?$/.exec(loc.pathname);
-  return m ? `${loc.origin}${m[1]}${m[2]}/${q}` : `${loc.origin}/play/${q}`;
+  return m ? `${loc.origin}${m[1]}play/${q}` : `${loc.origin}/play/${q}`;
+}
+
+/**
+ * The Quest store gate's "Play free on the web" link: the web game, keeping a valid `?world=` from the /app/ URL
+ * (as its canonical code, nothing else of the query).
+ */
+export function gatePlayHref(search: string): string {
+  const r = parseWorldParam({ search });
+  return r.kind === 'world' ? `../play/?${WORLD_PARAM}=${encodeURIComponent(r.code)}` : '../play/';
 }
 
 export type WorldParam = { kind: 'none' } | ({ kind: 'world' } & WorldPick) | { kind: 'error'; error: SeedCodeError; message: string };
