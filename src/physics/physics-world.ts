@@ -107,7 +107,7 @@ export class PhysicsWorld {
   private grid: ColliderGrid | null = null;
   private readonly found: GridCollider[] = [];
   /** outdoor kinematic colliders that move every frame (traffic): queried around the drone each step */
-  private movers: MoverSource | null = null;
+  private movers: (MoverSource & { readonly size: number }) | null = null;
   private readonly moverFound: MoverCollider[] = [];
   private foundCount = 0;
   /** box [min, max] the last grid query covered */
@@ -479,7 +479,7 @@ export class PhysicsWorld {
         if (sphereVsShape(c, r, col.shape, hit)) this.addContact(col.id, col.restitution, col.friction, col.moving ? col : null);
       }
     }
-    if (this.movers) this.collideMovers();
+    if (this.movers && this.movers.size > 0) this.collideMovers();
     if (this.contactCount === 0) return;
     this.resolve(dt);
   }

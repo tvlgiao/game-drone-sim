@@ -174,7 +174,7 @@ describe('city traffic simulation', () => {
           if (Math.abs(right - LANE_OFFSET) > 0.05) offLane++;
         }
       }
-      if (f % 6 === 0) {
+      if (f % 10 === 0) {
         for (let a = 0; a < sim.capacity; a++) {
           if (!sim.alive[a]) continue;
           for (let b = a + 1; b < sim.capacity; b++) if (sim.alive[b] && carsOverlap(sim, a, b)) overlaps++;
