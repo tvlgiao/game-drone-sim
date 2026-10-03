@@ -6,7 +6,7 @@
  * melt into the ground; wind sway in the vertex shader. Tier-gated count; off on the lowest tier.
  */
 import * as THREE from 'three';
-import { mulberry32 } from '../env-materials/texgen';
+import { mulberry32 } from '../materials/texgen';
 
 export interface GrassOptions {
   /** half-size of the flying field (mowed inside) */

@@ -7,7 +7,7 @@
  */
 import * as THREE from 'three';
 import { StaticBatcher, trs } from '../batcher';
-import { mulberry32 } from '../env-materials/texgen';
+import { mulberry32 } from '../materials/texgen';
 import type { VegBuilder } from './foliage';
 import { FLAT_RADIUS, terrainHeight } from './ground';
 

@@ -1,5 +1,5 @@
 /**
- * Loft shell: polished slab, reclaimed brick (north / west) and painted brick (east / south) with real
+ * Loft shell: polished slab, reclaimed brick (north / west), painted brick (east) and plaster (south) with real
  * window openings, riveted steel factory windows with dirty glass, timber deck ceiling, a sliding barn
  * door, conduit runs, the neon sign and wall / floor decals. Everything on a wall stays within 5 cm of it
  * (the room shell is a hard plane in physics), so nothing visible sticks out where the drone can fly.
@@ -7,9 +7,8 @@
 import * as THREE from 'three';
 import type { RoomDef } from '../types';
 import { StaticBatcher, trs } from './batcher';
-import { BRICK_TILE_M, FLOOR_TILE_M } from './env-materials/loft-textures';
-import { WOOD, type LoftMaterials } from './env-materials/loft-materials';
-import { DECAL } from './env-materials/loft-canvas';
+import { LOFT_UV, WOOD, type LoftMaterials } from './loft/materials';
+import { DECAL } from './loft/art';
 import { IDENTITY, cable, decalPlane, finish, rod } from './loft/dress';
 
 export interface WindowInfo {
@@ -61,7 +60,7 @@ export function buildRoom(room: RoomDef, mats: LoftMaterials, batch: StaticBatch
 
   const floor = new THREE.PlaneGeometry(sx, sz);
   floor.rotateX(-Math.PI / 2);
-  batch.add('floor', mats.floor, floor, trs(0, 0, 0), { uvTile: FLOOR_TILE_M });
+  batch.add('floor', mats.floor, floor, trs(0, 0, 0), { uvTile: LOFT_UV.floor });
   const ceil = new THREE.BoxGeometry(sx + WALL_T * 2, 0.3, sz + WALL_T * 2);
   batch.add('wood', mats.wood, ceil, trs(0, sy + 0.15, 0), { uvTile: 1.1, color: WOOD.deck });
 
@@ -69,9 +68,10 @@ export function buildRoom(room: RoomDef, mats: LoftMaterials, batch: StaticBatch
   const brickWalls = new Set<WindowInfo['wall']>(['north', 'west']);
   for (const wall of walls) {
     const f = wallFrame(wall, sx, sz);
-    const red = brickWalls.has(wall);
-    const key = red ? 'brick' : 'paintedBrick';
-    const mat = red ? mats.brick : mats.paintedBrick;
+    // reclaimed brick north / west, limewashed brick east, the renovated south wall skimmed in plaster
+    const key = brickWalls.has(wall) ? 'brick' : wall === 'east' ? 'paintedBrick' : 'plaster';
+    const mat = mats[key];
+    const uvTile = key === 'plaster' ? LOFT_UV.plaster : LOFT_UV.brick;
     const half = f.length / 2 + (wall === 'north' || wall === 'south' ? WALL_T : 0);
     const wins = room.windows
       .filter((w) => w.wall === wall)
@@ -85,7 +85,7 @@ export function buildRoom(room: RoomDef, mats: LoftMaterials, batch: StaticBatch
       if (u1 - u0 < 1e-3 || y1 - y0 < 1e-3) return;
       const g = new THREE.BoxGeometry(u1 - u0, y1 - y0, WALL_T);
       f.point((u0 + u1) / 2, (y0 + y1) / 2, WALL_T / 2, _v);
-      batch.add(key, mat, g, trs(_v.x, _v.y, _v.z, f.yaw), { uvTile: BRICK_TILE_M });
+      batch.add(key, mat, g, trs(_v.x, _v.y, _v.z, f.yaw), { uvTile });
     };
     let cursor = -half;
     for (const w of wins) {

@@ -15,6 +15,16 @@ export interface LevelFrame {
   fanAngle: number;
 }
 
+export interface LevelProbe {
+  position: THREE.Vector3;
+  near: number;
+  far: number;
+  /** smallest cube face size, whatever the tier's envSize (the loft's box-projected floor needs detail) */
+  minSize: number;
+  /** capture even on tiers without envMap: the level's own materials reflect it on every tier */
+  always: boolean;
+}
+
 export interface LevelView {
   /** everything the level adds to the scene (meshes, lights) */
   readonly group: THREE.Group;
@@ -22,9 +32,16 @@ export interface LevelView {
   readonly ringLight: THREE.PointLight;
   readonly background: THREE.Color;
   readonly fog: THREE.FogExp2;
-  /** PMREM environment (reflections), applied on tiers with envMap */
+  /**
+   * Stand-in environment (an analytic sky or a dark room) for when the capture of the level fails; the
+   * GameView normally captures the level itself from `probe` (ibl.ts) and uses that instead.
+   */
   readonly environment: THREE.Texture;
   readonly environmentIntensity: number;
+  /** where and how the GameView captures the level's environment (PMREM + SH light probe) */
+  readonly probe: LevelProbe;
+  /** the captured environment, for the level's own env-mapped materials (box-projected floor, glass) */
+  setEnvironment(env: THREE.Texture): void;
   /** post FX bloom luminance threshold */
   readonly bloomThreshold: number;
   update(f: LevelFrame): void;

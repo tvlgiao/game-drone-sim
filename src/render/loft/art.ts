@@ -3,7 +3,7 @@
  * neon sign atlas. All drawn procedurally; no fonts or images are downloaded.
  */
 import * as THREE from 'three';
-import { mulberry32 } from './texgen';
+import { mulberry32 } from '../materials/texgen';
 
 /** Decal atlas: 4 × 4 cells; `DECAL` names each cell. */
 export const DECAL_GRID = 4;

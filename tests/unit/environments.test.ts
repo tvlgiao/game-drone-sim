@@ -7,7 +7,7 @@
 import * as THREE from 'three';
 import { describe, expect, it } from 'vitest';
 import { StaticBatcher } from '../../src/render/batcher';
-import type { LoftMaterials } from '../../src/render/env-materials/loft-materials';
+import type { LoftMaterials } from '../../src/render/loft/materials';
 import { buildCity } from '../../src/render/loft/city';
 import { Halos } from '../../src/render/loft/halos';
 import { MoonPools } from '../../src/render/loft/moon-pools';
@@ -35,6 +35,7 @@ function stubLoftMaterials(): LoftMaterials {
     floor: std(),
     brick: std(),
     paintedBrick: std(),
+    plaster: std(),
     concrete: std(),
     wood: std({ vertexColors: true }),
     props,

@@ -6,8 +6,8 @@
  */
 import * as THREE from 'three';
 import { StaticBatcher, boxProjectUV, trs } from '../batcher';
-import type { LoftMaterials } from '../env-materials/loft-materials';
-import { clamp01, dataTexture, fbm, mix, mulberry32, rgba, smooth, texSize } from '../env-materials/texgen';
+import type { LoftMaterials } from './materials';
+import { clamp01, dataTexture, fbm, mix, mulberry32, rgba, smooth, texSize } from '../materials/texgen';
 import type { WindowInfo } from '../room';
 
 /** sky cylinder radius: the far corner of the room to it stays inside the indoor camera far plane (90 m) */

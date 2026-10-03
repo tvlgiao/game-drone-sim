@@ -2,7 +2,8 @@
  * Procedural PBR texture sets, generated as plain pixel arrays (no canvas, no GPU): albedo (sRGB, alpha
  * for foliage), a tangent-space normal map (OpenGL / +Y) derived from a height field, and an ARM map
  * (R ambient occlusion, G roughness, B metalness) — the same layout as the CC0 sets, so a material can
- * swap one for the other. Every generator tiles seamlessly and is deterministic for a given size.
+ * swap one for the other. Deterministic for a given size; every set tiles except the foliage card (one
+ * leaf cluster per card). Brick, slab, concrete, wood and gravel come from the field-based generators.ts.
  */
 import { clamp01, hash2, mix, smooth, tileCells, tileFbm, tileNoise } from './noise';
 
@@ -38,14 +39,12 @@ export type ProceduralKind =
   | 'brushedMetal'
   | 'paintedMetal'
   | 'rubber'
-  | 'concrete'
-  | 'brick'
-  | 'wood'
   | 'grass'
   | 'asphalt'
   | 'foliage'
   | 'plaster'
-  | 'bark';
+  | 'bark'
+  | 'rock';
 
 const to8 = (x: number): number => Math.round(clamp01(x) * 255);
 
@@ -169,62 +168,6 @@ const rubber: Sampler = (u, v, t) => {
   t.rough = 0.78 + 0.12 * grain;
 };
 
-const concrete: Sampler = (u, v, t) => {
-  const big = tileFbm(u, v, 3, 4, 71);
-  const fine = tileFbm(u, v, 48, 3, 73);
-  const cell = tileCells(u, v, 40, 79);
-  const pore = 1 - smooth(0.0, 0.09, cell.d - 0.05 * cell.id);
-  const g = 0.56 + 0.16 * (big - 0.5) + 0.08 * (fine - 0.5) - 0.18 * pore;
-  t.r = g * 1.0;
-  t.g = g * 0.985;
-  t.b = g * 0.96;
-  t.h = 0.5 * fine + 0.2 * big - 0.6 * pore;
-  t.ao = 1 - 0.4 * pore;
-  t.rough = 0.82 + 0.12 * (fine - 0.5) - 0.12 * (big - 0.5);
-};
-
-const brick: Sampler = (u, v, t) => {
-  // running bond: 8 courses × 4 bricks per tile (bricks 2:1 when the tile is mapped 1:1)
-  const rows = 8;
-  const cols = 4;
-  const ry = v * rows;
-  const row = Math.floor(ry);
-  const rx = u * cols + (row & 1) * 0.5;
-  const col = Math.floor(rx);
-  const fx = rx - col;
-  const fy = ry - row;
-  const mortar = 0.07;
-  const ex = Math.min(fx, 1 - fx) * 2; // aspect: bricks are twice as wide as tall
-  const ey = Math.min(fy, 1 - fy);
-  const edge = Math.min(ex, ey);
-  const inBrick = smooth(mortar * 0.6, mortar, edge + 0.02 * (tileNoise(u * 64, v * 64, 64, 83) - 0.5));
-  const id = hash2(((col % cols) + cols) % cols, row, 89);
-  const surface = tileFbm(u, v, 24, 3, 97);
-  const burn = tileFbm(u, v, 5, 3, 101);
-  const br = 0.5 + 0.12 * (id - 0.5) + 0.08 * (surface - 0.5) - 0.1 * smooth(0.6, 0.9, burn);
-  const mortarG = 0.62 + 0.06 * (surface - 0.5);
-  t.r = mix(mortarG, br * 1.0, inBrick);
-  t.g = mix(mortarG * 0.97, br * 0.48, inBrick);
-  t.b = mix(mortarG * 0.92, br * 0.36, inBrick);
-  t.h = inBrick * (0.7 + 0.15 * surface) + (1 - inBrick) * 0.1 * surface;
-  t.ao = mix(0.62, 1, inBrick);
-  t.rough = mix(0.95, 0.82 + 0.1 * (surface - 0.5), inBrick);
-};
-
-const wood: Sampler = (u, v, t) => {
-  // flat-sawn grain along u: rings warped by low-frequency noise
-  const warp = tileFbm(u, v, 3, 3, 103);
-  const rings = (v * 14 + warp * 3.2) % 1;
-  const ring = smooth(0.0, 0.18, rings) * (1 - smooth(0.55, 1.0, rings));
-  const fibre = tileNoise(u * 8, v * 220, 220, 107);
-  const tone = 0.42 + 0.14 * ring + 0.05 * (fibre - 0.5) + 0.06 * (warp - 0.5);
-  t.r = tone * 1.0;
-  t.g = tone * 0.7;
-  t.b = tone * 0.45;
-  t.h = 0.3 * ring + 0.25 * fibre;
-  t.rough = 0.55 + 0.1 * (1 - ring) + 0.05 * fibre;
-};
-
 const grass: Sampler = (u, v, t) => {
   const blades = tileNoise(u * 160, v * 40, 160, 109) * 0.6 + tileNoise(u * 320, v * 80, 320, 113) * 0.4;
   const patch = tileFbm(u, v, 4, 4, 127);
@@ -277,39 +220,57 @@ const bark: Sampler = (u, v, t) => {
   t.rough = 0.92;
 };
 
-/** Leaf cards: 26 leaves per tile, alpha-cut, darker towards the stem. */
+const rock: Sampler = (u, v, t) => {
+  // weathered granite: big cracked blocks, mineral speckle, lichen-free grey-buff
+  const blocks = tileCells(u, v, 6, 181);
+  const crack = 1 - smooth(0.0, 0.06, Math.abs(blocks.d - 0.5) * 0.5 + 0.02 * tileNoise(u * 40, v * 40, 40, 191));
+  const big = tileFbm(u, v, 4, 5, 193);
+  const speck = tileNoise(u * 256, v * 256, 256, 197);
+  const g = 0.42 + 0.14 * (big - 0.5) + 0.08 * (blocks.id - 0.5) + 0.06 * (speck - 0.5) - 0.16 * crack;
+  t.r = g * 1.02;
+  t.g = g * 0.98;
+  t.b = g * 0.93;
+  t.h = 0.7 * big + 0.1 * speck - 0.5 * crack;
+  t.ao = 1 - 0.45 * crack;
+  t.rough = 0.78 + 0.12 * (1 - big) * 0.5;
+};
+
+/**
+ * Leaf-cluster card: ~50 broad leaves fanning out from the centre, alpha-cut, nothing crossing the card
+ * edge (cards are single sprites, not a tiling surface), lighter tips, darker towards the twig.
+ */
 function foliageSampler(): Sampler {
-  const leaves: { x: number; y: number; c: number; s: number; len: number; tone: number }[] = [];
-  for (let i = 0; i < 26; i++) {
-    const a = hash2(i, 1, 151) * Math.PI * 2;
-    leaves.push({ x: hash2(i, 2, 151), y: hash2(i, 3, 151), c: Math.cos(a), s: Math.sin(a), len: 0.2 + 0.12 * hash2(i, 4, 151), tone: hash2(i, 5, 151) });
+  const leaves: { x: number; y: number; c: number; s: number; len: number; w: number; tone: number }[] = [];
+  for (let i = 0; i < 56; i++) {
+    const r = Math.sqrt(hash2(i, 1, 606)) * 0.33;
+    const th = hash2(i, 2, 606) * Math.PI * 2;
+    const a = th + (hash2(i, 3, 606) - 0.5) * 0.8;
+    leaves.push({ x: 0.5 + Math.cos(th) * r, y: 0.5 + Math.sin(th) * r, c: Math.cos(a), s: Math.sin(a), len: 0.075 + hash2(i, 4, 606) * 0.05, w: 0.028 + hash2(i, 5, 606) * 0.018, tone: hash2(i, 6, 606) });
   }
   return (u, v, t) => {
     t.a = 0;
+    t.r = 0.2;
+    t.g = 0.3;
+    t.b = 0.12;
     t.rough = 0.6;
+    let best = -1;
     for (const l of leaves) {
-      for (let oy = -1; oy <= 1; oy++) {
-        for (let ox = -1; ox <= 1; ox++) {
-          const dx = u - l.x + ox;
-          const dy = v - l.y + oy;
-          if (dx * dx + dy * dy > l.len * l.len) continue;
-          const along = (dx * l.c + dy * l.s) / l.len;
-          const across = (-dx * l.s + dy * l.c) / (l.len * 0.42);
-          if (along < 0 || along > 1) continue;
-          const width = Math.sin(Math.PI * Math.pow(along, 0.8));
-          const r = Math.abs(across) / Math.max(1e-3, width);
-          if (r > 1) continue;
-          const vein = 1 - smooth(0.0, 0.08, Math.abs(across));
-          const lum = 0.3 + 0.12 * l.tone + 0.08 * along;
-          t.r = lum * 0.42 + vein * 0.05;
-          t.g = lum * 0.95 + vein * 0.06;
-          t.b = lum * 0.3;
-          t.a = 1;
-          t.h = (1 - r * r) * 0.6 - vein * 0.15;
-          t.ao = 0.7 + 0.3 * along;
-          t.rough = 0.55;
-        }
-      }
+      const dx = u - l.x;
+      const dy = v - l.y;
+      const along = (dx * l.c + dy * l.s) / l.len;
+      const across = (-dx * l.s + dy * l.c) / l.w;
+      const d = along * along + across * across;
+      if (d >= 1 || l.tone <= best) continue;
+      best = l.tone;
+      const vein = Math.abs(across) < 0.08 ? 0.1 : 0;
+      const lum = (0.78 + l.tone * 0.32) * (0.8 + 0.2 * (1 - Math.abs(across))) - vein;
+      t.r = 0.2 * lum;
+      t.g = 0.33 * lum;
+      t.b = 0.11 * lum;
+      t.a = 1;
+      t.h = (1 - d) * 0.6 + l.tone * 0.3 - vein;
+      t.ao = 0.65 + 0.35 * l.tone;
+      t.rough = 0.55;
     }
   };
 }
@@ -319,14 +280,12 @@ const SAMPLERS: Record<ProceduralKind, () => { sample: Sampler; bump: number }> 
   brushedMetal: () => ({ sample: brushedMetal, bump: 0.08 }),
   paintedMetal: () => ({ sample: paintedMetal, bump: 0.08 }),
   rubber: () => ({ sample: rubber, bump: 0.35 }),
-  concrete: () => ({ sample: concrete, bump: 0.6 }),
-  brick: () => ({ sample: brick, bump: 1.2 }),
-  wood: () => ({ sample: wood, bump: 0.2 }),
   grass: () => ({ sample: grass, bump: 0.8 }),
   asphalt: () => ({ sample: asphalt, bump: 0.7 }),
   foliage: () => ({ sample: foliageSampler(), bump: 0.6 }),
   plaster: () => ({ sample: plaster, bump: 0.3 }),
   bark: () => ({ sample: bark, bump: 1.4 }),
+  rock: () => ({ sample: rock, bump: 1.0 }),
 };
 
 export const PROCEDURAL_KINDS = Object.keys(SAMPLERS) as ProceduralKind[];

@@ -8,14 +8,17 @@ import * as THREE from 'three';
 import { QUALITY_PROFILES, type QualityProfile } from '../../core/quality';
 import type { OutdoorLevel, SkyDef } from '../../types';
 import { StaticBatcher } from '../batcher';
-import type { LevelFrame, LevelView } from '../level-view';
+import type { LevelFrame, LevelProbe, LevelView } from '../level-view';
+import type { MaterialLibrary, MaterialScope } from '../materials/library';
+import type { WindUniforms } from '../materials/patches';
 import { mountainBackdrop } from './backdrop';
-import { VegBuilder, applyWind, barkTexture, leafCardTexture, type WindUniforms } from './foliage';
+import { VegBuilder } from './foliage';
 import { Grass } from './grass';
-import { fieldGeometry, grassDetail, gravelSet, meadowGeometry, padTexture, patchStripes, terrainHeight } from './ground';
+import { GRASS_TILE, fieldGeometry, meadowGeometry, padTexture, terrainHeight } from './ground';
 import { buildOutdoorProps, lowPolyMaterial, type OutdoorProps } from './outdoor-props';
 import { buildScenery } from './scenery';
 import { SkyDome, skyEnvironment } from './sky';
+import { applyEnvPatch } from '../materials/patches';
 
 const MEADOW_RADIUS = 1150;
 const GROUND_HAZE = 0x9db58a;
@@ -43,6 +46,7 @@ export class OutdoorLevelView implements LevelView {
   readonly fog: THREE.FogExp2;
   readonly environment: THREE.Texture;
   readonly environmentIntensity = 0.9;
+  readonly probe: LevelProbe = { position: new THREE.Vector3(0, 4, 0), near: 0.5, far: 1200, minSize: 64, always: false };
   /** the sky and sunlit ground sit near 1.0 in linear light: only the sun disc, rings and sparks bloom */
   readonly bloomThreshold = 1.6;
   readonly ringLight = new THREE.PointLight(0x19e6ff, 0, 7, 2);
@@ -56,13 +60,15 @@ export class OutdoorLevelView implements LevelView {
   private readonly wind: WindUniforms;
   private readonly grass: Grass;
   private readonly cards: THREE.Mesh | null;
+  private readonly scope: MaterialScope;
 
-  constructor(level: OutdoorLevel, renderer: THREE.WebGLRenderer, anisotropy: number) {
+  constructor(level: OutdoorLevel, renderer: THREE.WebGLRenderer, library: MaterialLibrary) {
     this.group.name = 'world';
+    this.scope = library.scope(level.id);
+    const lib = this.scope;
     const sky = typeof level.env.sky === 'string' ? FALLBACK_SKY : level.env.sky;
     this.background = new THREE.Color(sky.horizon);
     this.fog = new THREE.FogExp2(level.env.fog.color, 2.15 / level.env.fog.viewDistance);
-    const an = Math.min(anisotropy, 8);
 
     this.sky = new SkyDome(sky, GROUND_HAZE);
     this.group.add(this.sky.mesh);
@@ -84,14 +90,15 @@ export class OutdoorLevelView implements LevelView {
 
     const half = level.bounds.max?.[0] ?? 40;
     const batch = new StaticBatcher();
-    const low = lowPolyMaterial();
+    const low = lib.custom('training:lowpoly', () => lowPolyMaterial());
     const veg = new VegBuilder(terrainHeight);
     this.props = buildOutdoorProps(level.props, low, this.group, veg, batch);
     const trunks = level.props.filter((p) => p.kind === 'tree').map((p) => [p.position[0], p.position[2], 2.5] as [number, number, number]);
     buildScenery(batch, low, veg, { avoid: trunks });
 
-    const grass = grassDetail(512, an);
-    const meadowMat = new THREE.MeshStandardMaterial({ vertexColors: true, map: grass.map, normalMap: grass.normalMap, normalScale: new THREE.Vector2(0.3, 0.3), roughness: 1, metalness: 0, envMapIntensity: 0.3 });
+    // meadow and mowed field: the palette rides on vertex colours, the grass set (procedural, CC0 where
+    // loaded) only adds texture through the detail patch
+    const meadowMat = lib.material('grass', { uvMeters: GRASS_TILE, vertexColors: true, normalScale: 0.5, roughness: 1.4, envMapIntensity: 0.3, patch: { detail: true } });
     const groundGeo = meadowGeometry(MEADOW_RADIUS);
     if (this.props.hills) {
       const hills = this.props.hills;
@@ -104,36 +111,47 @@ export class OutdoorLevelView implements LevelView {
       this.owned.push(groundGeo);
       this.addMesh(new THREE.Mesh(groundGeo, meadowMat), 'meadow', false, true);
     }
-    const fieldMat = new THREE.MeshStandardMaterial({ vertexColors: true, map: grass.map, normalMap: grass.normalMap, normalScale: new THREE.Vector2(0.25, 0.25), roughness: 0.95, metalness: 0, envMapIntensity: 0.3, polygonOffset: true, polygonOffsetFactor: -1, polygonOffsetUnits: -1 });
-    patchStripes(fieldMat, half, FIELD_STRIPES);
+    const fieldMat = lib.material('grass', {
+      uvMeters: GRASS_TILE,
+      vertexColors: true,
+      normalScale: 0.4,
+      roughness: 1.4,
+      envMapIntensity: 0.3,
+      polygonOffset: -1,
+      patch: { detail: true, stripes: { half, width: (half * 2) / FIELD_STRIPES, strength: 0.16 } },
+    });
     const field = fieldGeometry(half, FIELD_STRIPES);
     this.addMesh(new THREE.Mesh(field, fieldMat), 'field', false, true);
-    this.owned.push(grass.map, grass.normalMap, meadowMat, fieldMat, field);
+    this.owned.push(field);
 
-    // gravel apron under the pad and the pilot's spot
-    const gravel = gravelSet(256, an);
+    // gravel apron under the pad and the pilot's spot (UVs in metres)
     const apronShape = roundedRect(7.4, 9.6, 1.2);
     const apron = new THREE.ShapeGeometry(apronShape, 6);
     apron.rotateX(-Math.PI / 2);
     const auv = apron.attributes.uv as THREE.BufferAttribute;
     const apos = apron.attributes.position;
-    for (let i = 0; i < auv.count; i++) auv.setXY(i, apos.getX(i) / 1.2, apos.getZ(i) / 1.2);
-    const gravelMat = new THREE.MeshStandardMaterial({ map: gravel.map, normalMap: gravel.normalMap, roughness: 0.95, metalness: 0, envMapIntensity: 0.3, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2 });
+    for (let i = 0; i < auv.count; i++) auv.setXY(i, apos.getX(i), apos.getZ(i));
+    const gravelMat = lib.material('gravel', { uvMeters: 1, roughness: 0.95, polygonOffset: -2 });
     const apronMesh = new THREE.Mesh(apron, gravelMat);
     apronMesh.position.set(0, 0.003, 34.3);
     this.addMesh(apronMesh, 'gravel', false, true);
-    this.owned.push(gravel.map, gravel.normalMap, gravelMat, apron);
+    this.owned.push(apron);
 
     const pad = level.props.find((p) => p.kind === 'pad');
     if (pad) {
-      const tex = padTexture(512);
-      const mat = new THREE.MeshStandardMaterial({ map: tex, roughness: 0.82, metalness: 0, polygonOffset: true, polygonOffsetFactor: -3, polygonOffsetUnits: -3 });
-      const geo = new THREE.PlaneGeometry(pad.size[0], pad.size[2]);
+      const [px, py, pz] = pad.position;
+      const [w, h, d] = pad.size;
+      const art = lib.texture('training:pad-art', () => padTexture(512));
+      const overlay = { texture: art, min: new THREE.Vector2(px - w / 2, pz - d / 2), size: new THREE.Vector2(w, d) };
+      const mat = lib.material('asphalt', { uvMeters: 1, roughness: 0.9, polygonOffset: -3, patch: { overlay } });
+      const geo = new THREE.PlaneGeometry(w, d);
       geo.rotateX(-Math.PI / 2);
+      const puv = geo.attributes.uv as THREE.BufferAttribute;
+      for (let i = 0; i < puv.count; i++) puv.setXY(i, geo.attributes.position.getX(i), geo.attributes.position.getZ(i));
       const m = new THREE.Mesh(geo, mat);
-      m.position.set(pad.position[0], pad.position[1] + pad.size[1], pad.position[2]);
+      m.position.set(px, py + h, pz);
       this.addMesh(m, 'pad', false, true);
-      this.owned.push(tex, mat, geo);
+      this.owned.push(geo);
     }
 
     for (const m of batch.build(this.group)) {
@@ -141,14 +159,12 @@ export class OutdoorLevelView implements LevelView {
       m.receiveShadow = true;
       this.owned.push(m.geometry);
     }
-    this.owned.push(low);
 
-    const bark = barkTexture(128);
-    const barkMat = applyWind(new THREE.MeshStandardMaterial({ vertexColors: true, map: bark, roughness: 0.95, metalness: 0, envMapIntensity: 0.4 }), this.wind, false);
-    const leavesMat = applyWind(new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.82, metalness: 0, side: THREE.DoubleSide, envMapIntensity: 0.5 }), this.wind, true);
-    const card = leafCardTexture(256);
-    const cardMat = applyWind(new THREE.MeshStandardMaterial({ vertexColors: true, map: card, alphaTest: 0.5, side: THREE.DoubleSide, roughness: 0.8, metalness: 0, envMapIntensity: 0.5 }), this.wind, true);
-    this.owned.push(bark, barkMat, leavesMat, card, cardMat);
+    const barkMat = lib.material('bark', { uvMeters: 1, vertexColors: true, roughness: 0.95, envMapIntensity: 0.4, patch: { wind: { uniforms: this.wind, flutter: false } } });
+    const leavesMat = lib.custom('training:leaves', () =>
+      applyEnvPatch(new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.82, metalness: 0, side: THREE.DoubleSide, envMapIntensity: 0.5 }), { wind: { uniforms: this.wind, flutter: true } }),
+    );
+    const cardMat = lib.material('foliage', { vertexColors: true, roughness: 0.8, envMapIntensity: 0.5, patch: { wind: { uniforms: this.wind, flutter: true } } });
     const vegMeshes = veg.build(this.group, { bark: barkMat, leaves: leavesMat, cards: cardMat });
     for (const m of [vegMeshes.bark, vegMeshes.leaves]) {
       if (!m) continue;
@@ -237,6 +253,9 @@ export class OutdoorLevelView implements LevelView {
     this.sun.shadow.needsUpdate = true;
   }
 
+  /** Outdoors nothing env-maps itself: the GameView's capture only feeds scene.environment / the SH probe. */
+  setEnvironment(_env: THREE.Texture): void {}
+
   dispose(): void {
     this.group.removeFromParent();
     this.sky.dispose();
@@ -248,6 +267,7 @@ export class OutdoorLevelView implements LevelView {
     this.grass.dispose();
     for (const d of this.props.disposables) d.dispose();
     for (const d of this.owned) d.dispose();
+    this.scope.dispose();
     this.group.clear();
   }
 }

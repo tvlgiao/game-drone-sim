@@ -4,7 +4,7 @@
  * without scene fog so the silhouettes stay readable. One merged, vertex-coloured, unlit-ish draw.
  */
 import * as THREE from 'three';
-import { mulberry32 } from '../env-materials/texgen';
+import { mulberry32 } from '../materials/texgen';
 
 interface Layer {
   radius: number;

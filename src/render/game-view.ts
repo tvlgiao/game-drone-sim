@@ -1,7 +1,7 @@
 /** The only render entry used by main.ts: owns renderer, scene, cameras, post FX and VFX. */
 import * as THREE from 'three';
 import { LosMarker } from './los-marker';
-import { MOBILE_MAX_TEXTURE, qualityProfile, type QualityProfile } from '../core/quality';
+import { MOBILE_MAX_TEXTURE, QUALITY_PROFILES, qualityProfile, type QualityProfile } from '../core/quality';
 import type { FormFactor } from '../core/device';
 import type { CameraMode, DroneState, GameEvent, LevelDef, QualityTier } from '../types';
 import type { LevelRuntime } from '../levels/runtime';
@@ -17,7 +17,7 @@ import { ContactShadow } from './vfx/contact-shadow';
 import { VfxDirector } from './vfx/director';
 import { XrPanel } from './xr-panel';
 import { HeadingArrow } from './heading-arrow';
-import { captureEnvironment } from './ibl';
+import { captureEnvironment, captureLightProbe } from './ibl';
 import { levelLook, type LevelLook, type ToneMapper } from './looks';
 import { MaterialLibrary } from './materials/library';
 import { findSun, SunCascades } from './shadows';
@@ -53,6 +53,8 @@ const _focus = new THREE.Vector3();
 const _yq = new THREE.Quaternion();
 const _ye = new THREE.Euler(0, 0, 0, 'YXZ');
 const Y_AXIS = new THREE.Vector3(0, 1, 0);
+/** Lighting the SH probe is captured under: a high tier's light rig, without shadow maps (none are rendered for it). */
+const REFERENCE_LIGHTING: QualityProfile = { ...QUALITY_PROFILES.high, shadows: false };
 /** Quest 2 budget (72 Hz, two eyes on a mobile GPU): no post FX, no shadow maps, small particle pools. */
 const XR_TIER: QualityTier = 'low';
 /** head height used until the headset reports a pose (local-floor space) */
@@ -86,8 +88,10 @@ export class GameView {
   /** look-test override of the level's tone mapper (render preview) */
   private toneOverride: ToneMapper | null = null;
   private readonly cascades = new SunCascades();
-  /** PMREM capture of the current level (null until a tier with environment maps asks for it) */
+  /** PMREM capture of the current level (null until a tier with environment maps, or the level, asks for it) */
   private envCapture: THREE.WebGLRenderTarget | null = null;
+  /** SH irradiance of the same view: the ambient on tiers without environment maps (null until asked for) */
+  private shProbe: THREE.LightProbe | null = null;
   private readonly sunDir = new THREE.Vector3(0, 1, 0);
   private renderScale = 1;
   private width = 1;
@@ -179,9 +183,7 @@ export class GameView {
    */
   loadLevel(level: LevelRuntime): void {
     this.cascades.detach();
-    this.envCapture?.dispose();
-    this.envCapture = null;
-    this.scene.environment = null;
+    this.dropCapture();
     this.levelView.dispose();
     this.rings.group.removeFromParent();
     this.rings.dispose();
@@ -195,9 +197,7 @@ export class GameView {
   }
 
   private buildLevelView(def: LevelDef): LevelView {
-    return def.kind === 'indoor'
-      ? new IndoorLevelView(def, this.renderer, this.mats, this.form)
-      : new OutdoorLevelView(def, this.renderer, this.renderer.capabilities.getMaxAnisotropy());
+    return def.kind === 'indoor' ? new IndoorLevelView(def, this.renderer, this.library, this.form) : new OutdoorLevelView(def, this.renderer, this.library);
   }
 
   private attachLevel(level: LevelRuntime): void {
@@ -437,8 +437,7 @@ export class GameView {
     this.levelView.refreshShadows();
     const sun = findSun(this.levelView.group);
     if (sun) this.sunDir.setFromMatrixPosition(sun.matrixWorld).sub(_v.setFromMatrixPosition(sun.target.matrixWorld)).normalize();
-    this.scene.environment = p.envMap ? this.environmentFor(p) : null;
-    this.scaleHemiLights(this.scene.environment !== null && this.envCapture !== null ? look.hemiWithIbl : 1);
+    this.applyEnvironment(p, look);
     if (p.post) {
       if (!this.post) this.post = new PostFX(r, this.scene, this.rig.camera);
       this.post.setBloomThreshold(Math.max(this.levelView.bloomThreshold, look.bloom.threshold));
@@ -456,20 +455,41 @@ export class GameView {
   }
 
   /**
-   * Captured environment of the current level, made on first use: the room or meadow as lit, seen
-   * from the middle of the course. Falls back to the level view's stand-in if the capture fails.
+   * One image-based-lighting path for every level (ibl.ts): the level is captured from its own probe point.
+   * Tiers with envMap light everything with the PMREM; tiers without get the SH irradiance of the same
+   * view as a LightProbe, so their ambient keeps the level's mood instead of a flat hemisphere colour. A
+   * level whose materials box-project the capture (the loft's floor and windows) gets it on every tier.
+   * Either way the level's hemisphere light drops to the look's `hemiWithIbl`: the capture already holds
+   * the sky / room ambient, counting it twice would flatten the light.
+   */
+  private applyEnvironment(p: QualityProfile, look: Readonly<LevelLook>): void {
+    const probe = this.levelView.probe;
+    const env = p.envMap || probe.always ? this.environmentFor(p) : null;
+    if (env && this.envCapture) this.levelView.setEnvironment(env);
+    this.scene.environment = p.envMap ? env : null;
+    const sh = p.envMap ? null : this.lightProbeFor();
+    if (this.shProbe) this.shProbe.visible = sh !== null;
+    const ibl = (this.scene.environment !== null && this.envCapture !== null) || sh !== null;
+    this.scaleHemiLights(ibl ? look.hemiWithIbl : 1);
+  }
+
+  /**
+   * Captured environment of the current level, made on first use: the room or meadow as lit, seen from
+   * the level's probe point. Falls back to the level view's stand-in if the capture fails.
    */
   private environmentFor(p: QualityProfile): THREE.Texture {
     if (!this.envCapture) {
-      const def = this.level;
-      const pos = def.kind === 'indoor' ? new THREE.Vector3(0, Math.min(2.6, def.room.size[1] * 0.45), 0) : new THREE.Vector3(0, 4, 0);
+      const probe = this.levelView.probe;
       this.levelView.group.updateMatrixWorld(true);
       try {
         this.envCapture = captureEnvironment(this.renderer, this.scene, [this.levelView.group], {
-          position: pos,
-          size: p.envSize,
-          near: def.kind === 'indoor' ? 0.05 : 0.5,
-          far: def.kind === 'indoor' ? 60 : 1200,
+          position: probe.position,
+          size: Math.max(p.envSize, probe.minSize),
+          near: probe.near,
+          far: probe.far,
+          // the level's env-mapped materials compile once, against a blank map of the final size
+          standIn: (stand) => this.levelView.setEnvironment(stand),
+          sceneStandIn: p.envMap,
         });
       } catch {
         return this.levelView.environment;
@@ -478,6 +498,40 @@ export class GameView {
       this.levelView.refreshShadows();
     }
     return this.envCapture.texture;
+  }
+
+  /**
+   * SH light probe of the level from its probe point (null if the GPU cannot read it back). It is taken
+   * with the level lit as on a high tier (every spot and practical on, shadow maps aside), so the ambient
+   * of a tier that drops lights still carries the full rig's colour: the low / VR loft keeps the warm
+   * washers' bounce instead of reading cold.
+   */
+  private lightProbeFor(): THREE.LightProbe | null {
+    if (!this.shProbe) {
+      const probe = this.levelView.probe;
+      this.levelView.setQuality(REFERENCE_LIGHTING);
+      this.levelView.group.updateMatrixWorld(true);
+      try {
+        this.shProbe = captureLightProbe(this.renderer, this.scene, [this.levelView.group], probe.position, probe.near, probe.far, null);
+      } catch {
+        return null;
+      } finally {
+        this.levelView.setQuality(this.profile);
+      }
+      this.shProbe.intensity = this.levelView.environmentIntensity;
+      this.scene.add(this.shProbe);
+      this.levelView.refreshShadows();
+    }
+    return this.shProbe;
+  }
+
+  private dropCapture(): void {
+    this.envCapture?.dispose();
+    this.envCapture = null;
+    this.shProbe?.removeFromParent();
+    this.shProbe?.dispose();
+    this.shProbe = null;
+    this.scene.environment = null;
   }
 
   /**
@@ -550,8 +604,7 @@ export class GameView {
     this.post?.dispose();
     this.post = null;
     this.cascades.detach();
-    this.envCapture?.dispose();
-    this.envCapture = null;
+    this.dropCapture();
     this.losMarker.dispose();
     this.xrPanel.dispose();
     this.arrow.dispose();

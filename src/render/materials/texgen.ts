@@ -1,12 +1,14 @@
 /**
- * DOM-free procedural texture toolkit for the environments: tileable noise fields, height → tangent-space
- * normal maps, packed AO/roughness/metalness maps, all written straight into DataTextures (no canvas, so
- * the generators also run in unit tests). Row 0 of every field is v = 0 (DataTexture does not flip).
+ * DOM-free field-based texture toolkit (whole-image passes; `noise.ts` is the per-texel one and owns the
+ * shared scalar helpers): tileable noise fields, height → tangent-space normal maps, packed AO / roughness /
+ * metalness maps, written straight into DataTextures (no canvas, so the generators run in unit tests).
+ * Row 0 of every field is v = 0 (DataTexture does not flip).
  */
 import * as THREE from 'three';
 import { fbmField, mulberry32 } from '../textures';
+import { clamp01, mix, smooth } from './noise';
 
-export { fbmField, mulberry32 };
+export { clamp01, fbmField, mix, mulberry32, smooth };
 
 /** A square-or-not scalar field, row-major, row 0 = v 0. */
 export interface Field {
@@ -150,12 +152,6 @@ function clamp255(v: number): number {
   return v <= 0 ? 0 : v >= 1 ? 255 : Math.round(v * 255);
 }
 
-export const clamp01 = (v: number): number => (v < 0 ? 0 : v > 1 ? 1 : v);
-export const smooth = (e0: number, e1: number, x: number): number => {
-  const t = clamp01((x - e0) / (e1 - e0));
-  return t * t * (3 - 2 * t);
-};
-export const mix = (a: number, b: number, t: number): number => a + (b - a) * t;
 
 export interface TexOptions {
   srgb?: boolean;

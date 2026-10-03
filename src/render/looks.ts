@@ -48,7 +48,8 @@ const NIGHT: LevelLook = {
   vignette: { offset: 0.32, darkness: 0.5 },
   grain: 0.05,
   aerial: null,
-  hemiWithIbl: 1,
+  // the captured room already carries the moonlit-window ambient the cool hemisphere stands in for
+  hemiWithIbl: 0.55,
 };
 
 /** Training Field: clear late-morning sun, crisp shadows, haze into the treeline. */

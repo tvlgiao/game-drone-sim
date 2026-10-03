@@ -164,7 +164,8 @@ export class Lights {
       s.shadow.map?.dispose();
       s.shadow.map = null;
       s.shadow.needsUpdate = true;
-      s.visible = p.tier !== 'low' || i === 0;
+      // low / VR keeps the warm key and the brick wall-washer: they set the loft's mood (the cool fill goes)
+      s.visible = p.tier !== 'low' || i < 2;
     });
     const sorted = [...this.practicals].sort((a, b) => a.priority - b.priority);
     const budget = Math.max(0, p.pointLights - 1); // ring light always counts

@@ -1,11 +1,11 @@
 /**
- * Countryside ground: a flat meadow under the course that rolls into gentle farmland past the treeline
- * (visual only: physics keeps the flat y = 0 plane, and nothing rises within FLAT_RADIUS), patchwork
- * fields in the distance, the mowed flying field with view-dependent stripes, an asphalt landing pad
- * and a gravel apron under the pilot. Textures are procedural DataTextures (DOM-free) except the pad art.
+ * Countryside ground geometry: a flat meadow under the course that rolls into gentle farmland past the
+ * treeline (visual only: physics keeps the flat y = 0 plane, and nothing rises within FLAT_RADIUS),
+ * patchwork fields in the distance, the mowed flying field, and the landing-pad markings. Surfaces come
+ * from the material library (grass, gravel, asphalt); the palette rides on vertex colours.
  */
 import * as THREE from 'three';
-import { blur, clamp01, dataTexture, fbm, field, mix, mulberry32, normalFromHeight, rgba, smooth, worley } from '../env-materials/texgen';
+import { clamp01, mulberry32, smooth } from '../materials/texgen';
 
 /** metres per grass detail tile */
 export const GRASS_TILE = 2.5;
@@ -142,58 +142,6 @@ export function meadowGeometry(radius: number, rings = 72, sectors = 120): THREE
   return g;
 }
 
-/** Near-white tileable grass detail (multiplied over vertex colours) with a matching normal map. */
-export function grassDetail(size: number, anisotropy: number): { map: THREE.DataTexture; normalMap: THREE.DataTexture } {
-  const base = fbm(size, size, 8, 4, 31, 0.55);
-  const clover = worley(size, Math.round(size / 18), 32);
-  const h = field(size);
-  const tint = new Float32Array(size * size);
-  const rnd = mulberry32(77);
-  // blade strokes: short leaning lines, lighter tips, darker roots (wrapped)
-  for (let i = 0; i < size * size * 0.09; i++) {
-    const x0 = rnd() * size;
-    const y0 = rnd() * size;
-    const len = 3 + rnd() * 6;
-    const lean = (rnd() - 0.5) * 1.2;
-    const light = rnd();
-    for (let k = 0; k < len; k++) {
-      const x = Math.floor(x0 + lean * k + size) % size;
-      const y = Math.floor(y0 + k) % size;
-      const j = y * size + x;
-      const t = k / len;
-      h.d[j] = Math.max(h.d[j]!, 0.4 + t * 0.6);
-      tint[j] = mix(-0.12, 0.12 * light, t);
-    }
-  }
-  const hb = blur(h, 1);
-  const map = rgba(size, size, (i, _x, _y, c) => {
-    const cl = clover.dist.d[i]! < 0.32 && clover.id.d[i]! > 0.82 ? 0.06 : 0;
-    const v = 0.8 + base.d[i]! * 0.26 + tint[i]! * 0.5;
-    c[0] = Math.min(1, v * (0.93 - cl));
-    c[1] = Math.min(1, v * (1 + cl * 0.5));
-    c[2] = Math.min(1, v * (0.86 - cl));
-  });
-  return { map: dataTexture(map, size, size, { srgb: true, anisotropy }), normalMap: dataTexture(normalFromHeight(hb, size / 96), size, size, { anisotropy }) };
-}
-
-/** Rolled gravel: packed stones (Worley cells) in greys and buff, with a normal map. */
-export function gravelSet(size: number, anisotropy: number): { map: THREE.DataTexture; normalMap: THREE.DataTexture } {
-  const stones = worley(size, Math.round(size / 7), 91);
-  const fine = fbm(size, size, 32, 3, 92, 0.6);
-  const h = field(size);
-  for (let i = 0; i < size * size; i++) h.d[i] = (1 - smooth(0.15, 0.62, stones.dist.d[i]!)) * 0.8 + fine.d[i]! * 0.2;
-  const map = rgba(size, size, (i, _x, _y, c) => {
-    const id = stones.id.d[i]!;
-    const edge = smooth(0.45, 0.7, stones.dist.d[i]!);
-    const v = (0.5 + id * 0.35) * (1 - edge * 0.55) * (0.9 + fine.d[i]! * 0.2);
-    const warm = id > 0.6 ? 1.06 : 0.98;
-    c[0] = v * warm;
-    c[1] = v * 0.97;
-    c[2] = v * (id > 0.6 ? 0.86 : 0.95);
-  });
-  return { map: dataTexture(map, size, size, { srgb: true, anisotropy }), normalMap: dataTexture(normalFromHeight(h, size / 64), size, size, { anisotropy }) };
-}
-
 function canvas(w: number, h = w): [HTMLCanvasElement, CanvasRenderingContext2D] {
   const c = document.createElement('canvas');
   c.width = w;
@@ -204,25 +152,13 @@ function canvas(w: number, h = w): [HTMLCanvasElement, CanvasRenderingContext2D]
 }
 
 /**
- * Asphalt landing pad: aggregate-speckled blacktop, worn white border, orange target ring and a teal H,
- * a little tyre / skid rubber. 1 texel ≈ 1 cm at 512.
+ * Landing-pad markings as an RGBA overlay for the library's asphalt (`overlay` patch): worn white border,
+ * orange target ring, teal H and tyre rubber; transparent where the blacktop shows. 1 texel ≈ 1 cm at 512.
  */
 export function padTexture(size = 512): THREE.CanvasTexture {
   const [c, ctx] = canvas(size);
-  const n = fbm(128, 128, 16, 3, 9, 0.6);
-  const img = ctx.createImageData(size, size);
   const rnd = mulberry32(5);
-  for (let y = 0; y < size; y++) {
-    for (let x = 0; x < size; x++) {
-      const i = (y * size + x) * 4;
-      const v = 52 + n.d[((y >> 2) & 127) * 128 + ((x >> 2) & 127)]! * 22 + (rnd() < 0.08 ? (rnd() - 0.3) * 60 : 0);
-      img.data[i] = v;
-      img.data[i + 1] = v;
-      img.data[i + 2] = v * 1.03;
-      img.data[i + 3] = 255;
-    }
-  }
-  ctx.putImageData(img, 0, 0);
+  ctx.clearRect(0, 0, size, size);
   const s = size / 512;
   ctx.globalAlpha = 0.92;
   ctx.strokeStyle = '#ecebe4';
@@ -241,14 +177,15 @@ export function padTexture(size = 512): THREE.CanvasTexture {
   ctx.fillRect(size / 2 + hw / 2 - bar, size / 2 - hh / 2, bar, hh);
   ctx.fillRect(size / 2 - hw / 2, size / 2 - bar / 2, hw, bar);
   ctx.globalAlpha = 1;
-  // wear: asphalt grain shows through the paint
+  // wear: the asphalt grain shows through the paint
+  ctx.globalCompositeOperation = 'destination-out';
   for (let i = 0; i < 9000 * s * s; i++) {
-    const v = 40 + rnd() * 30;
-    ctx.fillStyle = `rgba(${v},${v},${v},${0.35 + rnd() * 0.4})`;
+    ctx.fillStyle = 'rgba(0,0,0,' + (0.35 + rnd() * 0.5).toFixed(3) + ')';
     ctx.fillRect(rnd() * size, rnd() * size, 1.5 * s, 1.5 * s);
   }
+  ctx.globalCompositeOperation = 'source-over';
   // skid rubber across the centre
-  ctx.strokeStyle = 'rgba(15,15,16,0.18)';
+  ctx.strokeStyle = 'rgba(15,15,16,0.22)';
   ctx.lineCap = 'round';
   for (let i = 0; i < 7; i++) {
     ctx.lineWidth = (6 + rnd() * 10) * s;
@@ -302,34 +239,3 @@ export function fieldGeometry(half: number, stripes: number): THREE.BufferGeomet
   g.computeVertexNormals();
   return g;
 }
-
-/**
- * Mowing stripes read by the light: grass laid towards the viewer looks lighter, away darker. The stripe
- * parity comes from world x; the sheen from the horizontal view direction (guarded normalisation).
- */
-export function patchStripes(mat: THREE.MeshStandardMaterial, half: number, stripes: number, strength = 0.16): void {
-  mat.onBeforeCompile = (shader) => {
-    shader.uniforms.uStripeHalf = { value: half };
-    shader.uniforms.uStripeW = { value: (half * 2) / stripes };
-    shader.uniforms.uStripeK = { value: strength };
-    shader.vertexShader = shader.vertexShader
-      .replace('#include <common>', '#include <common>\nvarying vec3 vStripeWorld;')
-      .replace('#include <project_vertex>', '#include <project_vertex>\nvStripeWorld = ( modelMatrix * vec4( transformed, 1.0 ) ).xyz;');
-    shader.fragmentShader = shader.fragmentShader
-      .replace('#include <common>', '#include <common>\nvarying vec3 vStripeWorld;\nuniform float uStripeHalf;\nuniform float uStripeW;\nuniform float uStripeK;')
-      .replace(
-        '#include <color_fragment>',
-        `#include <color_fragment>
-{
-  vec2 toEye = cameraPosition.xz - vStripeWorld.xz;
-  float len = length( toEye );
-  float facing = len > 1e-3 ? toEye.y / len : 0.0;
-  float parity = mod( floor( ( vStripeWorld.x + uStripeHalf ) / uStripeW ), 2.0 ) * 2.0 - 1.0;
-  float inside = step( abs( vStripeWorld.x ), uStripeHalf ) * step( abs( vStripeWorld.z ), uStripeHalf );
-  diffuseColor.rgb *= 1.0 + uStripeK * parity * facing * inside;
-}`,
-      );
-  };
-  mat.customProgramCacheKey = () => 'mow-stripes';
-}
-

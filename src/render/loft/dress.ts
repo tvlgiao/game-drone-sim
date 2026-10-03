@@ -1,8 +1,8 @@
 /** Small geometry helpers shared by the loft builders: atlas decals, catenary cables, finish presets. */
 import * as THREE from 'three';
 import type { AddOptions } from '../batcher';
-import { decalRect } from '../env-materials/loft-canvas';
-import { FINISH } from '../env-materials/loft-materials';
+import { decalRect } from './art';
+import { FINISH } from './materials';
 
 /** Batcher options for a prop-material finish preset. */
 export function finish(name: keyof typeof FINISH, castShadow = true): AddOptions {

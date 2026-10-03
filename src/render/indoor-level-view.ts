@@ -1,7 +1,8 @@
 /**
  * Night-loft scenery: room shell, props, the city outside, lighting rig, lamp halos, window shafts and
- * dust. The loft owns its materials (built per level, freed on switch) and captures a probe of the lit
- * room for reflections, so floor, glass and metal reflect the actual windows, bulbs and neon.
+ * dust. Materials come from a library scope (freed on switch). The GameView captures the lit room from
+ * `probe` (ibl.ts) and hands it back through `setEnvironment`, so floor, glass and metal reflect the actual
+ * windows, bulbs and neon; the floor and windows box-project it on every tier.
  */
 import * as THREE from 'three';
 import type { FormFactor } from '../core/device';
@@ -9,13 +10,13 @@ import { isQuestBrowser } from '../core/xr';
 import { MOBILE_MAX_TEXTURE, qualityProfile, type QualityProfile } from '../core/quality';
 import type { IndoorLevel } from '../types';
 import { StaticBatcher } from './batcher';
-import { LoftMaterials } from './env-materials/loft-materials';
-import type { LevelFrame, LevelView } from './level-view';
+import type { LevelFrame, LevelProbe, LevelView } from './level-view';
 import { Lights, MOON_DIR } from './lights';
 import { buildCity, type CityBackdrop } from './loft/city';
 import { Halos } from './loft/halos';
+import { LoftMaterials } from './loft/materials';
 import { MoonPools } from './loft/moon-pools';
-import type { Materials } from './materials';
+import type { MaterialLibrary, MaterialScope } from './materials/library';
 import { buildProps, type LiveProps } from './props';
 import { buildRoom } from './room';
 import { Atmosphere } from './vfx/atmosphere';
@@ -34,15 +35,15 @@ const NO_RECEIVE = new Set(['glass', 'glow', 'bulbShell', 'neon', 'spill']);
 const RENDER_ORDER: Record<string, number> = { decals: 1, spill: 4, neon: 4, bulbShell: 4, glass: 6 };
 /** Lights' moon intensity with shadows (its constructor value) */
 const MOON_INTENSITY = 2.6;
-const PROBE_SIZE = 256;
 
 export class IndoorLevelView implements LevelView {
   readonly group = new THREE.Group();
   readonly background = new THREE.Color(0x04060b);
   readonly fog: THREE.FogExp2;
-  readonly environment: THREE.Texture;
   readonly environmentIntensity = 0.85;
   readonly bloomThreshold = 0.85;
+  readonly probe: LevelProbe;
+  private readonly scope: MaterialScope;
   private readonly mats: LoftMaterials;
   private readonly lights: Lights;
   private readonly live: LiveProps;
@@ -51,16 +52,18 @@ export class IndoorLevelView implements LevelView {
   private readonly halos: Halos;
   private readonly pools: MoonPools;
   private readonly atmos: Atmosphere;
-  private readonly probe: THREE.WebGLRenderTarget;
+  private standIn: THREE.Texture | null = null;
+  private readonly renderer: THREE.WebGLRenderer;
 
-  /** `_shared` (the GameView's drone materials) is not used by the loft: it owns its own set. */
-  constructor(level: IndoorLevel, renderer: THREE.WebGLRenderer, _shared: Materials, form: FormFactor) {
+  constructor(level: IndoorLevel, renderer: THREE.WebGLRenderer, library: MaterialLibrary, form: FormFactor) {
+    this.renderer = renderer;
     this.group.name = 'world';
     this.fog = new THREE.FogExp2(level.env.fog.color, 2.15 / level.env.fog.viewDistance);
     // phones, tablets and the Quest (mobile GPU + CPU: generation time and memory) get half-size maps
     const quest = typeof navigator !== 'undefined' && isQuestBrowser(navigator.userAgent);
     const maxTexture = form === 'desktop' && !quest ? 2048 : MOBILE_MAX_TEXTURE / 2;
-    this.mats = new LoftMaterials({ anisotropy: renderer.capabilities.getMaxAnisotropy(), maxTexture, room: level.room.size, puddles: PUDDLES });
+    this.scope = library.scope(level.id);
+    this.mats = new LoftMaterials(this.scope, { anisotropy: renderer.capabilities.getMaxAnisotropy(), maxTexture, room: level.room.size, puddles: PUDDLES });
     const batch = new StaticBatcher();
     const windows = buildRoom(level.room, this.mats, batch);
     this.live = buildProps(level.props, this.mats, batch, this.group);
@@ -76,9 +79,8 @@ export class IndoorLevelView implements LevelView {
     // light cookies: reflector rings break up the spot pools
     for (const s of this.lights.spots) s.map = this.mats.cookie;
 
-    this.probe = captureProbe(renderer, this.group, this.mats.box.probe, this.mats);
-    this.environment = this.probe.texture;
-    this.mats.setProbe(this.environment);
+    // the capture point is the box projection's origin: reflections line up with the walls
+    this.probe = { position: this.mats.box.probe, near: 0.05, far: 85, minSize: 128, always: true };
 
     this.halos = new Halos(this.live.lamps);
     this.pools = new MoonPools(windows, MOON_DIR);
@@ -89,6 +91,16 @@ export class IndoorLevelView implements LevelView {
       .map((p) => new THREE.Vector3(p.position[0], p.position[1] + (p.kind === 'lamp-floor' ? p.size[1] - 0.2 : 0), p.position[2]));
     this.atmos = new Atmosphere(windows, MOON_DIR, warm, qualityProfile('ultra', form).particles);
     this.group.add(this.atmos.shafts, this.atmos.dust);
+  }
+
+  /** Fallback only (the capture failed): the old hand-built dark-loft stand-in, made on first use. */
+  get environment(): THREE.Texture {
+    this.standIn ??= this.lights.buildEnvironment(this.renderer);
+    return this.standIn;
+  }
+
+  setEnvironment(env: THREE.Texture): void {
+    this.mats.setProbe(env);
   }
 
   get ringLight(): THREE.PointLight {
@@ -106,10 +118,12 @@ export class IndoorLevelView implements LevelView {
     this.lights.setQuality(p);
     this.atmos.setQuality(p.particles, p.shafts);
     this.halos.setBloom(p.bloom);
-    // without shadow maps the moon would light the whole floor through the walls: keep a little of it as
-    // fill and draw the window pools instead
+    // Without shadow maps the moon would light every wall that faces it through the brick: a cold wash the
+    // shadowed tiers never show. There it is off (one light less on the Quest); the window pools draw the
+    // moonlight on the floor and the SH probe (ibl.ts) carries the room's ambient, warm like the high tiers.
     this.pools.mesh.visible = !p.shadows;
-    this.lights.moon.intensity = p.shadows ? MOON_INTENSITY : MOON_INTENSITY * 0.22;
+    this.lights.moon.visible = p.shadows;
+    this.lights.moon.intensity = MOON_INTENSITY;
   }
 
   refreshShadows(): void {
@@ -125,36 +139,7 @@ export class IndoorLevelView implements LevelView {
     this.pools.dispose();
     this.atmos.dispose();
     this.lights.dispose();
-    this.probe.dispose();
-    this.mats.dispose();
+    this.scope.dispose();
     this.group.clear();
   }
-}
-
-/**
- * One-off PMREM of the lit room from `at` (before shafts and dust exist). Shadow maps are off for the
- * capture: they are not rendered yet, and the probe is blurry enough not to miss them. Leaves floor and
- * glass pointing at a disposed stand-in: the caller sets the real probe right after.
- */
-function captureProbe(renderer: THREE.WebGLRenderer, root: THREE.Object3D, at: THREE.Vector3, mats: LoftMaterials): THREE.WebGLRenderTarget {
-  const pmrem = new THREE.PMREMGenerator(renderer);
-  // a blank stand-in of the same PMREM size: the capture then compiles the materials with the env-map
-  // programs they will use in the game, instead of compiling every loft shader twice
-  const stand = pmrem.fromScene(new THREE.Scene(), 0, 0.1, 1, { size: PROBE_SIZE });
-  const scene = new THREE.Scene();
-  scene.background = new THREE.Color(0x05070c);
-  scene.environment = stand.texture;
-  mats.setProbe(stand.texture);
-  const parent = root.parent;
-  scene.add(root);
-  scene.updateMatrixWorld(true);
-  const shadows = renderer.shadowMap.enabled;
-  renderer.shadowMap.enabled = false;
-  const target = pmrem.fromScene(scene, 0, 0.05, 85, { size: PROBE_SIZE, position: at });
-  pmrem.dispose();
-  stand.dispose();
-  renderer.shadowMap.enabled = shadows;
-  scene.remove(root);
-  parent?.add(root);
-  return target;
 }

@@ -5,7 +5,7 @@
  */
 import * as THREE from 'three';
 import type { WindowInfo } from '../room';
-import { dataTexture, rgba, smooth } from '../env-materials/texgen';
+import { dataTexture, rgba, smooth } from '../materials/texgen';
 
 /** one glazed pane: bright centre, dark mullion border, soft falloff */
 function paneTexture(size: number): THREE.DataTexture {
@@ -54,7 +54,7 @@ export class MoonPools {
     g.computeBoundingSphere();
     const mat = new THREE.MeshBasicMaterial({
       map: paneTexture(64),
-      color: new THREE.Color(0.1, 0.13, 0.24),
+      color: new THREE.Color(0.011, 0.013, 0.019),
       transparent: true,
       blending: THREE.AdditiveBlending,
       depthWrite: false,

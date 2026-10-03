@@ -72,19 +72,19 @@ describe('procedural texture sets', () => {
     }
     expect(clear).toBeGreaterThan(200);
     expect(solid).toBeGreaterThan(200);
-    const brick = generatePbr('brick', 32).albedo.data;
-    for (let i = 3; i < brick.length; i += 4) expect(brick[i]).toBe(255);
+    const rock = generatePbr('rock', 32).albedo.data;
+    for (let i = 3; i < rock.length; i += 4) expect(rock[i]).toBe(255);
   });
 
   it('metals carry metalness in the ARM blue channel, dielectrics none', () => {
-    const blue = (k: 'brushedMetal' | 'concrete') => {
+    const blue = (k: 'brushedMetal' | 'plaster') => {
       const d = generatePbr(k, 32).arm.data;
       let s = 0;
       for (let i = 2; i < d.length; i += 4) s += d[i]!;
       return s / (d.length / 4) / 255;
     };
     expect(blue('brushedMetal')).toBeCloseTo(1, 2);
-    expect(blue('concrete')).toBe(0);
+    expect(blue('plaster')).toBe(0);
   });
 });
 

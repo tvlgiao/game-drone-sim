@@ -8,8 +8,8 @@ import * as THREE from 'three';
 import { RoundedBoxGeometry } from 'three/examples/jsm/geometries/RoundedBoxGeometry.js';
 import type { PropDef } from '../types';
 import { StaticBatcher, type AddOptions } from './batcher';
-import { DECAL, decalRect } from './env-materials/loft-canvas';
-import { WOOD, type LoftMaterials } from './env-materials/loft-materials';
+import { DECAL, decalRect } from './loft/art';
+import { WOOD, type LoftMaterials } from './loft/materials';
 import { decalPlane, finish } from './loft/dress';
 import { mulberry32 } from './textures';
 

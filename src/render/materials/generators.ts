@@ -1,7 +1,8 @@
 /**
- * Night-loft surface maps, generated procedurally (no external assets, no licence to track): albedo,
- * tangent-space normal and packed ORM (R ambient occlusion, G roughness, B metalness) per surface.
- * Every generator is deterministic and DOM-free.
+ * Field-based surface generators (texgen.ts): albedo, tangent-space normal and packed ORM (R ambient
+ * occlusion, G roughness, B metalness — the CC0 ARM layout) per surface. The library uses the brick, slab,
+ * concrete, wood and gravel sets as the procedural stage of its presets (`library.ts`); the rest are
+ * single-purpose maps the loft art asks the library to cache (`library.custom`). Deterministic, DOM-free.
  */
 import type * as THREE from 'three';
 import { blur, clamp01, dataTexture, fbm, field, mix, mulberry32, normalFromHeight, rgba, smooth, worley, type Field } from './texgen';
@@ -70,8 +71,8 @@ function brickFields(size: number, seed: number): BrickFields {
   return { height, edge, brickRand, brickId, lo, mid, hi };
 }
 
-/** Reclaimed red brick (north / west walls) and the same courses painted over in warm white (east / south). */
-export function brickSets(size: number, anisotropy: number, seed = 3): { red: PbrSet; painted: PbrSet } {
+/** Reclaimed red brick (painted walls are the same courses under the library's `paint` patch). */
+export function brickSet(size: number, anisotropy: number, seed = 3): PbrSet {
   const f = brickFields(size, seed);
   const normal = normalFromHeight(f.height, size / 128);
   const ao = blur({ w: size, h: size, d: Float32Array.from(f.edge.d, (e) => smooth(-6, 5, e)) }, 2);
@@ -105,27 +106,8 @@ export function brickSets(size: number, anisotropy: number, seed = 3): { red: Pb
     c[1] = mix(0.97, 0.78 + f.brickRand[id * 5 + 1]! * 0.14 + (f.hi.d[i]! - 0.5) * 0.1, brick);
     c[2] = 0;
   });
-  // clean limewash: the mortar lines and brick faces still read through; wear comes from world-space grime and decals
-  const paintAlbedo = rgba(size, size, (i, _x, _y, c) => {
-    const brick = smooth(-1, 1, f.edge.d[i]!);
-    const v = (0.9 + (f.lo.d[i]! - 0.5) * 0.12 + (f.hi.d[i]! - 0.5) * 0.06) * mix(0.84, 1, brick);
-    const id = f.brickId[i]!;
-    const ghost = 1 - (f.brickRand[id * 5]! - 0.5) * 0.06;
-    c[0] = 0.78 * v * ghost;
-    c[1] = 0.76 * v * ghost;
-    c[2] = 0.72 * v * ghost;
-  });
-  const paintOrm = rgba(size, size, (i, _x, _y, c) => {
-    c[0] = 0.5 + 0.5 * ao.d[i]!;
-    c[1] = 0.66 + (f.hi.d[i]! - 0.5) * 0.12;
-    c[2] = 0;
-  });
   const opts = { anisotropy };
-  const normalMap = dataTexture(normal, size, size, opts);
-  return {
-    red: { map: dataTexture(redAlbedo, size, size, { ...opts, srgb: true }), normalMap, orm: dataTexture(redOrm, size, size, opts) },
-    painted: { map: dataTexture(paintAlbedo, size, size, { ...opts, srgb: true }), normalMap, orm: dataTexture(paintOrm, size, size, opts) },
-  };
+  return { map: dataTexture(redAlbedo, size, size, { ...opts, srgb: true }), normalMap: dataTexture(normal, size, size, opts), orm: dataTexture(redOrm, size, size, opts) };
 }
 
 /** Polished concrete slab detail tile (4 m): aggregate flecks, mottling, pits, saw-cut joint on the tile border. */
@@ -417,4 +399,31 @@ export function leafMap(size: number, seed = 81): THREE.DataTexture {
     c[2] = (0.13 + mid * 0.12) * k;
   });
   return dataTexture(data, size, size, { srgb: true, repeat: false });
+}
+
+/** Rolled gravel (one tile ≈ 1.2 m): packed stones (Worley cells) in greys and buff, rough, with a normal map. */
+export function gravelSet(size: number, anisotropy: number): PbrSet {
+  const stones = worley(size, Math.round(size / 7), 91);
+  const fine = fbm(size, size, 32, 3, 92, 0.6);
+  const h = field(size);
+  for (let i = 0; i < size * size; i++) h.d[i] = (1 - smooth(0.15, 0.62, stones.dist.d[i]!)) * 0.8 + fine.d[i]! * 0.2;
+  const map = rgba(size, size, (i, _x, _y, c) => {
+    const id = stones.id.d[i]!;
+    const edge = smooth(0.45, 0.7, stones.dist.d[i]!);
+    const v = (0.5 + id * 0.35) * (1 - edge * 0.55) * (0.9 + fine.d[i]! * 0.2);
+    const warm = id > 0.6 ? 1.06 : 0.98;
+    c[0] = v * warm;
+    c[1] = v * 0.97;
+    c[2] = v * (id > 0.6 ? 0.86 : 0.95);
+  });
+  const orm = rgba(size, size, (i, _x, _y, c) => {
+    c[0] = 0.55 + 0.45 * (1 - smooth(0.35, 0.7, stones.dist.d[i]!));
+    c[1] = 0.86 + fine.d[i]! * 0.1;
+    c[2] = 0;
+  });
+  return {
+    map: dataTexture(map, size, size, { srgb: true, anisotropy }),
+    normalMap: dataTexture(normalFromHeight(h, size / 64), size, size, { anisotropy }),
+    orm: dataTexture(orm, size, size, { anisotropy }),
+  };
 }
