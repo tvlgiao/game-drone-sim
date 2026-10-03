@@ -373,6 +373,18 @@ describe('no node leaks', () => {
     expect(d.music.song).toBe(LEVEL_SONG.infinite);
   });
 
+  it('20 level switches leave nothing feeding a released node (the old level reverb convolver goes)', async () => {
+    const { a, ctx } = await engine('training', SOUND, true);
+    for (let i = 0; i < 20; i++) {
+      a.setLevel({ def: { id: LEVELS[i % LEVELS.length]! }, terrain: null });
+      await flush();
+      ctx.currentTime += 5;
+      a.frame(drone([0.5, 0.5, 0.5, 0.5]), race('freefly'), 'chase', EYE);
+      ctx.endSources();
+    }
+    expect(ctx.edgesIntoReleased()).toEqual([]);
+  });
+
   it('voice pool: one-shots release their source when they end; a busy pool steals the oldest', () => {
     const ctx = new FakeContext();
     const stats = { created: 0, released: 0 };

@@ -426,7 +426,10 @@ export class GameAudio {
       conv.channelCount = 1;
       conv.channelCountMode = 'explicit';
     }
-    this.reverbIn!.connect(conv);
+    const reverbIn = this.reverbIn!;
+    reverbIn.connect(conv);
+    // the shared reverb send feeds this level's convolver: cut that edge when the level goes
+    scope.onDispose(() => reverbIn.disconnect(conv));
     conv.connect(this.reverbOut!);
     glide(this.reverbOut!.gain, profile.reverbMix, ctx.currentTime, 0.2);
     const hub = this.level?.life ?? null;

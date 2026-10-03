@@ -20,6 +20,7 @@ export class Scope {
   private nodes: AudioNode[] = [];
   private sources = new Set<Source>();
   private disposed = false;
+  private cleanups: (() => void)[] = [];
 
   constructor(
     readonly ctx: BaseAudioContext,
@@ -119,10 +120,26 @@ export class Scope {
     return d;
   }
 
+  /**
+   * Runs `fn` when the scope is disposed: for connections from nodes outside the scope into it, which its own
+   * disconnects do not cut (a live node feeding a released one keeps it, its buffers and its processing alive).
+   */
+  onDispose(fn: () => void): void {
+    this.cleanups.push(fn);
+  }
+
   /** Stops every source and disconnects every node; the scope cannot be used afterwards. */
   dispose(): void {
     if (this.disposed) return;
     this.disposed = true;
+    for (const fn of this.cleanups) {
+      try {
+        fn();
+      } catch {
+        /* already disconnected */
+      }
+    }
+    this.cleanups = [];
     for (const s of this.sources) {
       try {
         s.stop();

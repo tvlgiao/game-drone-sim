@@ -57,6 +57,8 @@ export class FakeNode {
   readonly id = nextId++;
   readonly outputs = new Set<FakeNode | FakeParam>();
   disconnected = false;
+  /** released by its owner (a parameterless disconnect): nothing should still feed it */
+  released = false;
   constructor(
     readonly ctx: FakeContext,
     readonly kind: string,
@@ -69,9 +71,14 @@ export class FakeNode {
     this.disconnected = false;
     return dest;
   }
-  disconnect(): void {
+  disconnect(dest?: FakeNode | FakeParam): void {
+    if (dest) {
+      this.outputs.delete(dest);
+      return;
+    }
     this.outputs.clear();
     this.disconnected = true;
+    this.released = true;
   }
 }
 
@@ -214,6 +221,19 @@ export class FakeContext {
   }
 
   /** Nodes reachable upstream of the destination (the live graph). */
+  /**
+   * Connections from a node still in use into a released one: in a real context they keep the released node (and
+   * its buffers, its processing) alive.
+   */
+  edgesIntoReleased(): { from: string; to: string }[] {
+    const out: { from: string; to: string }[] = [];
+    for (const n of this.nodes) {
+      if (n.released) continue;
+      for (const o of n.outputs) if (o instanceof FakeNode && o.released) out.push({ from: n.kind, to: o.kind });
+    }
+    return out;
+  }
+
   liveGraph(): Set<FakeNode> {
     const into = new Map<FakeNode, FakeNode[]>();
     for (const n of this.nodes)
