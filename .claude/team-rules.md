@@ -34,7 +34,7 @@ Rules that go with the routing:
 7. **Secrets.** API keys (OpenAI, Gemini, Ark, Meshy, App Store Connect) live in the macOS Keychain or
    `~/.config`, never in the repo, never printed in logs or chat. Scripts read them via
    `security find-generic-password -w` or an env var set at runtime.
-8. **Paid calls need the user's OK first.** Before any API call that costs money (image, video or 3D generation, LLM API calls, Codex / MiMo runs), ask the user, stating the tool, model, number of calls and estimated cost, and wait for a yes. Approval covers only that batch. Free calls (listing models, validating a key) need no approval. Generation is batched and capped per task.
+8. **Paid calls need the user's OK first.** Before any API call that costs money (image, video or 3D generation, LLM API calls, Codex runs), ask the user, stating the tool, model, number of calls and estimated cost, and wait for a yes. Approval covers only that batch. Free calls (listing models, validating a key) and MiMo CLI runs (covered by the owner's monthly plan) need no approval. Generation is batched and capped per task.
    cap needs the user's OK.
 
 ### Keys (macOS Keychain, account `drone-sim`)
