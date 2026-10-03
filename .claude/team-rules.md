@@ -47,4 +47,4 @@ Read with `security find-generic-password -a drone-sim -s <SERVICE> -w`; never p
 | `GEMINI_API_KEY` | Gemini images / text | valid |
 | `BYTEPLUS_API_KEY` | BytePlus ModelArk: Seedream, Seedance | valid |
 | `BYTEDANCE_API_KEY` | second BytePlus ModelArk key (not Volcengine CN) | valid on BytePlus |
-| `MESHY_API_KEY` | Meshy 3D | missing: add one before 3D generation |
+| `MESHY_API_KEY` | Meshy 3D (key "drone-sim", API base `https://api.meshy.ai/openapi`) | valid; 2,266 credits on 2026-10-03 |
