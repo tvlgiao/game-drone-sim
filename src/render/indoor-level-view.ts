@@ -34,6 +34,7 @@ const NO_RECEIVE = new Set(['glass', 'glow', 'bulbShell', 'neon', 'spill']);
 const RENDER_ORDER: Record<string, number> = { decals: 1, spill: 4, neon: 4, bulbShell: 4, glass: 6 };
 /** Lights' moon intensity with shadows (its constructor value) */
 const MOON_INTENSITY = 2.6;
+const PROBE_SIZE = 256;
 
 export class IndoorLevelView implements LevelView {
   readonly group = new THREE.Group();
@@ -75,7 +76,7 @@ export class IndoorLevelView implements LevelView {
     // light cookies: reflector rings break up the spot pools
     for (const s of this.lights.spots) s.map = this.mats.cookie;
 
-    this.probe = captureProbe(renderer, this.group, this.mats.box.probe);
+    this.probe = captureProbe(renderer, this.group, this.mats.box.probe, this.mats);
     this.environment = this.probe.texture;
     this.mats.setProbe(this.environment);
 
@@ -132,19 +133,26 @@ export class IndoorLevelView implements LevelView {
 
 /**
  * One-off PMREM of the lit room from `at` (before shafts and dust exist). Shadow maps are off for the
- * capture: they are not rendered yet, and the probe is blurry enough not to miss them.
+ * capture: they are not rendered yet, and the probe is blurry enough not to miss them. Leaves floor and
+ * glass pointing at a disposed stand-in: the caller sets the real probe right after.
  */
-function captureProbe(renderer: THREE.WebGLRenderer, root: THREE.Object3D, at: THREE.Vector3): THREE.WebGLRenderTarget {
+function captureProbe(renderer: THREE.WebGLRenderer, root: THREE.Object3D, at: THREE.Vector3, mats: LoftMaterials): THREE.WebGLRenderTarget {
+  const pmrem = new THREE.PMREMGenerator(renderer);
+  // a blank stand-in of the same PMREM size: the capture then compiles the materials with the env-map
+  // programs they will use in the game, instead of compiling every loft shader twice
+  const stand = pmrem.fromScene(new THREE.Scene(), 0, 0.1, 1, { size: PROBE_SIZE });
   const scene = new THREE.Scene();
   scene.background = new THREE.Color(0x05070c);
+  scene.environment = stand.texture;
+  mats.setProbe(stand.texture);
   const parent = root.parent;
   scene.add(root);
   scene.updateMatrixWorld(true);
   const shadows = renderer.shadowMap.enabled;
   renderer.shadowMap.enabled = false;
-  const pmrem = new THREE.PMREMGenerator(renderer);
-  const target = pmrem.fromScene(scene, 0, 0.05, 85, { size: 256, position: at });
+  const target = pmrem.fromScene(scene, 0, 0.05, 85, { size: PROBE_SIZE, position: at });
   pmrem.dispose();
+  stand.dispose();
   renderer.shadowMap.enabled = shadows;
   scene.remove(root);
   parent?.add(root);

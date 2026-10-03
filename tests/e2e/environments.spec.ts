@@ -51,6 +51,14 @@ async function luminance(page: Page): Promise<{ mean: number; std: number; black
   }, png.toString('base64'));
 }
 
+/** Touch devices first show the tap-to-play gate (and on iOS the home-screen tip); behind it the view is frozen. */
+async function passGate(page: Page): Promise<void> {
+  const gate = page.getByRole('button', { name: /tap to play/i });
+  if (await gate.isVisible().catch(() => false)) await gate.tap();
+  const tip = page.getByRole('button', { name: /got it/i });
+  if (await tip.isVisible({ timeout: 800 }).catch(() => false)) await tip.tap();
+}
+
 test.beforeEach(({ context }) => skipTutorialOffer(context));
 
 for (const level of ['training', 'night-loft'] as const) {
@@ -65,6 +73,7 @@ for (const level of ['training', 'night-loft'] as const) {
       await page.addInitScript((q) => localStorage.setItem('drone-sim.settings', JSON.stringify({ quality: q })), tier);
       await page.goto('/play/?rotate=0');
       await page.waitForFunction(() => !!(window as unknown as { __drone?: Hook }).__drone, null, { timeout: 30_000 });
+      await passGate(page);
       await page.evaluate((id) => (window as unknown as { __drone: Hook }).__drone.startLevel(id), level);
       await expect.poll(() => hook(page, (d) => d.level), { timeout: 20_000 }).toBe(level);
       await page.evaluate((id) => (window as unknown as { __drone: Hook }).__drone.action({ type: 'level', id, mode: 'freefly' }), level);
