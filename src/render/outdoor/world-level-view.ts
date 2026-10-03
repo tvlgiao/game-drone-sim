@@ -166,9 +166,10 @@ export class WorldLevelView implements LevelView {
       envMapIntensity: 0.8,
       worldUv: true,
       // the procedural stand-in (low tier) is a coarser grain than the scan: less of it
-      detail: lowTier ? 0.35 : 0.55,
-      // grass relief that reads at drone height without crumpling the meadow
-      normalScale: 0.45,
+      detail: lowTier ? 0.2 : 0.55,
+      // grass relief that reads at drone height without crumpling the meadow (the stand-in's clumps stamp
+      // circles on the ground: barely any of its relief)
+      normalScale: lowTier ? 0.12 : 0.45,
       // grass seen against a low sun: no specular glitter off the blades' normal map
       roughness: 1.35,
     });

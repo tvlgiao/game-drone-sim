@@ -391,7 +391,8 @@ const AFTER_COLOR = /* glsl */ `
     }
   }
   #endif
-  envRock = clamp( max( vTerrain.x, smoothstep( uSlopeRock, uSlopeRock + 0.15, 1.0 - tn.y ) ), 0.0, 1.0 ) * ( 1.0 - envSnow * 0.9 );
+  // the generator's weight carries ±0.25 of noise even on flat ground: only what rises above it is rock
+  envRock = clamp( max( smoothstep( 0.25, 0.6, vTerrain.x ), smoothstep( uSlopeRock, uSlopeRock + 0.15, 1.0 - tn.y ) ), 0.0, 1.0 ) * ( 1.0 - envSnow * 0.9 );
   if ( envRock > 0.002 ) {
     vec3 rmean = max( texture2D( uRockMap, vec2( 0.5 ), 16.0 ).rgb, vec3( 0.03 ) );
     vec3 rock = envTriplanar( uRockMap, vEnvWorld * uRockScale, tn );

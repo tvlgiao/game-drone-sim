@@ -167,7 +167,8 @@ const ground = level.terrain({
   worldUv: true,              // …or world XZ metres (heightfield chunks carry no UVs)
   detail: 0.55,               // share of the base map's contrast kept under the vertex colours
   normalScale: 0.45,          // base normal map strength
-  rockAttribute: 'aRock',     // float 0..1 per vertex → triplanar rock (`rock`: CC0 Aerial Rocks 02 where loaded)
+  rockAttribute: 'aRock',     // float 0..1 per vertex → triplanar rock from 0.25, full at 0.6 (the generator's weight
+                              // carries ±0.25 of noise on flat ground); `rock`: CC0 Aerial Rocks 02 where loaded
   wetAttribute: 'aWet',       // float 0..1 per vertex → darker, glossier, flatter (river / lake banks)
   slopeRock: 0.1,             // optional: rock also where 1 − normal.y > 0.1 (full at +0.15)
   rockMeters: 11,             // fine rock tile (m)
