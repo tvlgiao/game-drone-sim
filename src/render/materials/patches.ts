@@ -20,6 +20,7 @@
  * blocks of the frame.
  */
 import * as THREE from 'three';
+import { GUST_GLSL, TERRAIN_GUST } from '../life/gust';
 
 export interface BoxProjection {
   min: THREE.Vector3;
@@ -92,6 +93,8 @@ export interface TerrainPatch {
   snow?: boolean;
   /** the base maps take world XZ (metres) instead of the geometry's UVs (heightfield chunks carry none) */
   worldUv?: boolean;
+  /** travelling wind gusts brighten meadow and crops (TERRAIN_GUST uniforms, docs/12) */
+  gust?: boolean;
 }
 
 export interface EnvPatch {
@@ -109,6 +112,8 @@ export interface EnvPatch {
   /** transparent glass: reflections stay at full strength while the body fades (premultiplied blending) */
   glass?: { clearAlpha: number; dirtRoughness: number };
   wind?: { uniforms: WindUniforms; flutter: boolean };
+  /** travelling wind gusts brighten meadow and crop vertex colours (TERRAIN_GUST uniforms, docs/12) */
+  gust?: boolean;
 }
 
 const VERT_HEAD = /* glsl */ `
@@ -121,6 +126,7 @@ varying vec2 vRM;
 attribute float aSway;
 uniform float uTime;
 uniform vec2 uWind;
+${GUST_GLSL}
 #endif
 #ifdef ENV_TERRAIN
 varying vec3 vEnvWorldN;
@@ -147,6 +153,13 @@ const VERT_WIND = /* glsl */ `
   vec3 windLocal = vec3( uWind.x, 0.0, uWind.y );
   #endif
   float gust = sin( uTime * 1.25 + ph ) * 0.55 + sin( uTime * 2.3 + ph * 1.7 ) * 0.25 + 0.4;
+  // travelling gusts (docs/12): a band rolling downwind leans the whole treeline further
+  #ifdef USE_INSTANCING
+  vec2 gustAt = instanceMatrix[3].xz;
+  #else
+  vec2 gustAt = ( modelMatrix * vec4( transformed, 1.0 ) ).xz;
+  #endif
+  gust *= 1.0 + 1.3 * lifeGust( gustAt, uWind, uTime );
   transformed += windLocal * gust * aSway;
   #ifdef ENV_FLUTTER
   transformed += vec3( sin( uTime * 8.0 + ph * 13.0 ), sin( uTime * 6.3 + ph * 11.0 ) * 0.6, cos( uTime * 7.1 + ph * 9.0 ) ) * 0.06 * aSway;
@@ -238,6 +251,12 @@ float envOverlay = 0.0;
 uniform float uStripeHalf;
 uniform float uStripeW;
 uniform float uStripeK;
+#endif
+#ifdef ENV_GUST
+uniform float uGustTime;
+uniform vec2 uGustWind;
+uniform vec2 uGustOrigin;
+${GUST_GLSL}
 #endif
 #ifdef ENV_TERRAIN
 varying vec3 vEnvWorldN;
@@ -420,6 +439,18 @@ const AFTER_COLOR = /* glsl */ `
   diffuseColor.rgb *= mix( 1.0, 0.55, wet );
 }
 #endif
+#if defined( ENV_GUST ) && defined( USE_COLOR )
+{
+  // a gust rolling over meadow and crops: the bent blades / ears show their paler side (docs/12)
+  float green = smoothstep( 0.9, 1.15, vColor.g / max( vColor.r, 1e-3 ) ) + smoothstep( 0.3, 0.55, vColor.r + vColor.g - 2.0 * vColor.b ) * 0.6;
+  float crop = clamp( green, 0.0, 1.0 );
+  #ifdef ENV_TERRAIN
+  crop *= ( 1.0 - envRock ) * ( 1.0 - envSnow ) * ( 1.0 - clamp( vTerrain.y, 0.0, 1.0 ) );
+  #endif
+  float g = lifeGust( vEnvWorld.xz + uGustOrigin, uGustWind, uGustTime ) * ( 1.0 - smoothstep( 250.0, 700.0, length( vViewPosition ) ) );
+  diffuseColor.rgb *= 1.0 + 0.16 * g * crop;
+}
+#endif
 `;
 
 const AFTER_ROUGH = /* glsl */ `
@@ -487,10 +518,11 @@ export function patchKey(p: EnvPatch): string {
     p.detail ? `d${p.detail === true ? 1 : p.detail}` : '',
     p.overlay ? 'o' : '',
     p.stripes ? 's' : '',
-    t ? `t${t.rockAttribute ?? ''}:${t.wetAttribute ?? ''}${t.rockTint ? 'k' : ''}${t.rockMacroMeters ? 'm' : ''}${t.soil ? 's' : ''}${t.srgbColors ? 'c' : ''}${t.snow ? 'n' : ''}${t.worldUv ? 'w' : ''}` : '',
+    t ? `t${t.rockAttribute ?? ''}:${t.wetAttribute ?? ''}${t.rockTint ? 'k' : ''}${t.rockMacroMeters ? 'm' : ''}${t.soil ? 's' : ''}${t.srgbColors ? 'c' : ''}${t.snow ? 'n' : ''}${t.worldUv ? 'w' : ''}${t.gust ? 'g' : ''}` : '',
     p.vertexRM ? 'v' : '',
     p.glass ? 'gl' : '',
     p.wind ? (p.wind.flutter ? 'wf' : 'w') : '',
+    p.gust ? 'G' : '',
   ].join('');
 }
 
@@ -570,6 +602,10 @@ export function applyEnvPatch<M extends THREE.MeshStandardMaterial>(mat: M, p: E
     if (t.srgbColors) defines.ENV_SRGB_COLOR = '';
     if (t.snow) defines.ENV_SNOW = '';
     if (t.worldUv) defines.ENV_WORLD_UV = '';
+  }
+  if (p.gust || p.terrain?.gust) {
+    defines.ENV_GUST = '';
+    Object.assign(uniforms, TERRAIN_GUST);
   }
   if (p.vertexRM) {
     defines.ENV_VERTEX_RM = '';

@@ -14,6 +14,7 @@ import { instancedMaterials, type InstanceUniforms } from './terrain-materials';
 import { carModel, LAMP_HEX, streetLightModel, unitBox, unitCylinder } from './scatter-models';
 import { CAR_STRIDE, KERB_STRIDE, LIGHT_STRIDE, type CityFurniture } from '../../levels/city-furniture';
 import type { MaterialSource } from '../materials/library';
+import { CITY_RIVER_FLOW } from '../../world/life/water-flow';
 
 /** roof detail (parapets, vents, skylights): within this distance of the drone, on roofs up to this height, m */
 const ROOF_DETAIL_RANGE = 150;
@@ -588,5 +589,13 @@ export function cityRiverGeometry(reach = 2600): THREE.BufferGeometry {
   const g = new THREE.PlaneGeometry(r.halfWidth * 2, reach * 2, 1, 8);
   g.rotateX(-Math.PI / 2);
   g.translate(r.x, r.level, 0);
+  // the river runs south (docs/12): its level surface gives no slope to follow
+  const n = g.getAttribute('position').count;
+  const flow = new Float32Array(n * 2);
+  for (let k = 0; k < n; k++) {
+    flow[k * 2] = CITY_RIVER_FLOW[0];
+    flow[k * 2 + 1] = CITY_RIVER_FLOW[1];
+  }
+  g.setAttribute('aFlow', new THREE.BufferAttribute(flow, 2));
   return g;
 }

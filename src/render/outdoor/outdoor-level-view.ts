@@ -40,6 +40,8 @@ const GRASS: Record<QualityProfile['tier'], { tufts: number; half: number }> = {
 const GRASS_MAX = GRASS.ultra.tufts;
 
 const _v = new THREE.Vector3();
+/** meadow: grass detail under the vertex colours, travelling gusts over it (one object: the library caches by identity) */
+const MEADOW_PATCH = { detail: 0.7, gust: true };
 
 export class OutdoorLevelView implements LevelView {
   readonly group = new THREE.Group();
@@ -100,7 +102,7 @@ export class OutdoorLevelView implements LevelView {
 
     // meadow and mowed field: the palette rides on vertex colours, the grass set (procedural, CC0 where
     // loaded) only adds texture through the detail patch
-    const meadowMat = lib.material('grass', { uvMeters: GRASS_TILE, vertexColors: true, normalScale: 0.5, roughness: 1.4, envMapIntensity: 0.3, patch: { detail: 0.7 } });
+    const meadowMat = lib.material('grass', { uvMeters: GRASS_TILE, vertexColors: true, normalScale: 0.5, roughness: 1.4, envMapIntensity: 0.3, patch: MEADOW_PATCH });
     const groundGeo = meadowGeometry(MEADOW_RADIUS);
     if (this.props.hills) {
       const hills = this.props.hills;
@@ -120,7 +122,7 @@ export class OutdoorLevelView implements LevelView {
       roughness: 1.4,
       envMapIntensity: 0.3,
       polygonOffset: -1,
-      patch: { detail: 0.7, stripes: { half, width: (half * 2) / FIELD_STRIPES, strength: 0.16 } },
+      patch: { detail: 0.7, stripes: { half, width: (half * 2) / FIELD_STRIPES, strength: 0.16 }, gust: true },
     });
     const field = fieldGeometry(half, FIELD_STRIPES);
     this.addMesh(new THREE.Mesh(field, fieldMat), 'field', false, true);

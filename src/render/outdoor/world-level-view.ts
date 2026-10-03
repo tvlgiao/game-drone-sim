@@ -31,6 +31,8 @@ import { rippleTexture, setWaterDetail, setWaterSky, setWaterTime, waterMaterial
 import { WorldOrigin } from './world-origin';
 import { bakeImpostorAtlas, WorldTrees } from './world-trees';
 import { applyEnvPatch, type WindUniforms } from '../materials/patches';
+import { WorldLife } from '../life/world-life';
+import { TERRAIN_GUST } from '../life/gust';
 
 /** sky fill: low enough that slopes facing away from a low sun stay dark */
 const HEMI = 0.62;
@@ -100,6 +102,8 @@ export class WorldLevelView implements LevelView {
   private far: FarTerrain | null = null;
   private city: CityView | null = null;
   private river: THREE.Mesh | null = null;
+  /** traffic, birds, roof and countryside life (docs/12) */
+  private readonly life: WorldLife;
   private profile: OutdoorProfile;
   private baseProfile: OutdoorProfile;
   private sky: SkyDef;
@@ -184,6 +188,8 @@ export class WorldLevelView implements LevelView {
       normalScale: lowTier ? 0.12 : 0.45,
       // grass seen against a low sun: no specular glitter off the blades' normal map
       roughness: 1.35,
+      // travelling wind gusts over meadow and crops (docs/12)
+      gust: true,
     });
     this.roadMat = roadMaterial(this.detail);
     this.waterMat = waterMaterial(sky, this.ripple, this.profile.waterDetail);
@@ -239,6 +245,10 @@ export class WorldLevelView implements LevelView {
       this.cityTreesAt.set(s[0], 0, s[2]);
       this.scatter.rebuild(new Map(), this.cityTrees, this.cityTreesAt);
     }
+    this.life = new WorldLife(rt, this.shared, this.origin, library.profile.tier, form, this.wind.uWind.value);
+    this.life.setDusk(dusk);
+    this.life.setFog(this.fog.density, this.fog.color);
+    this.group.add(this.life.group);
     this.placeSun(new THREE.Vector3(...s));
     // the environment is captured above the take-off, clear of the drone and the pilot
     const groundY = rt.terrain ? rt.terrain.heightAt(s[0], s[2]) : 0;
@@ -285,6 +295,8 @@ export class WorldLevelView implements LevelView {
     const dusk = duskAmount(sky);
     this.scatter.setDusk(dusk);
     this.city?.setDusk(dusk);
+    this.life.setDusk(dusk);
+    this.life.setFog(this.fog.density, this.fog.color);
     this.placeSun(this.shadowAt.lengthSq() > 0 ? this.shadowAt : new THREE.Vector3(...this.level.spawn.position));
     // the GameView re-captures from the probe right away: the dome must surround it (the next frame moves it back)
     this.dome.follow(this.probe.position);
@@ -306,6 +318,9 @@ export class WorldLevelView implements LevelView {
     this.wind.uTime.value = f.time;
     setWaterTime(this.waterMat, f.time);
     this.dome.follow(f.camera);
+    this.dome.update(f.time);
+    TERRAIN_GUST.uGustTime.value = f.time;
+    TERRAIN_GUST.uGustWind.value.copy(this.wind.uWind.value);
     const d = f.drone;
     if (this.terrain) {
       this.origin.follow(d.x, d.z);
@@ -329,6 +344,7 @@ export class WorldLevelView implements LevelView {
       this.city.setRoofDetail(true, this.cityTreesAt.x, this.cityTreesAt.z, f.camera.x, f.camera.z);
     }
     if (this.followShadow) this.placeSun(this.shadowCentre(f.camera, d));
+    this.life.update(f);
   }
 
   /** Shadow box centre: ahead of the drone along the horizontal camera → drone direction. */
@@ -383,6 +399,7 @@ export class WorldLevelView implements LevelView {
     const prof = scaledProfile(this.baseProfile, this.viewScale * this.viewSetting);
     this.profile = prof;
     this.fog.density = 2.15 / this.fogDistance();
+    this.life?.setFog(this.fog.density, this.fog.color);
     this.cameraFar = this.farPlane();
     setWaterDetail(this.waterMat, prof.waterDetail);
     this.scatter.caps = { treesLod0: prof.treesLod0, treesLod1: prof.treesLod1, rocks: prof.rocks };
@@ -408,6 +425,7 @@ export class WorldLevelView implements LevelView {
       this.city.setFacadeDetail(prof.facadeDetail);
     }
     if (!q) return;
+    this.life.setQuality(q.tier);
     // casters for whichever sun shadow runs: the GameView's cascades (ultra / high) or the follow box below
     const casters = q.shadows && (prof.sunShadows || q.sunCascades);
     const detailed = q.tier === 'ultra' || q.tier === 'high';
@@ -468,6 +486,7 @@ export class WorldLevelView implements LevelView {
       base.radius = this.profile.stream.radius;
     }
     if (this.city) base.buildings = this.city.buildings.count;
+    base.life = this.life.stats();
     return base;
   }
 
@@ -476,6 +495,7 @@ export class WorldLevelView implements LevelView {
     this.terrain?.dispose();
     this.far?.dispose();
     this.city?.dispose();
+    this.life.dispose();
     this.river?.geometry.dispose();
     this.scatter.dispose();
     this.impostors?.dispose();
