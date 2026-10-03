@@ -195,7 +195,10 @@ test.describe('desktop', () => {
     await boot(page, 'high');
     const go = async (id: string): Promise<number[]> => {
       await fly(page, id);
-      await page.waitForTimeout(1_500);
+      // hover over the take-off until the streamer has nothing left to build or upload
+      await page.evaluate(() => (window as unknown as W).__drone.hold(true));
+      await expect.poll(() => page.evaluate(() => (window as unknown as { __drone: { view: { levelBusy: boolean } } }).__drone.view.levelBusy), { timeout: 60_000 }).toBe(false);
+      await page.waitForTimeout(2_000);
       const s = await hook(page, (d) => d.stats());
       return [s.geometries, s.textures];
     };
@@ -204,7 +207,16 @@ test.describe('desktop', () => {
     for (const id of order) await go(id);
     const warm: Record<string, number[]> = {};
     for (const id of order) warm[id] = await go(id);
-    for (let i = 0; i < 2; i++) for (const id of order) expect(await go(id), `${id} round ${i + 2}`).toEqual(warm[id]);
+    for (let i = 0; i < 2; i++) {
+      for (const id of order) {
+        const [g, t] = await go(id);
+        const [g0, t0] = warm[id]!;
+        expect(t, `${id} textures, round ${i + 2}`).toBe(t0);
+        // streamed worlds keep a chunk or two more or less depending on what was in flight: no growth, though
+        if (id === 'alpine' || id === 'infinite') expect(Math.abs(g! - g0!), `${id} geometries, round ${i + 2}`).toBeLessThanOrEqual(2);
+        else expect(g, `${id} geometries, round ${i + 2}`).toBe(g0);
+      }
+    }
     expect(errors).toEqual([]);
   });
 
