@@ -121,6 +121,16 @@ export function worldsByRecent(store: WorldsStore): SavedWorld[] {
   return [...store.worlds].sort((a, b) => b.lastPlayed - a.lastPlayed || a.id.localeCompare(b.id));
 }
 
+/**
+ * Whether this build can generate a saved world: entries from a newer build (a generator version it does not
+ * have) stay in the list, untouched, but cannot be played here.
+ */
+export function worldSupported(w: Pick<SavedWorld, 'gen'>): boolean {
+  return SUPPORTED_GEN_VERSIONS.includes(w.gen);
+}
+
+/** The world played last, if this build can play it. */
 export function lastPlayedWorld(store: WorldsStore): SavedWorld | null {
-  return store.worlds.find((w) => w.id === store.last) ?? null;
+  const w = store.worlds.find((x) => x.id === store.last) ?? null;
+  return w && worldSupported(w) ? w : null;
 }

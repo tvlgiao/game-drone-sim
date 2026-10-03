@@ -3,7 +3,7 @@
  */
 import { describe, expect, it } from 'vitest';
 import { decodeSeed, encodeSeed, fnv1a32, parseSeedInput } from '../../src/world/seed-code';
-import { deleteWorld, emptyWorlds, lastPlayedWorld, loadWorlds, MAX_WORLDS, recordPlayed, renameWorld, saveWorlds, WORLDS_KEY, worldsByRecent, type WorldsStore } from '../../src/game/worlds';
+import { deleteWorld, emptyWorlds, lastPlayedWorld, loadWorlds, MAX_WORLDS, recordPlayed, renameWorld, saveWorlds, WORLDS_KEY, worldsByRecent, worldSupported, type WorldsStore } from '../../src/game/worlds';
 
 const ALPHABET = '0123456789ABCDEFGHJKMNPQRSTVWXYZ';
 const SEEDS = [0, 1, 42, 0x7fffffff, 0x80000000, 0xdeadbeef, 0xffffffff, 123456789, 2654435761];
@@ -111,6 +111,32 @@ describe('seed codes', () => {
 });
 
 describe('saved worlds store', () => {
+  it('keeps a world from a newer generator but never offers it as the last one to play', () => {
+    const s = new MemoryStorage();
+    const future = encodeSeed(1234, 3);
+    const ok = encodeSeed(99, 2);
+    s.setItem(
+      WORLDS_KEY,
+      JSON.stringify({
+        v: 1,
+        last: future,
+        worlds: [
+          { id: future, name: 'Future', code: future, seed: 1234, gen: 3, created: 1, lastPlayed: 5 },
+          { id: ok, name: 'Here', code: ok, seed: 99, gen: 2, created: 1, lastPlayed: 4 },
+        ],
+      }),
+    );
+    const store = loadWorlds(s);
+    // kept (a newer build plays it, and saving does not drop it)
+    expect(store.worlds.map((w) => w.id)).toEqual([future, ok]);
+    expect(worldSupported(store.worlds[0]!)).toBe(false);
+    expect(worldSupported(store.worlds[1]!)).toBe(true);
+    // not the world a relaunch / Infinite / the VR card resume
+    expect(lastPlayedWorld(store)).toBeNull();
+    saveWorlds(s, store);
+    expect(loadWorlds(s).worlds.map((w) => w.id)).toContain(future);
+  });
+
   it('records, renames, deletes and remembers the last world', () => {
     let store = emptyWorlds();
     ({ store } = recordPlayed(store, 42, 1, 1000));

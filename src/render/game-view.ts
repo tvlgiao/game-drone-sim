@@ -135,13 +135,24 @@ export class GameView {
   /** PMREM capture of the current level (null until a tier with environment maps, or the level, asks for it) */
   private envCapture: THREE.WebGLRenderTarget | null = null;
   /** SH irradiance of the same view: the ambient on tiers without environment maps (null until asked for) */
-  private shProbe: THREE.LightProbe | null = null;
+  /**
+   * The SH ambient of tiers without envMap. One object for the view's lifetime, in the scene (visible) whenever the
+   * tier uses it, so the programs compiled before its capture (prepare) already count one light probe: three keys
+   * programs on the number of probes, and adding it afterwards would recompile everything on the first frame.
+   */
+  private readonly shProbe = new THREE.LightProbe();
+  /** shProbe holds the current level's capture */
+  private shReady = false;
   private readonly sunDir = new THREE.Vector3(0, 1, 0);
   private renderScale = 1;
   private width = 1;
   private height = 1;
   private pendingRespawn = false;
   private xrLoad: XrLoadingPanel | null = null;
+  /** bumped by every loadLevel: a prepare() belongs to one level */
+  private levelGen = 0;
+  /** the prepare() running now (they run one after another) */
+  private prepareRun: Promise<void> = Promise.resolve();
   /** loadLevel(…, { deferred }) ran and prepare() has not finished yet */
   private deferred = false;
   /** water surface of the level under the drone (installed by the level view or setWaterProbe) */
@@ -247,6 +258,7 @@ export class GameView {
    * materials, FX pools, post FX) stay.
    */
   loadLevel(level: LevelRuntime, opts: { deferred?: boolean } = {}): void {
+    this.levelGen++;
     this.cascades.detach();
     this.setWaterProbe(null);
     this.dropCapture();
@@ -286,7 +298,14 @@ export class GameView {
     onProgress?.(1);
   }
 
+  /** e2e fault injection: the next level view fails to build (a load that breaks after the old scenery is gone) */
+  faultNextBuild = false;
+
   private buildLevelView(level: LevelRuntime): LevelView {
+    if (this.faultNextBuild) {
+      this.faultNextBuild = false;
+      throw new Error('injected level-view fault');
+    }
     const def = level.def;
     if (def.kind === 'indoor') return new IndoorLevelView(def, this.renderer, this.library, this.form);
     if (level.content) {
@@ -350,7 +369,16 @@ export class GameView {
    * when cancelled) it only returns.
    */
   async prepare(onStep: (step: PrepareStep, f: number) => void = () => {}, cancelled: () => boolean = () => false): Promise<void> {
-    if (!this.deferred) return;
+    // one at a time, each for the level it was asked for: a prepare whose level was replaced meanwhile (the boot's,
+    // when a deep link loads another level) stops at its next step and leaves the new level deferred for its own
+    const gen = this.levelGen;
+    const run = this.prepareRun.then(() => this.prepareLevel(gen, onStep, () => cancelled() || gen !== this.levelGen));
+    this.prepareRun = run.catch(() => undefined);
+    return run;
+  }
+
+  private async prepareLevel(gen: number, onStep: (step: PrepareStep, f: number) => void, cancelled: () => boolean): Promise<void> {
+    if (!this.deferred || gen !== this.levelGen) return;
     const r = this.renderer;
     const p = this.profile;
     const look = this.currentLook;
@@ -397,24 +425,48 @@ export class GameView {
       // into render targets (linear output); without post the frame goes straight to the screen
       const rt = new THREE.WebGLRenderTarget(4, 4);
       const prev = r.getRenderTarget();
+      // tiers without envMap light with the SH probe: in the scene (still black) while their programs compile
+      this.shProbe.visible = !p.envMap;
+      if (!p.envMap && !this.shProbe.parent) this.scene.add(this.shProbe);
+      // the next-ring light is on in a race and off in free flight (and in the menus before either): the frame's
+      // programs for both light counts, so neither mode's first frame recompiles the scene
+      const ringLight = this.levelView.ringLight;
+      const frameVariants = async (from: number, span: number): Promise<void> => {
+        await this.compileSliced(cam, (f) => onStep('shaders', from + (span / 2) * f));
+        ringLight.visible = !ringLight.visible;
+        try {
+          await this.compileSliced(cam, (f) => onStep('shaders', from + span / 2 + (span / 2) * f));
+        } finally {
+          ringLight.visible = !ringLight.visible;
+        }
+      };
       try {
         r.setRenderTarget(rt);
-        await this.compileSliced(cam, (f) => onStep('shaders', 0.5 * f));
+        // with post the frame draws into the composer's target
+        if (this.post) await frameVariants(0, 0.5);
         // the capture sees the scenery alone (the drone's and the rig's lights hidden: other light counts, other
-        // programs); the SH probe of a tier without envMap is taken under the high tier's light rig
+        // programs), at this tier for the environment map and, on a tier without envMap, under the high tier's
+        // light rig for the SH probe
         const restore = showSceneryOnly(this.scene, [this.levelView.group]);
         try {
-          if (!p.envMap) this.levelView.setQuality(REFERENCE_LIGHTING);
-          await this.compileSliced(cam, (f) => onStep('shaders', 0.5 + 0.2 * f));
+          if (p.envMap || probe.always) await this.compileSliced(cam, (f) => onStep('shaders', 0.5 + 0.1 * f));
+          if (!p.envMap) {
+            this.levelView.setQuality(REFERENCE_LIGHTING);
+            try {
+              await this.compileSliced(cam, (f) => onStep('shaders', 0.6 + 0.1 * f));
+            } finally {
+              this.levelView.setQuality(p);
+            }
+          }
         } finally {
-          if (!p.envMap) this.levelView.setQuality(p);
           restore();
         }
       } finally {
         r.setRenderTarget(prev);
         rt.dispose();
       }
-      if (!this.post) await this.compileSliced(cam, (f) => onStep('shaders', 0.7 + 0.2 * f));
+      // without post the frame goes straight to the screen (sRGB output, tone mapping in the shader)
+      if (!this.post) await frameVariants(0.7, 0.2);
       if (this.post) await this.post.precompile();
       await this.linkPrograms((f) => onStep('shaders', 0.9 + 0.1 * f));
     } catch {
@@ -452,7 +504,7 @@ export class GameView {
     if (cancelled()) return;
     // 4. warm: the composer's passes and one frame of the level, behind the loading screen
     this.post?.warm();
-    this.deferred = false;
+    if (gen === this.levelGen) this.deferred = false;
     onStep('warm', 1);
   }
 
@@ -925,7 +977,7 @@ export class GameView {
     if (env && this.envCapture) this.levelView.setEnvironment(env);
     this.scene.environment = p.envMap ? env : null;
     const sh = p.envMap ? null : this.lightProbeFor();
-    if (this.shProbe) this.shProbe.visible = sh !== null;
+    this.shProbe.visible = sh !== null;
     const ibl = (this.scene.environment !== null && this.envCapture !== null) || sh !== null;
     this.scaleHemiLights(ibl ? look.hemiWithIbl : 1);
   }
@@ -964,19 +1016,24 @@ export class GameView {
    * washers' bounce instead of reading cold.
    */
   private lightProbeFor(): THREE.LightProbe | null {
-    if (!this.shProbe) {
+    if (!this.shReady) {
       const probe = this.levelView.probe;
       this.levelView.setQuality(REFERENCE_LIGHTING);
       this.levelView.group.updateMatrixWorld(true);
+      let captured: THREE.LightProbe;
       try {
-        this.shProbe = captureLightProbe(this.renderer, this.scene, [this.levelView.group], probe.position, probe.near, probe.far, null);
+        captured = captureLightProbe(this.renderer, this.scene, [this.levelView.group], probe.position, probe.near, probe.far, null);
       } catch {
         return null;
       } finally {
         this.levelView.setQuality(this.profile);
       }
+      // into the probe the programs were compiled with (same object, same count)
+      this.shProbe.sh.copy(captured.sh);
+      captured.dispose();
       this.shProbe.intensity = this.levelView.environmentIntensity;
-      this.scene.add(this.shProbe);
+      if (!this.shProbe.parent) this.scene.add(this.shProbe);
+      this.shReady = true;
       this.levelView.refreshShadows();
     }
     return this.shProbe;
@@ -985,9 +1042,9 @@ export class GameView {
   private dropCapture(): void {
     this.envCapture?.dispose();
     this.envCapture = null;
-    this.shProbe?.removeFromParent();
-    this.shProbe?.dispose();
-    this.shProbe = null;
+    // the probe object stays (and stays in the scene): only its capture is dropped
+    this.shProbe.sh.zero();
+    this.shReady = false;
     this.scene.environment = null;
   }
 

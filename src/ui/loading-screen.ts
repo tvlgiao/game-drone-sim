@@ -132,6 +132,11 @@ export class LoadingScreen {
     return this.state !== 'hidden';
   }
 
+  /** showing a load failure (Retry / Back) */
+  get failed(): boolean {
+    return this.state === 'error';
+  }
+
   /** loading (not failed, not fading out) */
   get loading(): boolean {
     return this.state === 'loading';

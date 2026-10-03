@@ -107,7 +107,14 @@ function boot(caps: EditionCaps): void {
   const lastWorld = (): { seed: number; gen: number } | null => lastPlayedWorld(loadWorlds(storage));
   const firstLevel = loadLastLevel(storage);
   const firstWorld = firstLevel === 'infinite' ? lastWorld() : null;
-  let level: LevelRuntime = buildLevel(firstLevel, firstWorld?.seed, firstWorld?.gen);
+  let level: LevelRuntime;
+  try {
+    level = buildLevel(firstLevel, firstWorld?.seed, firstWorld?.gen);
+  } catch (err) {
+    // a remembered world this build cannot generate (saved by a newer one): start on the beginner field
+    console.warn('Remembered level could not be built; starting on Training', err);
+    level = buildLevel('training');
+  }
 
   let view: GameView;
   /** the boot level is still being readied (view.prepare) behind the splash: no frame draws it yet */
@@ -425,10 +432,41 @@ function boot(caps: EditionCaps): void {
     void finishLoad(mode);
   }
 
-  async function startLevel(id: LevelId, opts: { seed?: number; gen?: number } = {}, mode: LevelMode | null = null, after: () => void = () => void finishLoad(null)): Promise<boolean> {
-    const seq = ++levelSeq;
+  /** the load running now (a pick of the same level joins it instead of starting over) */
+  let inflight: { id: LevelId; seed: number | undefined; done: Promise<boolean> } | null = null;
+
+  /** Drops the running load without a screen change (a newer pick wants the level already loaded). */
+  function cancelInflight(): void {
+    if (!inflight) return;
+    const id = inflight.id;
+    inflight = null;
+    loadCancel++;
+    loadingLevel = null;
+    loader.hide();
+    audio.setLoading(false);
+    levelEvents.emit({ type: 'failed', id, error: 'cancelled' });
+  }
+
+  function startLevel(id: LevelId, opts: { seed?: number; gen?: number } = {}, mode: LevelMode | null = null, after: () => void = () => void finishLoad(null)): Promise<boolean> {
     const seed = opts.seed === undefined ? undefined : opts.seed >>> 0;
-    if (id === level.def.id && (seed === undefined || seed === level.content?.seed)) return true;
+    // the same level (and world) is already on its way: wait for that load instead of cancelling it
+    if (inflight && inflight.id === id && (seed === undefined || seed === inflight.seed)) return inflight.done;
+    if (id === level.def.id && (seed === undefined || seed === level.content?.seed)) {
+      // already loaded: nothing to load, and a load of another level that was still running is dropped
+      cancelInflight();
+      return Promise.resolve(true);
+    }
+    const run = loadLevel(id, opts, mode, after, seed);
+    const entry = { id, seed: id === 'infinite' ? (seed ?? lastWorld()?.seed) : seed, done: run };
+    inflight = entry;
+    void run.finally(() => {
+      if (inflight === entry) inflight = null;
+    });
+    return run;
+  }
+
+  async function loadLevel(id: LevelId, opts: { seed?: number; gen?: number }, mode: LevelMode | null, after: () => void, seed: number | undefined): Promise<boolean> {
+    const seq = ++levelSeq;
     const entry = levelEntry(id);
     if (!entry) return false;
     const cancelToken = ++loadCancel;
@@ -486,8 +524,9 @@ function boot(caps: EditionCaps): void {
       }
       report('scene', 0.1);
       await yieldToMain();
-      view.loadLevel(next, { deferred: true });
+      // from here the old scenery is being torn down: a failure can no longer go back to it
       swapped = true;
+      view.loadLevel(next, { deferred: true });
       const old = level;
       level = next;
       levelReadyFlag = true;
@@ -508,30 +547,38 @@ function boot(caps: EditionCaps): void {
         return false;
       }
       report('warm', 1);
+      // load audits: how many programs the level was readied with (frames after it should add none)
+      performance.mark?.('load:ready', { detail: { programs: view.renderer.info.programs?.length ?? 0 } });
     } catch (err) {
       console.error('Level failed to load', id, err);
       if (!swapped) next?.dispose?.();
+      // superseded by a newer load, or cancelled with Back before the swap: that one owns the screen and the
+      // shared state now (Back already reported the cancel); a broken swap still needs the reload below
+      if (seq !== levelSeq || (!swapped && cancelToken !== loadCancel)) return false;
       loadingLevel = null;
       audio.setLoading(false);
       audio.levelMusic();
-      levelEvents.emit({ type: 'failed', id, error: err instanceof Error ? err.message : String(err) });
-      if (seq === levelSeq) {
-        if (swapped) {
-          // the old scenery is already gone: the only safe way back is a reload
-          loader.hide();
-          hud.setError(`The level couldn't be loaded (${err instanceof Error ? err.message : String(err)}). Reload to continue.`);
-        } else {
-          loader.fail(`${entry.name} couldn't be loaded${err instanceof Error && err.message ? ` (${err.message})` : ''}. Check your connection and try again.`, () => {
-            // the retried load ends the way the first one would have (run started, tutorial set up, …)
-            void startLevel(id, opts, mode, after).then((ok) => {
-              if (ok) after();
-            });
+      const reason = err instanceof Error ? err.message : String(err);
+      levelEvents.emit({ type: 'failed', id, error: reason });
+      if (swapped) {
+        // the old scenery is already gone: the only safe way back is a reload
+        loader.hide();
+        hud.setError(`The level couldn't be loaded (${reason}). Reload to continue.`);
+      } else if (view.presenting) {
+        // a headset cannot see the DOM error: say it on the VR card and give the menu back
+        loader.hide();
+        toast(`${entry.name} couldn't be loaded. Check your connection.`);
+      } else {
+        loader.fail(`${entry.name} couldn't be loaded${reason ? ` (${reason})` : ''}. Check your connection and try again.`, () => {
+          // the retried load ends the way the first one would have (run started, tutorial set up, …)
+          void startLevel(id, opts, mode, after).then((ok) => {
+            if (ok) after();
           });
-          loader.onCancel = () => {
-            loadingLevel = null;
-            hud.showScreen('levels');
-          };
-        }
+        });
+        loader.onCancel = () => {
+          loadingLevel = null;
+          hud.showScreen('levels');
+        };
       }
       return false;
     }
@@ -546,7 +593,10 @@ function boot(caps: EditionCaps): void {
    * while the scene already renders behind it; physics stay held and arming is refused until it is gone (a Race then
    * counts down 3-2-1-GO with the drone disarmed on its spawn).
    */
+  let handoff: Promise<void> | null = null;
   function finishLoad(mode: LevelMode | null): Promise<void> {
+    // a second caller (a pick that joined the running load) waits for the same hand-off
+    if (handoff) return handoff;
     // the level's theme comes in with the hand-off (the loading mix glides back to the game's own)
     audio.levelMusic();
     audio.setLoading(false);
@@ -563,7 +613,11 @@ function boot(caps: EditionCaps): void {
       loop.reset();
     };
     // control at the start of the fade ("Ready" is short); a cancelled hand-off releases when it ends
-    return loader.finish(mode === 'freefly', release).then(release);
+    const done = loader.finish(mode === 'freefly', release).then(release);
+    handoff = done.finally(() => {
+      handoff = null;
+    });
+    return handoff;
   }
 
   // The level remembered from the last session streams in behind the menu.
@@ -1117,6 +1171,8 @@ function boot(caps: EditionCaps): void {
       dialogInput = true;
     }
     // the loading screen owns menu input: Back / Esc / pad B cancel the load or leave its error
+    // (in a headset an error is a toast on the card; an error screen left from before Enter VR is dropped)
+    if (inVr && loader.failed) loader.cancel();
     if (loader.blocking) {
       if (inp.nav.back && !inVr) loader.cancel();
       dialogInput = true;
@@ -1338,7 +1394,8 @@ function boot(caps: EditionCaps): void {
   }, 3000);
 
   // a shared world link opens straight into that world (web: ?world=; native shells: the app URL)
-  openWorldLink(location, true);
+  // after the boot level is ready: its prepare and the deep link's load must not interleave
+  void bootReady.then(() => openWorldLink(location, true));
   if (device.native) {
     void import('@capacitor/app')
       .then(({ App }) => App.addListener('appUrlOpen', (e) => openWorldLink(e.url, false)))

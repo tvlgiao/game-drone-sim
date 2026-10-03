@@ -5,7 +5,7 @@
  * the screen element, focus and the delete confirmation.
  */
 import './worlds-screen.css';
-import { deleteWorld, loadWorlds, MAX_WORLD_NAME, MAX_WORLDS, renameWorld, saveWorlds, worldsByRecent, type SavedWorld, type WorldsStore } from '../game/worlds';
+import { deleteWorld, loadWorlds, MAX_WORLD_NAME, MAX_WORLDS, renameWorld, saveWorlds, worldsByRecent, worldSupported, type SavedWorld, type WorldsStore } from '../game/worlds';
 import { GEN_VERSION } from '../world/world';
 import { esc } from './level-select';
 import { lastPlayedText, MAX_SEED_INPUT, playWorld, randomSeed, seedFieldStatus, worldShareUrl, type WorldPick } from './worlds-model';
@@ -119,7 +119,8 @@ export class WorldsScreen {
         break;
       case 'play': {
         const w = this.find(code);
-        if (w) this.start({ seed: w.seed, gen: w.gen });
+        if (w && !worldSupported(w)) this.host.toast(`${w.name} needs a newer version of Drone Sim`);
+        else if (w) this.start({ seed: w.seed, gen: w.gen });
         break;
       }
       case 'rename':
