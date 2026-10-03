@@ -140,3 +140,24 @@ Phones: no AO, no motion blur, reflective glass, ≤ 512 textures, ≤ 128 env. 
   returns GPU-synced ms/frame.
 - `node scripts/beauty-shots.mjs <dir> [port]` (needs `npx vite --port 5701`): both levels, every camera,
   every tier at 1920×1080 plus an iPhone frame, with ms/frame.
+
+## 9. Cost (measured 2026-10-03)
+
+GPU-synced ms/frame from `__preview.bench(120)`, 1920×1080 at DPR 1, chase camera, Apple-silicon Mac
+under ANGLE/Metal (Playwright Chromium). Other GPU work was running on the machine, so treat ±1.5 ms as
+noise.
+
+| level | ultra | high | medium | low |
+| --- | --- | --- | --- | --- |
+| Night Loft before → after | 10.7 → 12.5 | 8.4 → 11.0 | 5.3 → 5.1 | 1.6 → 1.3 |
+| Training before → after | 4.8 → 9.0 | 4.9 → 8.1 | 3.9 → 3.4 | 0.9 → 1.2 |
+
+Most of the ultra / high delta is N8AO (half res: ~1.5 ms Medium, ~3.5 ms High at 720p) and, outdoors,
+the two cascades re-rendered every frame. Full-resolution N8AO cost ~17 ms at 720p and was dropped.
+
+**Quest 2 (72 Hz)**: VR runs `low`, which this work leaves at the pre-existing cost apart from the tone
+mapper (one curve in the material shaders): emulated (IWER) Training draws 52 calls / 85 k triangles,
+Night Loft 172 calls / 150 k per eye pass. The emulator caps at the desktop's 60 Hz rAF and runs on a
+desktop GPU, so it only proves the path is light (no composer, no shadow maps, no PMREM capture, no
+texture downloads). 72 fps on a real headset is not measured here: the claim rests on the VR path's
+budgets being unchanged from the previous release. Flat Quest Browser (Adreno → medium) loads at most the level's CC0 sets (≤ 2.9 MB).
