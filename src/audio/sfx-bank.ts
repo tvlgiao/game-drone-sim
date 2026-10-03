@@ -470,6 +470,9 @@ function cowbell(k: Kit, f: number): void {
 
 export type Offline = (channels: number, length: number, sampleRate: number) => OfflineAudioContext;
 
+/** Output trims that level the bank (RMS within a few dB per family: impacts, rewards, callouts). */
+const TRIM: Partial<Record<SfxId, number>> = { 'crash-water': 1.4, 'stinger-lap': 2, 'stinger-best': 1.7, oob: 2.5, inbounds: 1.8, 'cowbell-1': 1.6, 'cowbell-2': 1.6 };
+
 export function sfxLength(id: SfxId): number {
   return RECIPES[id].len;
 }
@@ -479,6 +482,7 @@ export async function renderSfx(id: SfxId, sampleRate: number, offline: Offline,
   const recipe = RECIPES[id];
   const ctx = offline(1, Math.ceil(recipe.len * sampleRate), sampleRate);
   const out = ctx.createGain();
+  out.gain.value = TRIM[id] ?? 1;
   out.connect(ctx.destination);
   const nbuf = ctx.createBuffer(1, Math.round(sampleRate * 3), sampleRate);
   nbuf.copyToChannel(noise(nbuf.length, 'white', 5 + seed), 0);

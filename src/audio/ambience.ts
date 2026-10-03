@@ -85,13 +85,15 @@ export class Ambience {
     }
     for (const e of profile.emitters) this.emitter(e);
     if (profile.river) {
-      const src = s.loop(d.noise.white);
-      const bp = s.filter('bandpass', 1100, 0.45);
+      // rushing water: a broad mid hiss (not the top octave) over a low rumble
+      const src = s.loop(d.noise.pink);
+      const bp = s.filter('bandpass', 750, 0.4);
+      const lp = s.filter('lowpass', 4200, 0.6);
       const lo = s.loop(d.noise.brown);
-      const lg = s.gain(0.6);
+      const lg = s.gain(0.5);
       this.riverGain = s.gain(0);
       this.riverPanner = s.panner(d.model, 12, 1, 2000);
-      src.connect(bp).connect(this.riverGain);
+      src.connect(bp).connect(lp).connect(this.riverGain);
       lo.connect(lg).connect(this.riverGain);
       this.riverGain.connect(this.riverPanner).connect(d.out);
     }
@@ -195,7 +197,7 @@ export class Ambience {
     }
     if (this.riverGain && this.riverPanner) {
       const near = this.water.near;
-      glide(this.riverGain.gain, near > 0 ? 0.55 * near : 0, now, 0.6);
+      glide(this.riverGain.gain, near > 0 ? 0.4 * near : 0, now, 0.6);
       if (near > 0) placePanner(this.riverPanner, this.water.x, this.water.y, this.water.z, now, 0.5);
       this.last.river = near;
     }
