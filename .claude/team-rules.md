@@ -8,9 +8,9 @@ The main session (Claude Opus) manages and coordinates. It routes work by type:
 | Management, coordination, integration, final review, user communication | Claude Opus (main session) | — |
 | Deep analysis, UI/UX design research, architecture research, planning | Claude Opus (main) or Opus subagents | `Agent` with `model: "opus"` |
 | Coding, test writing, testing, simple jobs, tasks with a clear, specific spec | Claude Sonnet subagents | `Agent` with `model: "sonnet"`, in a worktree |
-| Cross-checking plans, adversarial review of designs and PRs | Codex CLI, MiMo CLI agents | run headless, e.g. `codex exec "<prompt>"`; read-only on the repo |
-| 2D graphics, images (UI art, icons, store art, textures, level-card art) | OpenAI image API (`gpt-image-1`) or Gemini image API | scripts under `tools/gen/`, outputs reviewed before commit |
-| Video from an image or a prompt (trailers, store previews) | ByteDance Seedance (Volcengine Ark API) | scripts under `tools/gen/` |
+| Cross-checking plans, adversarial review of designs and PRs | Codex CLI, MiMo CLI agents | headless: `codex exec "<prompt>"` (`~/.local/bin/codex`), `~/.mimocode/bin/mimo run "<prompt>"` (mimocode, not on the non-interactive PATH); read-only on the repo |
+| 2D graphics, images (UI art, icons, store art, textures, level-card art) | OpenAI image API (`gpt-image-1`), Gemini image API, or BytePlus Seedream (`dola-seedream-5-0-pro`) | scripts under `tools/gen/`, outputs reviewed before commit |
+| Video from an image or a prompt (trailers, store previews) | BytePlus ModelArk Seedance (`dreamina-seedance-2-5`, `-2-0-fast` for drafts), endpoint `https://ark.ap-southeast.bytepluses.com/api/v3` | scripts under `tools/gen/` |
 | 3D models, 3D assets, motion, rigs | Meshy (web or API) | export glTF/GLB, then the asset pipeline below |
 
 Rules that go with the routing:
@@ -36,3 +36,15 @@ Rules that go with the routing:
    `security find-generic-password -w` or an env var set at runtime.
 8. **Cost control.** Image, video and 3D generation calls are batched and capped per task. Spending beyond the
    cap needs the user's OK.
+
+### Keys (macOS Keychain, account `drone-sim`)
+
+Read with `security find-generic-password -a drone-sim -s <SERVICE> -w`; never print the value.
+
+| Service | Used for | Status (2026-10-03) |
+|---|---|---|
+| `OPENAI_API_KEY` | OpenAI images | valid |
+| `GEMINI_API_KEY` | Gemini images / text | valid |
+| `BYTEPLUS_API_KEY` | BytePlus ModelArk: Seedream, Seedance | valid |
+| `BYTEDANCE_API_KEY` | second BytePlus ModelArk key (not Volcengine CN) | valid on BytePlus |
+| `MESHY_API_KEY` | Meshy 3D | missing: add one before 3D generation |
