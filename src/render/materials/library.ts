@@ -109,6 +109,18 @@ export interface TerrainOptions {
    */
   vertexColors?: boolean;
   envMapIntensity?: number;
+  /** rock layer colour (the map brings detail only); default: the map's own colour */
+  rockTint?: THREE.ColorRepresentation;
+  /** second, coarser rock sample (tile metres) for faces seen from afar; default none */
+  rockMacroMeters?: number;
+  /** soil detail (CC0 forest ground where loaded) on bare earth and wet banks; default off */
+  soil?: boolean;
+  /** vertex colours are sRGB bytes (world engine palette): linearise them; default false */
+  srgbColors?: boolean;
+  /** whitest vertex colours read as snow (smoother, less grain, no rock); default false */
+  snow?: boolean;
+  /** base maps in world XZ metres instead of mesh UVs (heightfield chunks have none); default false */
+  worldUv?: boolean;
 }
 
 export interface TextureSet {
@@ -163,7 +175,7 @@ const PRESETS: Readonly<Record<PresetName, PresetDef>> = {
   grass: { kind: 'grass', cc0: 'grass', tileMeters: 1, physical: false, params: { metalness: 0, envMapIntensity: 0.5 } },
   gravel: { kind: 'gravel', cc0: null, tileMeters: GENERATED.gravel.tileMeters, physical: false, params: { metalness: 0, envMapIntensity: 0.3 } },
   bark: { kind: 'bark', cc0: 'bark', tileMeters: 1, physical: false, params: { metalness: 0, envMapIntensity: 0.4 } },
-  rock: { kind: 'rock', cc0: null, tileMeters: 3, physical: false, params: { metalness: 0, envMapIntensity: 0.5 } },
+  rock: { kind: 'rock', cc0: 'rock', tileMeters: 3, physical: false, params: { metalness: 0, envMapIntensity: 0.5 } },
   foliage: { kind: 'foliage', cc0: null, tileMeters: 0.5, physical: false, params: { metalness: 0, alphaTest: 0.5, side: THREE.DoubleSide } },
   needles: { kind: 'needles', cc0: null, tileMeters: 0.5, physical: false, params: { metalness: 0, alphaTest: 0.45, side: THREE.DoubleSide } },
   glass: { kind: null, cc0: null, tileMeters: 1, physical: true, params: {} },
@@ -184,6 +196,14 @@ interface Entry {
   /** custom materials: textures / objects created by the factory */
   extra: { dispose(): void }[];
   owners: Set<string>;
+  /** extra layers bound from scanned sets (terrain rock / soil): rebound when a scan arrives */
+  onScan?: (id: Cc0SetId, set: TextureSet) => void;
+}
+
+interface SetWatcher {
+  owner: string;
+  id: Cc0SetId;
+  cb: (set: TextureSet, tileMeters: number) => void;
 }
 
 const defaultFetcher: TextureFetcher = (url) => new THREE.TextureLoader().loadAsync(url);
@@ -209,6 +229,11 @@ export interface MaterialSource {
   texture<T extends THREE.Texture>(key: string, factory: () => T): T;
   terrain(opts?: Readonly<TerrainOptions>): THREE.MeshStandardMaterial;
   textures(preset: Exclude<PresetName, 'glass'>): TextureSet;
+  /**
+   * The best maps of a preset for a custom shader: called now with the procedural set (or the scan if it is
+   * already in), and again when the CC0 scan arrives on a tier that loads it. Released with the owner.
+   */
+  watchSet(preset: Exclude<PresetName, 'glass'>, cb: (set: TextureSet, tileMeters: number) => void): void;
   /** shared tileable noise (G = breakup, R = blotchy AO, B = 1): grime, paint chips, metal roughness */
   grunge(): THREE.Texture;
   readonly profile: QualityProfile;
@@ -246,6 +271,10 @@ export class MaterialScope implements MaterialSource {
     return this.lib.textures(preset);
   }
 
+  watchSet(preset: Exclude<PresetName, 'glass'>, cb: (set: TextureSet, tileMeters: number) => void): void {
+    this.lib.watchFor(this.name, preset, cb);
+  }
+
   grunge(): THREE.Texture {
     return this.lib.grunge();
   }
@@ -269,6 +298,7 @@ export class MaterialLibrary implements MaterialSource {
   /** procedural sets given out through textures(): kept even after a scanned set replaces them */
   private readonly handedOut = new Set<SurfaceKind>();
   private readonly patchIds = new WeakMap<EnvPatch, number>();
+  private readonly watchers: SetWatcher[] = [];
   private nextPatchId = 1;
   private grungeTex: THREE.DataTexture | null = null;
   private scopeSeq = 0;
@@ -311,6 +341,22 @@ export class MaterialLibrary implements MaterialSource {
     return this.acquireTerrain(ROOT, opts);
   }
 
+  watchSet(preset: Exclude<PresetName, 'glass'>, cb: (set: TextureSet, tileMeters: number) => void): void {
+    this.watchFor(ROOT, preset, cb);
+  }
+
+  /** @internal */
+  watchFor(owner: string, preset: Exclude<PresetName, 'glass'>, cb: (set: TextureSet, tileMeters: number) => void): void {
+    const def = PRESETS[preset];
+    const id = def.cc0;
+    const scanned = id ? this.scanned.get(id) : undefined;
+    if (scanned) cb(scanned, CC0_SETS[id!].tileMeters);
+    else cb(this.textures(preset), def.tileMeters);
+    if (!id || scanned) return;
+    this.watchers.push({ owner, id, cb });
+    if (this._profile.pbrTextures) void this.loadScanned(id);
+  }
+
   /** The procedural maps of a preset (shared, repeat 1; do not dispose). */
   textures(preset: Exclude<PresetName, 'glass'>): TextureSet {
     const kind = PRESETS[preset].kind!;
@@ -339,6 +385,7 @@ export class MaterialLibrary implements MaterialSource {
       const id = PRESETS[e.preset].cc0;
       if (id && p.pbrTextures && !this.scanned.has(id)) void this.loadScanned(id);
     }
+    if (p.pbrTextures) for (const w of this.watchers) if (!this.scanned.has(w.id)) void this.loadScanned(w.id);
   }
 
   /** Material, texture and GPU-upload counts (uploads = distinct texture sources). */
@@ -401,25 +448,57 @@ export class MaterialLibrary implements MaterialSource {
 
   /** @internal */
   acquireTerrain(owner: string, o: Readonly<TerrainOptions>): THREE.MeshStandardMaterial {
-    const rockSet = this.textures('rock');
+    const key = `terrain|${JSON.stringify(o)}`;
+    const hit = this.entries.get(key);
+    if (hit) {
+      hit.owners.add(owner);
+      return hit.material as THREE.MeshStandardMaterial;
+    }
+    // rock and soil: the scan where it is already in, else the procedural stand-in until it arrives
+    const rockScan = this.scanned.get('rock');
+    const rockSet = rockScan ?? this.textures('rock');
+    const rockMeters = o.rockMeters ?? PRESETS.rock.tileMeters;
+    const soilScan = o.soil ? this.scanned.get('soil') : undefined;
+    const soilSet = o.soil ? (soilScan ?? this.textures('gravel')) : null;
     const patch: EnvPatch = {
       detail: o.vertexColors ?? true,
       terrain: {
-        rock: { albedo: rockSet.albedo, arm: rockSet.arm, tileMeters: o.rockMeters ?? PRESETS.rock.tileMeters },
+        rock: { albedo: rockSet.albedo, arm: rockSet.arm, tileMeters: rockMeters },
         rockAttribute: o.rockAttribute === undefined ? 'aRock' : o.rockAttribute,
         wetAttribute: o.wetAttribute === undefined ? 'aWet' : o.wetAttribute,
         slopeRock: o.slopeRock ?? 2,
+        rockTint: o.rockTint !== undefined ? new THREE.Color(o.rockTint) : undefined,
+        rockMacroMeters: o.rockMacroMeters,
+        soil: soilSet ? { albedo: soilSet.albedo, arm: soilSet.arm, tileMeters: soilScan ? CC0_SETS.soil.tileMeters : GENERATED.gravel.tileMeters } : undefined,
+        srgbColors: o.srgbColors,
+        snow: o.snow,
+        worldUv: o.worldUv,
       },
     };
     const opts: MaterialOptions = { uvMeters: o.uvMeters ?? 1, vertexColors: o.vertexColors ?? true, envMapIntensity: o.envMapIntensity ?? 0.4, patch };
-    const key = `terrain|${JSON.stringify(o)}`;
     const m = this.build(owner, key, o.base ?? 'grass', opts) as THREE.MeshStandardMaterial;
     m.name = 'lib:terrain';
+    const entry = this.entries.get(key)!;
+    entry.onScan = (id, set) => {
+      const u = m.userData.envUniforms as Record<string, THREE.IUniform>;
+      if (id === 'rock') {
+        u.uRockMap!.value = set.albedo;
+        u.uRockArm!.value = set.arm;
+      } else if (id === 'soil' && u.uSoilMap) {
+        u.uSoilMap.value = set.albedo;
+        u.uSoilScale!.value = 1 / CC0_SETS.soil.tileMeters;
+      }
+    };
+    if (this._profile.pbrTextures) {
+      if (!rockScan) void this.loadScanned('rock');
+      if (o.soil && !soilScan) void this.loadScanned('soil');
+    }
     return m;
   }
 
   /** @internal */
   release(owner: string): void {
+    for (let i = this.watchers.length - 1; i >= 0; i--) if (this.watchers[i]!.owner === owner) this.watchers.splice(i, 1);
     for (const [k, e] of this.entries) {
       if (!e.owners.delete(owner) || e.owners.size > 0) continue;
       this.disposeEntry(e);
@@ -538,6 +617,13 @@ export class MaterialLibrary implements MaterialSource {
         this.scanned.set(id, set);
         for (const e of this.entries.values()) {
           if (e.preset && PRESETS[e.preset].cc0 === id) this.bindMaps(e, set, CC0_SETS[id].tileMeters);
+          e.onScan?.(id, set);
+        }
+        for (let i = this.watchers.length - 1; i >= 0; i--) {
+          const w = this.watchers[i]!;
+          if (w.id !== id) continue;
+          this.watchers.splice(i, 1);
+          w.cb(set, CC0_SETS[id].tileMeters);
         }
         // the stand-in is no longer referenced: free its GPU copy
         for (const name of PRESET_NAMES) {

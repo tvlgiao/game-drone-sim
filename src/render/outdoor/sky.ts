@@ -87,8 +87,6 @@ export class SkyDome {
     const shader = physicalSkyShader();
     const m = new THREE.ShaderMaterial({ ...shader, side: THREE.BackSide, depthWrite: false, fog: false });
     const u = m.uniforms;
-    // Preetham wants the sun far away: 450 000 is the horizon fade length its vertex shader assumes
-    (u.sunPosition!.value as THREE.Vector3).set(...sky.sunDir).normalize().multiplyScalar(450_000);
     u.turbidity!.value = look.turbidity;
     u.rayleigh!.value = look.rayleigh;
     u.mieCoefficient!.value = look.mieCoefficient;
@@ -97,11 +95,19 @@ export class SkyDome {
     u.cloudDensity!.value = look.cloudDensity;
     u.cloudElevation!.value = look.cloudElevation;
     u.cloudScale!.value = look.cloudScale;
-    groundRadiance(sky, ground, u.skyGround!.value as THREE.Color);
     this.mesh = new THREE.Mesh(g, m);
     this.mesh.name = 'sky';
     this.mesh.frustumCulled = false;
     this.mesh.renderOrder = -10;
+    this.setSky(sky, ground);
+  }
+
+  /** New sun position (time of day): the scattering, the sun disc and the lit ground below the horizon follow. */
+  setSky(sky: SkyDef, ground: THREE.ColorRepresentation): void {
+    const u = this.mesh.material.uniforms;
+    // Preetham wants the sun far away: 450 000 is the horizon fade length its vertex shader assumes
+    (u.sunPosition!.value as THREE.Vector3).set(...sky.sunDir).normalize().multiplyScalar(450_000);
+    groundRadiance(sky, ground, u.skyGround!.value as THREE.Color);
   }
 
   /** The dome rides with the camera: it is infinitely far away. */

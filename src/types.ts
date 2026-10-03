@@ -217,10 +217,14 @@ export interface SkyDef {
   sunIntensity: number;
   /** hemisphere light: sky colour, ground colour */
   hemi: [number, number];
+  /** fog / haze colour where it differs from `horizon` (dusk: the horizon glows only towards the sun) */
+  haze?: number;
 }
 
 export interface EnvDef {
   sky: 'night-loft' | SkyDef;
+  /** generated outdoor levels: the sky preset `sky` came from (levels/skies.ts), so a time-of-day pick can swap it */
+  time?: 'dawn' | 'noon' | 'golden' | 'dusk' | 'afternoon' | 'alpine';
   /** distance of 1 % visibility; FogExp2 density = 2.15 / viewDistance */
   fog: { color: number; viewDistance: number };
   ambience: { kind: 'room' | 'wind'; gain: number };

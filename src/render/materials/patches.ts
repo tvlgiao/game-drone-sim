@@ -10,7 +10,8 @@
  *              mip), so vertex colours keep the palette and a scanned or procedural set only adds texture
  * - `overlay`  an RGBA picture laid on a world-space XZ rectangle (landing-pad markings over asphalt)
  * - `stripes`  view-dependent mowing stripes
- * - `terrain`  triplanar rock on a per-vertex weight, wet banks on another (see `MaterialLibrary.terrain`)
+ * - `terrain`  triplanar rock on a per-vertex weight (two scales, tinted, bump-mapped), wet banks on another,
+ *              bare-earth soil detail and smoother snow by the vertex colour (see `MaterialLibrary.terrain`)
  * - `vertexRM` per-vertex roughness / metalness (`aRM`) for merged prop materials
  * - `glass`    premultiplied dirty glass: reflections stay at full strength while the body fades
  * - `wind`     sway by the per-vertex `aSway` (metres), optional leaf flutter
@@ -79,6 +80,18 @@ export interface TerrainPatch {
   wetAttribute: string | null;
   /** above this world-normal steepness (1 − n.y) rock shows even without the attribute; > 1 disables */
   slopeRock: number;
+  /** linear colour the rock layer is normalised to (the map only brings its detail); absent: the map's own colour */
+  rockTint?: THREE.Color;
+  /** second, coarser triplanar rock sample (tile metres): breaks the repeat on mountain faces seen from afar */
+  rockMacroMeters?: number;
+  /** soil detail where the vertex colour is bare earth (redder than green: fields, tracks) and on wet banks */
+  soil?: TerrainLayer;
+  /** vertex colours are sRGB bytes (the world engine's palette): linearised in the vertex shader */
+  srgbColors?: boolean;
+  /** the whitest vertex colours read as snow: less grain, smoother, no rock */
+  snow?: boolean;
+  /** the base maps take world XZ (metres) instead of the geometry's UVs (heightfield chunks carry none) */
+  worldUv?: boolean;
 }
 
 export interface EnvPatch {
@@ -142,6 +155,12 @@ const VERT_WIND = /* glsl */ `
 #endif
 `;
 
+const VERT_COLOR = /* glsl */ `
+#if defined( ENV_SRGB_COLOR ) && defined( USE_COLOR )
+vColor.rgb = pow( vColor.rgb, vec3( 2.2 ) );
+#endif
+`;
+
 const VERT_BODY = /* glsl */ `
 {
   vec4 envWp = vec4( transformed, 1.0 );
@@ -152,6 +171,23 @@ const VERT_BODY = /* glsl */ `
 }
 #ifdef ENV_VERTEX_RM
 vRM = aRM;
+#endif
+#ifdef ENV_WORLD_UV
+#ifdef USE_MAP
+vMapUv = ( mapTransform * vec3( vEnvWorld.xz, 1.0 ) ).xy;
+#endif
+#ifdef USE_NORMALMAP
+vNormalMapUv = ( normalMapTransform * vec3( vEnvWorld.xz, 1.0 ) ).xy;
+#endif
+#ifdef USE_ROUGHNESSMAP
+vRoughnessMapUv = ( roughnessMapTransform * vec3( vEnvWorld.xz, 1.0 ) ).xy;
+#endif
+#ifdef USE_METALNESSMAP
+vMetalnessMapUv = ( metalnessMapTransform * vec3( vEnvWorld.xz, 1.0 ) ).xy;
+#endif
+#ifdef USE_AOMAP
+vAoMapUv = ( aoMapTransform * vec3( vEnvWorld.xz, 1.0 ) ).xy;
+#endif
 #endif
 #ifdef ENV_TERRAIN
 vEnvWorldN = normalize( mat3( modelMatrix ) * objectNormal );
@@ -211,6 +247,30 @@ uniform sampler2D uRockArm;
 uniform float uRockScale;
 uniform float uSlopeRock;
 float envRock = 0.0;
+float envRockH = 0.5;
+float envSnow = 0.0;
+#ifdef ENV_ROCK_TINT
+uniform vec3 uRockTint;
+#endif
+#ifdef ENV_ROCK_MACRO
+uniform float uRockMacro;
+#endif
+#ifdef ENV_SOIL
+uniform sampler2D uSoilMap;
+uniform float uSoilScale;
+#endif
+// screen-space bump from a height in metres (three's perturbNormalArb without a bump map)
+vec3 envBump( vec3 p, vec3 n, float h ) {
+  vec3 sx = dFdx( p );
+  vec3 sy = dFdy( p );
+  vec3 r1 = cross( sy, n );
+  vec3 r2 = cross( n, sx );
+  float det = dot( sx, r1 ) * ( gl_FrontFacing ? 1.0 : -1.0 );
+  vec3 grad = sign( det ) * ( dFdx( h ) * r1 + dFdy( h ) * r2 );
+  vec3 bn = abs( det ) * n - grad;
+  float l = length( bn );
+  return l > 1e-6 ? bn / l : n;
+}
 vec3 envTriplanar( sampler2D tex, vec3 p, vec3 n ) {
   vec3 w = pow( abs( n ), vec3( 4.0 ) );
   w /= max( w.x + w.y + w.z, 1e-4 );
@@ -220,6 +280,7 @@ vec3 envTriplanar( sampler2D tex, vec3 p, vec3 n ) {
 #ifdef ENV_VERTEX_RM
 varying vec2 vRM;
 #endif
+vec3 envDetailK = vec3( 1.0 );
 #ifdef ENV_GLASS
 uniform float uClearAlpha;
 uniform float uDirtRough;
@@ -249,7 +310,8 @@ const AFTER_MAP = /* glsl */ `
   // the smallest mip is the map's mean colour: what is left is texture, not tint. Mostly its luminance:
   // a scan's dry blades or fallen leaves must not repaint the level's palette
   vec3 dr = sampledDiffuseColor.rgb / max( texture2D( map, vec2( 0.5 ), 16.0 ).rgb, vec3( 0.03 ) );
-  diffuseColor.rgb = diffuse * mix( vec3( 1.0 ), mix( vec3( dot( dr, vec3( 0.2126, 0.7152, 0.0722 ) ) ), dr, 0.3 ), ENV_DETAIL );
+  envDetailK = mix( vec3( 1.0 ), mix( vec3( dot( dr, vec3( 0.2126, 0.7152, 0.0722 ) ) ), dr, 0.3 ), ENV_DETAIL );
+  diffuseColor.rgb = diffuse * envDetailK;
 }
 #endif
 #if defined( ENV_PAINT ) && defined( USE_MAP )
@@ -309,12 +371,51 @@ const AFTER_COLOR = /* glsl */ `
 #ifdef ENV_TERRAIN
 {
   vec3 tn = normalize( vEnvWorldN );
-  envRock = clamp( max( vTerrain.x, smoothstep( uSlopeRock, uSlopeRock + 0.15, 1.0 - tn.y ) ), 0.0, 1.0 );
+  float envDist = length( vViewPosition );
+  float wet = clamp( vTerrain.y, 0.0, 1.0 );
+  #if defined( ENV_SNOW ) && defined( USE_COLOR )
+  envSnow = smoothstep( 0.5, 0.72, min( vColor.r, vColor.b ) );
+  // snow keeps a third of the grain
+  diffuseColor.rgb = mix( diffuseColor.rgb, diffuse * vColor.rgb * mix( vec3( 1.0 ), envDetailK, 0.35 ), envSnow );
+  #endif
+  #if defined( ENV_SOIL ) && defined( USE_COLOR )
+  {
+    // bare earth: a darker vertex colour redder than it is green (ploughed fields, tracks, garden beds; not the
+    // bright crops), and the wet banks
+    float earth = smoothstep( 0.95, 0.85, vColor.g / max( vColor.r, 1e-3 ) ) * ( 1.0 - smoothstep( 0.26, 0.36, dot( vColor.rgb, vec3( 0.2126, 0.7152, 0.0722 ) ) ) );
+    float soilW = max( earth, wet * 0.85 ) * ( 1.0 - envSnow );
+    if ( soilW > 0.002 ) {
+      vec3 sr = texture2D( uSoilMap, vEnvWorld.xz * uSoilScale ).rgb / max( texture2D( uSoilMap, vec2( 0.5 ), 16.0 ).rgb, vec3( 0.03 ) );
+      float sl = mix( dot( sr, vec3( 0.2126, 0.7152, 0.0722 ) ), 1.0, 0.25 + 0.75 * smoothstep( 90.0, 420.0, envDist ) );
+      diffuseColor.rgb = mix( diffuseColor.rgb, diffuse * vColor.rgb * sl, soilW );
+    }
+  }
+  #endif
+  envRock = clamp( max( vTerrain.x, smoothstep( uSlopeRock, uSlopeRock + 0.15, 1.0 - tn.y ) ), 0.0, 1.0 ) * ( 1.0 - envSnow * 0.9 );
   if ( envRock > 0.002 ) {
+    vec3 rmean = max( texture2D( uRockMap, vec2( 0.5 ), 16.0 ).rgb, vec3( 0.03 ) );
     vec3 rock = envTriplanar( uRockMap, vEnvWorld * uRockScale, tn );
+    #ifdef ENV_ROCK_MACRO
+    {
+      // the coarse sample carries the face from afar; the fine one adds texture near the drone, then fades
+      vec3 rockM = envTriplanar( uRockMap, vEnvWorld * uRockMacro, tn );
+      rock = mix( rockM * ( rock / rmean ), rockM, smoothstep( 80.0, 360.0, envDist ) );
+    }
+    #endif
+    envRockH = dot( rock / rmean, vec3( 0.333 ) ) * 0.5;
+    #ifdef ENV_ROCK_TINT
+    {
+      vec3 rr = rock / rmean;
+      vec3 tint = uRockTint;
+      #ifdef USE_COLOR
+      tint = mix( tint, vColor.rgb, 0.12 );
+      #endif
+      rock = tint * mix( vec3( dot( rr, vec3( 0.2126, 0.7152, 0.0722 ) ) ), rr, 0.45 );
+    }
+    #endif
     diffuseColor.rgb = mix( diffuseColor.rgb, rock, envRock );
   }
-  diffuseColor.rgb *= mix( 1.0, 0.55, clamp( vTerrain.y, 0.0, 1.0 ) );
+  diffuseColor.rgb *= mix( 1.0, 0.55, wet );
 }
 #endif
 `;
@@ -332,6 +433,7 @@ roughnessFactor = mix( roughnessFactor, roughnessFactor * 0.85, envOverlay );
 #ifdef ENV_TERRAIN
 if ( envRock > 0.002 ) roughnessFactor = mix( roughnessFactor, envTriplanar( uRockArm, vEnvWorld * uRockScale, normalize( vEnvWorldN ) ).g, envRock );
 roughnessFactor = mix( roughnessFactor, 0.12, clamp( vTerrain.y, 0.0, 1.0 ) );
+roughnessFactor = mix( roughnessFactor, 0.55, envSnow );
 #endif
 #ifdef ENV_VERTEX_RM
 roughnessFactor = clamp( vRM.x + ( roughnessFactor - 0.75 ) * 0.6, 0.04, 1.0 );
@@ -356,9 +458,13 @@ const AFTER_NORMAL = /* glsl */ `
 #endif
 #ifdef ENV_TERRAIN
 {
-  // rock and standing water flatten the grass normal map (the rock's own relief comes from the mesh)
+  // rock and standing water flatten the grass normal map; the rock gets its own relief from its height
   vec3 flatN = normalize( vNormal );
   normal = normalize( mix( normal, flatN, max( envRock, clamp( vTerrain.y, 0.0, 1.0 ) ) * 0.85 ) );
+  if ( envRock > 0.002 ) {
+    float near = 1.0 - smoothstep( 220.0, 900.0, length( vViewPosition ) );
+    normal = envBump( -vViewPosition, normal, ( envRockH - 0.5 ) * 1.4 * envRock * near );
+  }
 }
 #endif
 `;
@@ -379,7 +485,7 @@ export function patchKey(p: EnvPatch): string {
     p.detail ? `d${p.detail === true ? 1 : p.detail}` : '',
     p.overlay ? 'o' : '',
     p.stripes ? 's' : '',
-    t ? `t${t.rockAttribute ?? ''}:${t.wetAttribute ?? ''}` : '',
+    t ? `t${t.rockAttribute ?? ''}:${t.wetAttribute ?? ''}${t.rockTint ? 'k' : ''}${t.rockMacroMeters ? 'm' : ''}${t.soil ? 's' : ''}${t.srgbColors ? 'c' : ''}${t.snow ? 'n' : ''}${t.worldUv ? 'w' : ''}` : '',
     p.vertexRM ? 'v' : '',
     p.glass ? 'gl' : '',
     p.wind ? (p.wind.flutter ? 'wf' : 'w') : '',
@@ -446,6 +552,22 @@ export function applyEnvPatch<M extends THREE.MeshStandardMaterial>(mat: M, p: E
     uniforms.uRockArm = { value: t.rock.arm };
     uniforms.uRockScale = { value: 1 / Math.max(0.01, t.rock.tileMeters) };
     uniforms.uSlopeRock = { value: t.slopeRock };
+    if (t.rockTint) {
+      defines.ENV_ROCK_TINT = '';
+      uniforms.uRockTint = { value: t.rockTint };
+    }
+    if (t.rockMacroMeters) {
+      defines.ENV_ROCK_MACRO = '';
+      uniforms.uRockMacro = { value: 1 / Math.max(0.01, t.rockMacroMeters) };
+    }
+    if (t.soil) {
+      defines.ENV_SOIL = '';
+      uniforms.uSoilMap = { value: t.soil.albedo };
+      uniforms.uSoilScale = { value: 1 / Math.max(0.01, t.soil.tileMeters) };
+    }
+    if (t.srgbColors) defines.ENV_SRGB_COLOR = '';
+    if (t.snow) defines.ENV_SNOW = '';
+    if (t.worldUv) defines.ENV_WORLD_UV = '';
   }
   if (p.vertexRM) {
     defines.ENV_VERTEX_RM = '';
@@ -472,6 +594,7 @@ export function applyEnvPatch<M extends THREE.MeshStandardMaterial>(mat: M, p: E
     shader.vertexShader = shader.vertexShader
       .replace('#include <common>', `#include <common>\n${VERT_HEAD}`)
       .replace('#include <begin_vertex>', `#include <begin_vertex>\n${VERT_WIND}`)
+      .replace('#include <color_vertex>', `#include <color_vertex>\n${VERT_COLOR}`)
       .replace('#include <project_vertex>', `#include <project_vertex>\n${VERT_BODY}`);
     let fs = shader.fragmentShader
       .replace('#include <common>', `#include <common>\n${FRAG_HEAD}`)

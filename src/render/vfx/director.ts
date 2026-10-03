@@ -32,8 +32,20 @@ export interface VfxFrame {
   xr: boolean;
 }
 
-/** Is there water at (x, z)? Levels with water install one; spray replaces dust there. */
-export type WaterProbe = (x: number, z: number) => boolean;
+/**
+ * Water at (x, z)? Levels with water install one; spray replaces dust there. A number is the water surface
+ * height (−Infinity: dry), so spray rises off the surface rather than the river bed under it; `true` means
+ * water at the ground height.
+ */
+export type WaterProbe = (x: number, z: number) => boolean | number;
+
+/** Water surface under (x, z) per the probe, or null when dry (`true` = at the ground height `ground`). */
+export function waterSurface(probe: WaterProbe | null, x: number, z: number, ground: number): number | null {
+  const w = probe?.(x, z);
+  if (w === true) return ground;
+  if (typeof w === 'number' && w > -Infinity) return Math.max(w, ground);
+  return null;
+}
 
 const WHITE = new THREE.Color(1, 1, 1);
 const SPARK = new THREE.Color(1, 0.55, 0.16);
@@ -299,7 +311,9 @@ export class VfxDirector {
 
   private emitWash(pos: THREE.Vector3, motors: number, near: number, surfaceY: number, dt: number): void {
     this.washAcc += dt * this.budget.washRate * motors * Math.pow(near, 1.5);
-    const wet = this.water?.(pos.x, pos.z) === true;
+    const level = waterSurface(this.water, pos.x, pos.z, surfaceY);
+    const wet = level !== null;
+    if (wet) surfaceY = level;
     const y = surfaceY + 0.02;
     while (this.washAcc >= 1) {
       this.washAcc -= 1;

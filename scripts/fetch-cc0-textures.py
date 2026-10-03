@@ -6,7 +6,7 @@ hashed assets, so the web, PWA and native builds all ship them).
 
 Poly Haven assets are CC0 1.0 (https://polyhaven.com/license). Re-run after changing SETS; the
 budget test (tests/unit/asset-budget.test.ts) fails if the folder grows past its limits.
-Usage: python3 scripts/fetch-cc0-textures.py   (needs Pillow with WebP support)
+Usage: python3 scripts/fetch-cc0-textures.py [slug ...]   (needs Pillow with WebP support; slugs limit the run)
 """
 import io
 import json
@@ -24,6 +24,8 @@ SETS = [
     'leafy_grass',
     'painted_plaster_wall',
     'bark_brown_02',
+    'aerial_rocks_02',
+    'forest_ground_04',
 ]
 MAPS = {'Diffuse': ('albedo', 80), 'nor_gl': ('normal', 88), 'arm': ('arm', 82)}
 RES = '1k'
@@ -37,7 +39,10 @@ def get(url: str) -> bytes:
 
 def main() -> int:
     credits = []
+    only = set(sys.argv[1:])
     for asset in SETS:
+        if only and asset not in only:
+            continue
         files = json.loads(get(f'https://api.polyhaven.com/files/{asset}'))
         info = json.loads(get(f'https://api.polyhaven.com/info/{asset}'))
         out = os.path.join(ROOT, asset)

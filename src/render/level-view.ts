@@ -1,6 +1,8 @@
 /** Render seam between GameView and a level's scenery (room or outdoor set): built per level, disposed on switch. */
 import type * as THREE from 'three';
 import type { QualityProfile } from '../core/quality';
+import type { WorldTime } from './looks';
+import type { WaterProbe } from './vfx/director';
 
 export interface LevelFrame {
   time: number;
@@ -58,4 +60,13 @@ export interface LevelView {
   readonly busy?: boolean;
   /** streaming / instancing numbers for the debug hook */
   stats?(): Record<string, unknown>;
+  /** view distance the sun cascades cover (m; default shadows.ts CASCADE_FAR) */
+  readonly shadowFar?: number;
+  /** water surface under (x, z) (−Infinity: dry): prop-wash spray, wash height over water */
+  readonly waterProbe?: WaterProbe;
+  /** generated levels: the sky preset drawn now, and a new one (time of day) */
+  readonly time?: WorldTime;
+  setTime?(time: WorldTime): void;
+  /** generated levels: the pilot's View distance (1 = the tier's own) */
+  setViewDistance?(k: number): void;
 }

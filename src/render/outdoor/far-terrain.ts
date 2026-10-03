@@ -10,7 +10,7 @@ import { chunkLimits } from '../../levels/world-runtime';
 import { CHUNK_SIZE, LOD_QUADS, type ChunkData } from '../../world/chunk-gen';
 import type { WorldSpec } from '../../world/world';
 import type { ChunkBuilder } from '../../world/worker/chunk-builder';
-import type { TerrainView } from './terrain-view';
+import { upNormals, type TerrainView } from './terrain-view';
 import type { WorldOrigin } from './world-origin';
 
 /** chunks (Chebyshev, centre distance) drawn with 8 × 8 quads; further ones get 4 × 4 */
@@ -224,6 +224,7 @@ export class FarTerrain {
     this.water.geometry.dispose();
     const g = new THREE.BufferGeometry();
     g.setAttribute('position', new THREE.BufferAttribute(new Float32Array(nv * 3), 3).setUsage(THREE.DynamicDrawUsage));
+    g.setAttribute('normal', upNormals(nv));
     g.setIndex(new THREE.BufferAttribute(new Uint32Array(ni), 1).setUsage(THREE.DynamicDrawUsage));
     this.water.geometry = g;
     this.capWaterV = nv;

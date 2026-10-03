@@ -221,7 +221,8 @@ export class ScatterView {
     this.caps = caps;
     const mk = (model: THREE.BufferGeometry, key: string, opts: { sway?: number; roughness?: number; shadow?: boolean; tree?: boolean } = {}): InstanceLayer => {
       const { material, depth } = instancedMaterials(
-        { key, sway: opts.sway, roughness: opts.roughness, vertex: opts.tree ? TREE_LEAN : undefined, fragment: opts.tree ? TREE_JITTER : undefined },
+        // crowns take most of their shade-side light from the sky: a full share of the captured environment
+        { key, sway: opts.sway, roughness: opts.roughness, envMapIntensity: opts.tree ? 1 : 0.5, vertex: opts.tree ? TREE_LEAN : undefined, fragment: opts.tree ? TREE_JITTER : undefined },
         shared,
       );
       const layer = new InstanceLayer(model, material, opts.shadow === false ? null : depth, key);
@@ -237,7 +238,7 @@ export class ScatterView {
       mk(birchLod0(), 'birch0', { sway: 1.2, tree: true }),
     ];
     const atlas = treeBillboardAtlas();
-    const bb = instancedMaterials({ key: 'billboards', roughness: 0.95, vertex: BILLBOARD_UV, fragment: TREE_JITTER }, shared);
+    const bb = instancedMaterials({ key: 'billboards', roughness: 0.95, envMapIntensity: 1, vertex: BILLBOARD_UV, fragment: TREE_JITTER }, shared);
     bb.material.map = atlas;
     bb.material.alphaTest = 0.5;
     bb.material.side = THREE.DoubleSide;

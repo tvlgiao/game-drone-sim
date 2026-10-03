@@ -1,15 +1,11 @@
 /**
- * Materials for generated terrain: vertex-colour ground with a procedural detail texture (grass grain on flats,
- * rock strata on slopes, blended by the normal: triplanar-ish), road ribbons with painted lines, and the shared
- * instancing transform used by trees, rocks, houses and bridges. Textures are DataTextures (no canvas), so the
+ * Materials for generated terrain beside the library's terrain ground (materials/library.ts `terrain()`): the
+ * procedural detail texture (City facades, roads), road ribbons with painted lines, and the shared instancing
+ * transform used by trees, rocks, houses and bridges. Textures are DataTextures (no canvas), so the
  * module also builds in Node tests.
  */
 import * as THREE from 'three';
 import { fbmField } from '../textures';
-
-/** metres per fine detail tile; a second, coarser tile hides the repetition */
-export const DETAIL_TILE = 4;
-const DETAIL_TILE_COARSE = 29;
 
 /**
  * RGBA detail: R fine grain (grass / soil), G stretched strata (rock faces), B medium blotches, A macro
@@ -49,106 +45,6 @@ const COLOR_VERTEX_SRGB = /* glsl */ `
 #if defined( USE_COLOR )
   vColor.rgb = pow( vColor.rgb, vec3( 2.2 ) );
 #endif`;
-
-/**
- * The world engine paints village plateaus one flat khaki (0x8d9858 ± 6 %), which reads as a bare disc from
- * the air: those vertices become lawn green, matched by hue ratio so the per-vertex jitter does not matter.
- */
-const VILLAGE_LAWN = /* glsl */ `
-#if defined( USE_COLOR )
-{
-  vec3 s = pow( vColor.rgb, vec3( 1.0 / 2.2 ) );
-  vec2 ratio = s.rb / max( s.g, 1e-3 );
-  float village = 1.0 - smoothstep( 0.012, 0.03, length( ratio - vec2( 0.9276, 0.5789 ) ) );
-  vColor.rgb = mix( vColor.rgb, pow( vec3( 0.37, 0.52, 0.23 ), vec3( 2.2 ) ), village );
-}
-#endif`;
-
-const TERRAIN_VARYINGS = /* glsl */ `
-varying vec3 vTerrainPos;
-varying vec3 vTerrainN;`;
-
-const DETAIL_FN = /* glsl */ `
-uniform sampler2D uDetail;
-float terrainDetail( vec3 p, vec3 n, float dist, out float steep ) {
-  vec3 w = pow( abs( n ), vec3( 4.0 ) );
-  w /= ( w.x + w.y + w.z );
-  steep = 1.0 - smoothstep( 0.55, 0.8, n.y );
-  float k = 1.0 / ${DETAIL_TILE.toFixed(1)};
-  float kc = 1.0 / ${DETAIL_TILE_COARSE.toFixed(1)};
-  vec4 top = texture2D( uDetail, p.xz * k );
-  vec4 topC = texture2D( uDetail, p.xz * kc + 0.37 );
-  float grass = top.r * 0.55 + topC.b * 0.45;
-  float rock = texture2D( uDetail, p.zy * kc ).g * w.x + texture2D( uDetail, p.xy * kc ).g * w.z + topC.g * w.y;
-  rock = rock * 0.7 + top.r * 0.3;
-  float d = mix( grass, rock, steep );
-  // far away the grain only shimmers: fade to the mean
-  return mix( d, 0.5, smoothstep( 120.0, 520.0, dist ) );
-}
-// screen-space bump from a height (three's perturbNormalArb without a bump map)
-vec3 terrainBump( vec3 p, vec3 n, float h ) {
-  vec3 sx = dFdx( p );
-  vec3 sy = dFdy( p );
-  vec3 r1 = cross( sy, n );
-  vec3 r2 = cross( n, sx );
-  float det = dot( sx, r1 ) * ( gl_FrontFacing ? 1.0 : -1.0 );
-  vec3 grad = sign( det ) * ( dFdx( h ) * r1 + dFdy( h ) * r2 );
-  return normalize( abs( det ) * n - grad );
-}`;
-
-/**
- * Terrain: vertex colours × detail, macro tint variation, wetter / glossier snow. One program for every
- * chunk and LOD (and the far backdrop, which adds its own colours).
- */
-export function terrainMaterial(detail: THREE.Texture): THREE.MeshStandardMaterial {
-  const m = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.94, metalness: 0, envMapIntensity: 0.2 });
-  m.name = 'terrain';
-  m.onBeforeCompile = (s) => {
-    s.uniforms.uDetail = { value: detail };
-    s.vertexShader = s.vertexShader
-      .replace('#include <common>', `#include <common>\n${TERRAIN_VARYINGS}`)
-      .replace('#include <color_vertex>', `${COLOR_VERTEX_SRGB}\n${VILLAGE_LAWN}`)
-      .replace(
-        '#include <project_vertex>',
-        `#include <project_vertex>
-  vTerrainPos = ( modelMatrix * vec4( transformed, 1.0 ) ).xyz;
-  vTerrainN = normalize( mat3( modelMatrix ) * objectNormal );`,
-      );
-    s.fragmentShader = s.fragmentShader
-      .replace('#include <common>', `#include <common>\n${TERRAIN_VARYINGS}\n${DETAIL_FN}`)
-      .replace(
-        '#include <color_fragment>',
-        `#include <color_fragment>
-  float steep;
-  float dist = length( vViewPosition );
-  float d = terrainDetail( vTerrainPos, normalize( vTerrainN ), dist, steep );
-  float macro = texture2D( uDetail, vTerrainPos.xz * 0.0021 ).a;
-  float snow = smoothstep( 0.62, 0.8, min( diffuseColor.r, diffuseColor.b ) );
-  diffuseColor.rgb *= mix( 0.62 + 0.76 * d, 0.9 + 0.2 * d, snow );
-  diffuseColor.rgb *= mix( vec3( 0.84, 0.9, 0.82 ), vec3( 1.1, 1.05, 0.95 ), macro );
-  // rock faces: gullies down the fall line and banded strata, large enough to survive the distance fade
-  float gully = texture2D( uDetail, vec2( dot( vTerrainPos.xz, vec2( 0.0071, 0.0049 ) ), vTerrainPos.y * 0.0012 ) ).g;
-  float band = texture2D( uDetail, vec2( vTerrainPos.y * 0.011, 0.37 ) ).r;
-  vec3 rockTint = mix( vec3( 0.74, 0.77, 0.82 ), vec3( 1.02, 0.98, 0.9 ), band );
-  diffuseColor.rgb = mix( diffuseColor.rgb, diffuseColor.rgb * rockTint * ( 0.62 + 0.62 * gully ), steep * ( 1.0 - snow ) );
-  // a touch less saturation: aerial greens are olive, not toy green
-  diffuseColor.rgb = mix( vec3( dot( diffuseColor.rgb, vec3( 0.2126, 0.7152, 0.0722 ) ) ), diffuseColor.rgb, 0.78 ) * 0.92;`,
-      )
-      .replace(
-        '#include <roughnessmap_fragment>',
-        `#include <roughnessmap_fragment>
-  roughnessFactor = mix( roughnessFactor, 0.55, snow );`,
-      )
-      .replace(
-        '#include <normal_fragment_maps>',
-        `#include <normal_fragment_maps>
-  // crags on rock faces, a softer grain on grass; gone with the detail at distance
-  normal = terrainBump( -vViewPosition, normal, ( d - 0.5 ) * mix( 0.12, 0.9, steep ) * ( 1.0 - snow * 0.6 ) );`,
-      );
-  };
-  m.customProgramCacheKey = () => 'terrain-v4';
-  return m;
-}
 
 const ROAD_VARYINGS = /* glsl */ `
 varying vec2 vRoad;
@@ -239,6 +135,8 @@ vTint = aInstB.w;`;
 
 export interface InstancedMaterialOptions {
   roughness?: number;
+  /** share of the captured environment (diffuse IBL / reflections); default 0.4 */
+  envMapIntensity?: number;
   /** model has a roof part stretched by aInstC.x (houses) */
   roof?: boolean;
   sway?: number;
@@ -284,7 +182,7 @@ function patchInstanced(s: THREE.WebGLProgramParametersWithUniforms, o: Instance
 
 /** MeshStandardMaterial (vertex colours) with the packed instance transform, plus the matching shadow depth material. */
 export function instancedMaterials(o: InstancedMaterialOptions, shared: InstanceUniforms): { material: THREE.MeshStandardMaterial; depth: THREE.MeshDepthMaterial } {
-  const material = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: o.roughness ?? 0.9, metalness: 0, envMapIntensity: 0.4 });
+  const material = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: o.roughness ?? 0.9, metalness: 0, envMapIntensity: o.envMapIntensity ?? 0.4 });
   material.name = o.key;
   material.defines = { ...(o.roof ? { INST_ROOF: '' } : {}), ...o.defines };
   material.onBeforeCompile = (s) => patchInstanced(s, o, shared, false);

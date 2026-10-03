@@ -15,11 +15,12 @@ import { WorldLevelView } from './outdoor/world-level-view';
 import { PostFX } from './post';
 import { NEXT_COLOR, RingsView } from './rings-view';
 import { ContactShadow } from './vfx/contact-shadow';
-import { VfxDirector, type WaterProbe } from './vfx/director';
+import { VfxDirector, waterSurface, type WaterProbe } from './vfx/director';
 import { XrPanel } from './xr-panel';
 import { HeadingArrow } from './heading-arrow';
 import { captureEnvironment, captureLightProbe } from './ibl';
-import { levelLook, type LevelLook, type ToneMapper } from './looks';
+import { levelLook, type LevelLook, type ToneMapper, type WorldTime } from './looks';
+import { levelTime } from '../levels/skies';
 import { MaterialLibrary } from './materials/library';
 import { findSun, SunCascades } from './shadows';
 
@@ -58,6 +59,8 @@ const Y_AXIS = new THREE.Vector3(0, 1, 0);
 const REFERENCE_LIGHTING: QualityProfile = { ...QUALITY_PROFILES.high, shadows: false };
 /** Quest 2 budget (72 Hz, two eyes on a mobile GPU): no post FX, no shadow maps, small particle pools. */
 const XR_TIER: QualityTier = 'low';
+/** Settings → Time of day */
+export type TimeSetting = 'auto' | 'dawn' | 'noon' | 'golden' | 'dusk';
 /** seconds at the minimum render scale before generated levels shorten their view distance (07 §7) */
 const VIEW_SCALE_AFTER = 3;
 const VIEW_SCALE_STEP = 0.75;
@@ -101,6 +104,11 @@ export class GameView {
   private width = 1;
   private height = 1;
   private pendingRespawn = false;
+  /** water surface of the level under the drone (installed by the level view or setWaterProbe) */
+  private waterProbe: WaterProbe | null = null;
+  /** pilot's Time of day / View distance for generated outdoor levels */
+  private timeSetting: TimeSetting = 'auto';
+  private viewDistance = 1;
   private bloomPulse = 0;
   /** render-preview hook: a fixed camera pose instead of the rig's (null = the rig) */
   posed: { position: THREE.Vector3; target: THREE.Vector3 } | null = null;
@@ -178,7 +186,8 @@ export class GameView {
     scene.add(this.xrDolly);
 
     this.level = level.def;
-    this.look = levelLook(level.def);
+    this.level = level.def;
+    this.look = levelLook(level.def, this.worldTime(level.def));
     void this.library.preload(level.def.id);
     this.levelView = this.buildLevelView(level);
     this.rings = new RingsView(level.def.rings);
@@ -195,13 +204,14 @@ export class GameView {
    */
   loadLevel(level: LevelRuntime): void {
     this.cascades.detach();
-    this.vfx.setWaterProbe(null);
+    this.setWaterProbe(null);
     this.dropCapture();
     this.levelView.dispose();
     this.rings.group.removeFromParent();
     this.rings.dispose();
     this.level = level.def;
-    this.look = levelLook(level.def);
+    this.level = level.def;
+    this.look = levelLook(level.def, this.worldTime(level.def));
     void this.library.preload(level.def.id);
     this.levelView = this.buildLevelView(level);
     this.rings = new RingsView(level.def.rings);
@@ -212,8 +222,13 @@ export class GameView {
   private buildLevelView(level: LevelRuntime): LevelView {
     const def = level.def;
     if (def.kind === 'indoor') return new IndoorLevelView(def, this.renderer, this.library, this.form);
-    if (level.content) return new WorldLevelView(level, this.renderer, this.library, this.form);
+    if (level.content) return new WorldLevelView(level, this.renderer, this.library, this.form, { time: this.worldTime(def), viewDistance: this.viewDistance });
     return new OutdoorLevelView(def, this.renderer, this.library);
+  }
+
+  /** Sky preset a generated level is drawn at under the pilot's Time of day (undefined: not a generated level). */
+  private worldTime(def: LevelDef): WorldTime | undefined {
+    return def.kind === 'outdoor' && def.env.time ? levelTime(def.env, this.timeSetting) : undefined;
   }
 
   /** The scenery's far plane (generated levels see further than the rig's default). */
@@ -227,6 +242,7 @@ export class GameView {
   }
 
   private attachLevel(level: LevelRuntime): void {
+    if (this.levelView.waterProbe) this.setWaterProbe(this.levelView.waterProbe);
     const v = this.levelView;
     this.scene.add(v.group, this.rings.group);
     this.scene.background = v.background;
@@ -247,6 +263,11 @@ export class GameView {
 
   get camera(): THREE.PerspectiveCamera {
     return this.rig.camera;
+  }
+
+  /** LOS pilot's eye (outdoors it moves when the pilot is re-planted): the HUD's pilot marker. */
+  get pilotEye(): THREE.Vector3 {
+    return this.rig.pilotEye;
   }
 
   get tier(): QualityTier {
@@ -316,14 +337,17 @@ export class GameView {
     else this.ledColor.setRGB(1, 0.3, 0.07);
     _ye.setFromQuaternion(f.drone.orientation, 'YXZ');
     this.contact.update(f.drone.position, this.ledColor, f.drone.armed ? 1 : 0.35, _ye.y, f.drone.armed ? motors : 0);
-    const h = this.contact.height;
+    // over a river or lake the wash, spray and its height read off the water surface, not the bed under it
+    const water = this.waterProbe ? waterSurface(this.waterProbe, f.drone.position.x, f.drone.position.z, this.contact.surfaceY) : null;
+    const surfaceY = water ?? this.contact.surfaceY;
+    const h = water === null ? this.contact.height : Math.max(0, f.drone.position.y - water);
     const wash = f.drone.armed ? motors * Math.max(0, 1 - h / 2) : 0;
 
     // pixels per unit of tan(angle): drawing-buffer height / 2 × projection y-scale (per eye in XR)
     r.getDrawingBufferSize(_size);
     const px = (_size.y / 2) * cam.projectionMatrix.elements[5]!;
     this.levelView.update({ time: t, dt, px, drone: f.drone.position, camera: _eye, wash, fanAngle: f.fanAngle });
-    this.vfx.update({ dt, time: t, px, drone: f.drone, camera: cam, fpvWeight: this.rig.fpvWeight, surfaceY: this.contact.surfaceY, height: h, xr });
+    this.vfx.update({ dt, time: t, px, drone: f.drone, camera: cam, fpvWeight: this.rig.fpvWeight, surfaceY, height: h, xr });
 
     if (xr) {
       r.render(this.scene, this.xrCam);
@@ -477,7 +501,34 @@ export class GameView {
    * of dust. Null removes it; a level switch keeps whatever the new level installs.
    */
   setWaterProbe(probe: WaterProbe | null): void {
+    this.waterProbe = probe;
     this.vfx.setWaterProbe(probe);
+  }
+
+  /**
+   * Time of day for generated outdoor levels ('auto' = the level's own): sky, sun, fog, water and lit windows
+   * in the level view, then the look and a fresh environment capture. No-op elsewhere.
+   */
+  setTimeOfDay(setting: TimeSetting): void {
+    this.timeSetting = setting;
+    const v = this.levelView;
+    if (!v.setTime || this.level.kind !== 'outdoor') return;
+    const time = levelTime(this.level.env, setting);
+    if (time === v.time) return;
+    v.setTime(time);
+    this.look = levelLook(this.level, time);
+    this.scene.background = v.background;
+    this.dropCapture();
+    this.cascades.detach();
+    this.applyQuality();
+  }
+
+  /** The pilot's View distance (0.5 short … 1.3 long; 1 = the tier's own) for generated outdoor levels. */
+  setViewDistance(k: number): void {
+    this.viewDistance = k;
+    if (!this.levelView.setViewDistance) return;
+    this.levelView.setViewDistance(k);
+    this.applyCameraFar();
   }
 
   /** Render scale pinned at 0.5 for VIEW_SCALE_AFTER s: generated levels shorten fog and streaming radius once. */
@@ -537,7 +588,7 @@ export class GameView {
     this.vfx.setQuality(p.tier);
     this.rings.setQuality(p.tier, look.ringGain);
     this.levelView.setQuality(p);
-    this.cascades.apply(this.levelView.group, p);
+    this.cascades.apply(this.levelView.group, p, this.levelView.shadowFar);
     this.levelView.refreshShadows();
     this.applyCameraFar();
     const sun = findSun(this.levelView.group);

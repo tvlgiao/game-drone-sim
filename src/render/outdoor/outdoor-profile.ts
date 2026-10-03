@@ -57,15 +57,24 @@ export const OUTDOOR_PROFILES: Readonly<Record<QualityTier, OutdoorProfile>> = {
   },
 };
 
+/** View distance setting → scale of the tier's fog / streaming reach ('auto' = the tier's own). */
+export const VIEW_DISTANCE_SCALE: Readonly<Record<'auto' | 'short' | 'medium' | 'long', number>> = { auto: 1, short: 0.5, medium: 0.75, long: 1.3 };
+
 /** Phones run the medium budget at most (07 §7: iPhone / tablet row); desktop takes the tier as is. */
+
 export function outdoorProfile(tier: QualityTier, form: FormFactor = 'desktop'): OutdoorProfile {
   if (form === 'phone' && (tier === 'ultra' || tier === 'high')) return OUTDOOR_PROFILES.medium;
   return OUTDOOR_PROFILES[tier];
 }
 
-/** Adaptive view distance (07 §7): render scale stuck at 0.5 shrinks fog and radius by 0.75, never below 2 chunks. */
+/**
+ * View distance scale: the pilot's View distance setting times the adaptive step (07 §7: render scale stuck at
+ * 0.5 shrinks fog and radius by 0.75, never below 2 chunks). Above 1 ("Long") only the fog and the batched far
+ * backdrop reach further (one draw either way); the streamed radius keeps the tier's budget.
+ */
 export function scaledProfile(p: OutdoorProfile, viewScale: number): OutdoorProfile {
-  if (viewScale >= 1) return p;
+  if (viewScale === 1) return p;
+  if (viewScale > 1) return p.farRadius > 0 ? { ...p, fog: p.fog * viewScale, farRadius: Math.round(p.farRadius * viewScale) } : { ...p, fog: p.fog * viewScale };
   const radius = Math.max(2, Math.round(p.stream.radius * viewScale));
   return { ...p, fog: p.fog * viewScale, farRadius: Math.round(p.farRadius * viewScale), stream: { ...p.stream, radius } };
 }

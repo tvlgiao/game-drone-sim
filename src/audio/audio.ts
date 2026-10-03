@@ -40,6 +40,8 @@ export class GameAudio {
   private volume = 0.7;
   private lastUpdate = 0;
   private ambience = 0;
+  /** Settings → Wind volume: multiplies the whole wind voice (ambient bed and speed rush) */
+  private windVolume = 1;
   private failed = false;
   private wantRunning = false;
 
@@ -87,6 +89,18 @@ export class GameAudio {
     this.ambience = kind === 'wind' ? Math.min(1, Math.max(0, gain)) : 0;
   }
 
+  /** Wind volume 0..1 (Settings): scales the wind bed and the speed rush; motors and SFX keep the master volume. */
+  setWindVolume(v: number): void {
+    this.windVolume = Math.min(1, Math.max(0, v));
+  }
+
+  /** wind gain the next update targets for `speed` (m/s) at audio time `now`, before the master volume (tests) */
+  windLevel(speed: number, now: number): number {
+    const s = Math.min(1, Math.max(0, speed / 25));
+    const gust = 0.75 + 0.25 * Math.sin(now * 0.37) * Math.sin(now * 0.11 + 1.3);
+    return Math.max(0.35 * s * s, AMBIENT_WIND * this.ambience * gust) * this.windVolume;
+  }
+
   setVolume(v: number): void {
     this.volume = Math.min(1, Math.max(0, v));
     if (this.ctx && this.master) this.master.gain.setTargetAtTime(this.volume, this.ctx.currentTime, 0.05);
@@ -123,8 +137,7 @@ export class GameAudio {
       const s = Math.min(1, Math.max(0, speed / 25));
       // slow gusts on the ambient bed
       const gust = 0.75 + 0.25 * Math.sin(now * 0.37) * Math.sin(now * 0.11 + 1.3);
-      const bed = AMBIENT_WIND * this.ambience * gust;
-      this.windGain.gain.setTargetAtTime(Math.max(0.35 * s * s, bed), now, 0.15);
+      this.windGain.gain.setTargetAtTime(this.windLevel(speed, now), now, 0.15);
       this.windFilter.frequency.setTargetAtTime(300 + 1800 * Math.max(s, this.ambience * 0.15 * gust), now, 0.15);
     }
   }

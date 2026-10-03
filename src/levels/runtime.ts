@@ -8,6 +8,7 @@ import type { City } from '../world/city-gen';
 import type { Outskirts } from './city-outskirts';
 import type { CityFurniture } from './city-furniture';
 import type { World } from '../world/world';
+import type { TerrainField as WorldTerrainField } from '../world/terrain-field';
 import type { ChunkStreamer } from './chunk-streamer';
 
 /**
@@ -73,4 +74,13 @@ export function groundAt(rt: Pick<LevelRuntime, 'terrain'>, x: number, z: number
 /** True when `x` is a LevelRuntime rather than raw room data (legacy constructors accept both). */
 export function isRuntime(x: object): x is LevelRuntime {
   return 'def' in x && 'surfaces' in x;
+}
+
+/**
+ * The world engine's field behind a generated level (Alpine, Infinite: the world's; City: its street / river
+ * field), for water, biome and minimap queries; null for authored levels.
+ */
+export function worldField(rt: Pick<LevelRuntime, 'terrain'>): WorldTerrainField | null {
+  const t = rt.terrain as Partial<WorldTerrainField> | null;
+  return t && typeof t.biomeAt === 'function' && typeof t.waterLevelAt === 'function' ? (t as WorldTerrainField) : null;
 }

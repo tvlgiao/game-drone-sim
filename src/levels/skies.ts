@@ -1,6 +1,7 @@
 /**
- * Outdoor lighting presets (sRGB hex colours, sun direction towards the sun). The fog colour is always the
- * horizon colour, so far terrain dissolves into the sky (07 §1.6).
+ * Outdoor lighting presets (sRGB hex colours, sun direction towards the sun). The fog colour is the horizon
+ * colour (or `haze` where the horizon glows only towards the sun, at dusk), so far terrain dissolves into the sky
+ * (07 §1.6).
  */
 import type { EnvDef, SkyDef } from '../types';
 import { hash1, u01 } from '../world/rng';
@@ -22,13 +23,24 @@ export const SKIES: Readonly<Record<SkyPreset, SkyDef>> = {
   dawn: { top: 0x4f7fbf, horizon: 0xf1cfb4, sunDir: unit(0.82, 0.16, -0.4), sunColor: 0xffcf9e, sunIntensity: 4.6, hemi: [0xb9c6e6, 0x4d4b3c] },
   noon: { top: 0x2f72cf, horizon: 0xc6dbea, sunDir: unit(-0.42, 0.74, 0.46), sunColor: 0xfff2df, sunIntensity: 5.2, hemi: [0xcfe0fb, 0x5b6a3c] },
   golden: { top: 0x3f6fb2, horizon: 0xe6cdac, sunDir: unit(-0.86, 0.22, -0.3), sunColor: 0xffc283, sunIntensity: 5.6, hemi: [0xb3c4e2, 0x56483a] },
-  dusk: { top: 0x2b4174, horizon: 0xdc9670, sunDir: unit(-0.78, 0.11, 0.6), sunColor: 0xff9a5e, sunIntensity: 4, hemi: [0x8d9cc8, 0x3e3836] },
+  dusk: { top: 0x2b4174, horizon: 0xdc9670, sunDir: unit(-0.78, 0.11, 0.6), sunColor: 0xff9a5e, sunIntensity: 4, hemi: [0x8d9cc8, 0x3e3836], haze: 0x9c8c95 },
 };
 
 /** Environment for an outdoor level at `time`, fog reaching 1 % visibility at `viewDistance` metres. */
 export function outdoorEnv(time: SkyPreset, viewDistance: number, wind = 0.5): EnvDef {
   const sky = SKIES[time];
-  return { sky, fog: { color: sky.horizon, viewDistance }, ambience: { kind: 'wind', gain: wind }, shadows: 'sun-follow' };
+  return { sky, time, fog: { color: sky.haze ?? sky.horizon, viewDistance }, ambience: { kind: 'wind', gain: wind }, shadows: 'sun-follow' };
+}
+
+/**
+ * The time of day a generated level is drawn at: its own (`env.time`) on Auto, else the pilot's pick. Alpine's
+ * own golden hour is the thin-air variant, kept when the pilot picks golden hour there too.
+ */
+export function levelTime(env: Pick<EnvDef, 'time'>, setting: TimeOfDay | 'auto'): SkyPreset {
+  const own = env.time ?? 'afternoon';
+  if (setting === 'auto') return own;
+  if (setting === 'golden' && own === 'alpine') return 'alpine';
+  return setting;
 }
 
 /** The Infinite world's time of day, fixed per seed (07 §2.6). */

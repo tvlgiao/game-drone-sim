@@ -9,6 +9,7 @@
 import * as THREE from 'three';
 import { cellKey, type ChunkStreamer, type StreamCell } from '../../levels/chunk-streamer';
 import { chunkIndices, CHUNK_SIZE, LOD_QUADS, type ChunkData, type Lod } from '../../world/chunk-gen';
+import { SURFACE_BANK, SURFACE_ROCK, SURFACE_STRIDE } from '../../world/chunk-gen-v2';
 import type { WorldOrigin } from './world-origin';
 
 /** free meshes kept for reuse across all LODs (07 §2.3) */
@@ -36,6 +37,25 @@ export interface TerrainMaterials {
   terrain: THREE.Material;
   road: THREE.Material;
   water: THREE.Material;
+}
+
+/**
+ * Per-vertex surface weights of generator v2 (rock, wet bank) as two normalised byte attributes `aRock` / `aWet`
+ * over one interleaved buffer, the layout `ChunkData.surface` already has. v1 chunks leave them at 0.
+ */
+export function addSurfaceAttributes(g: THREE.BufferGeometry, vertices: number, usage: THREE.Usage = THREE.StaticDrawUsage): THREE.InterleavedBuffer {
+  const buf = new THREE.InterleavedBuffer(new Uint8Array(vertices * SURFACE_STRIDE), SURFACE_STRIDE).setUsage(usage);
+  g.setAttribute('aRock', new THREE.InterleavedBufferAttribute(buf, 1, SURFACE_ROCK, true));
+  g.setAttribute('aWet', new THREE.InterleavedBufferAttribute(buf, 1, SURFACE_BANK, true));
+  return buf;
+}
+
+/** Copies a chunk's surface weights (zeros for v1 chunks) into the interleaved buffer at vertex `base`. */
+function copySurface(buf: THREE.InterleavedBuffer, data: ChunkData, base: number, vertices: number): void {
+  const a = buf.array as Uint8Array;
+  const n = vertices * SURFACE_STRIDE;
+  if (data.surface.length >= n) a.set(data.surface.subarray(0, n), base * SURFACE_STRIDE);
+  else a.fill(0, base * SURFACE_STRIDE, base * SURFACE_STRIDE + n);
 }
 
 export function lodVertexCount(lod: Lod): number {
@@ -78,6 +98,7 @@ class RibbonBatch {
     const pa = pos.array as Float32Array;
     const ia = idx.array as Uint32Array;
     const ra = this.road ? ((g.getAttribute('aRoad') as THREE.BufferAttribute).array as Float32Array) : null;
+    const sa = this.road ? null : ((g.getAttribute('aShore') as THREE.BufferAttribute).array as Float32Array);
     let v = 0;
     let i = 0;
     for (const c of chunks.values()) {
@@ -102,6 +123,7 @@ class RibbonBatch {
           ra[(v + k) * 2 + 1] = col[centre * 3]! > 150 ? 1 : 0;
         }
       }
+      if (sa) for (let k = 0; k < n; k++) sa[v + k] = shoreFoam(c.data, p[k * 3]!, p[k * 3 + 1]!, p[k * 3 + 2]!);
       const ix = r.indices;
       for (let k = 0; k < ix.length; k++) ia[i + k] = ix[k]! + v;
       v += n;
@@ -110,6 +132,7 @@ class RibbonBatch {
     pos.needsUpdate = true;
     idx.needsUpdate = true;
     if (ra) g.getAttribute('aRoad').needsUpdate = true;
+    if (sa) g.getAttribute('aShore').needsUpdate = true;
     g.setDrawRange(0, i);
     this.mesh.visible = i > 0;
   }
@@ -118,12 +141,12 @@ class RibbonBatch {
     this.mesh.geometry.dispose();
     const g = new THREE.BufferGeometry();
     g.setAttribute('position', new THREE.BufferAttribute(new Float32Array(nv * 3), 3).setUsage(THREE.DynamicDrawUsage));
+    // the standard program reads a normal: roads and water lie flat enough for straight up
+    g.setAttribute('normal', upNormals(nv));
     if (this.road) {
       g.setAttribute('aRoad', new THREE.BufferAttribute(new Float32Array(nv * 2), 2).setUsage(THREE.DynamicDrawUsage));
-      // the standard program reads a normal: roads lie flat enough for straight up
-      const n = new Float32Array(nv * 3);
-      for (let k = 0; k < nv; k++) n[k * 3 + 1] = 1;
-      g.setAttribute('normal', new THREE.BufferAttribute(n, 3));
+    } else {
+      g.setAttribute('aShore', new THREE.BufferAttribute(new Float32Array(nv), 1).setUsage(THREE.DynamicDrawUsage));
     }
     g.setIndex(new THREE.BufferAttribute(new Uint32Array(ni), 1).setUsage(THREE.DynamicDrawUsage));
     this.mesh.geometry = g;
@@ -136,10 +159,35 @@ class RibbonBatch {
   }
 }
 
+/** Straight-up normals for `nv` vertices of a flat ribbon (roads, water). */
+export function upNormals(nv: number): THREE.BufferAttribute {
+  const n = new Float32Array(nv * 3);
+  for (let k = 0; k < nv; k++) n[k * 3 + 1] = 1;
+  return new THREE.BufferAttribute(n, 3);
+}
+
+/** water this shallow (m) over the chunk grid's ground foams at full strength; deeper fades out by FOAM_DEPTH */
+const FOAM_DEPTH = 1.1;
+
+/**
+ * Shore foam 0..1 of a water vertex at chunk-local (x, z): from the water depth over the chunk's own ground grid
+ * (water vertices sit on grid points), full where the bank rises above the surface.
+ */
+export function shoreFoam(d: ChunkData, x: number, y: number, z: number): number {
+  const side = d.gridSize;
+  const step = CHUNK_SIZE / (side - 1);
+  const i = Math.min(side - 1, Math.max(0, Math.round(x / step)));
+  const j = Math.min(side - 1, Math.max(0, Math.round(z / step)));
+  const depth = y - d.positions[(j * side + i) * 3 + 1]!;
+  if (depth <= 0) return 1;
+  return depth >= FOAM_DEPTH ? 0 : 1 - depth / FOAM_DEPTH;
+}
+
 /** Every shown LOD2 chunk (grid + skirts) in one geometry: the outer rings cost one draw call. */
 class Lod2Batch {
   readonly mesh: THREE.Mesh;
   private cap = 0;
+  private surface: THREE.InterleavedBuffer | null = null;
   private readonly nv = lodVertexCount(2);
   private readonly idx = chunkIndices(2);
 
@@ -177,10 +225,12 @@ class Lod2Batch {
       }
       na.set(d.normals, base * 3);
       ca.set(d.colors, base * 3);
+      copySurface(this.surface!, d, base, nv);
       for (let i = 0; i < ni; i++) ia[k * ni + i] = this.idx[i]! + base;
       k++;
     }
     for (const a of ['position', 'normal', 'color']) g.getAttribute(a).needsUpdate = true;
+    this.surface!.needsUpdate = true;
     g.getIndex()!.needsUpdate = true;
     g.setDrawRange(0, k * ni);
     this.mesh.visible = k > 0;
@@ -194,6 +244,7 @@ class Lod2Batch {
     g.setAttribute('position', new THREE.BufferAttribute(new Float32Array(nv * 3), 3).setUsage(THREE.DynamicDrawUsage));
     g.setAttribute('normal', new THREE.BufferAttribute(new Int8Array(nv * 3), 3, true).setUsage(THREE.DynamicDrawUsage));
     g.setAttribute('color', new THREE.BufferAttribute(new Uint8Array(nv * 3), 3, true).setUsage(THREE.DynamicDrawUsage));
+    this.surface = addSurfaceAttributes(g, nv, THREE.DynamicDrawUsage);
     g.setIndex(new THREE.BufferAttribute(new Uint32Array(chunks * this.idx.length), 1).setUsage(THREE.DynamicDrawUsage));
     this.mesh.geometry = g;
     this.cap = chunks;
@@ -338,6 +389,7 @@ export class TerrainView {
     g.setAttribute('position', new THREE.BufferAttribute(new Float32Array(nv * 3), 3));
     g.setAttribute('normal', new THREE.BufferAttribute(new Int8Array(nv * 3), 3, true));
     g.setAttribute('color', new THREE.BufferAttribute(new Uint8Array(nv * 3), 3, true));
+    addSurfaceAttributes(g, nv);
     g.setIndex(this.indices[lod]!);
     g.boundingBox = new THREE.Box3();
     g.boundingSphere = new THREE.Sphere();
@@ -390,6 +442,11 @@ export function fillChunkGeometry(g: THREE.BufferGeometry, data: ChunkData): voi
   pos.needsUpdate = true;
   nor.needsUpdate = true;
   col.needsUpdate = true;
+  const rock = g.getAttribute('aRock') as THREE.InterleavedBufferAttribute | undefined;
+  if (rock) {
+    copySurface(rock.data, data, 0, pos.count);
+    rock.data.needsUpdate = true;
+  }
   const box = g.boundingBox ?? (g.boundingBox = new THREE.Box3());
   box.min.set(0, data.minY, 0);
   box.max.set(CHUNK_SIZE, data.maxY, CHUNK_SIZE);

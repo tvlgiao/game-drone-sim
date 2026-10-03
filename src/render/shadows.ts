@@ -43,7 +43,7 @@ export class SunCascades {
    * Cascades on when the tier asks for them and the level has a directional sun; otherwise the
    * level's own light is restored. Safe to call on every quality change.
    */
-  apply(root: THREE.Object3D | null, p: QualityProfile): void {
+  apply(root: THREE.Object3D | null, p: QualityProfile, far = CASCADE_FAR): void {
     const want = p.shadows && p.sunCascades && root !== null;
     const dl = want ? findSun(root) : null;
     if (!dl) {
@@ -74,7 +74,7 @@ export class SunCascades {
       sun.shadow.map = null;
     }
     sun.shadow.camera.near = 0.5;
-    sun.shadow.camera.far = CASCADE_FAR;
+    sun.shadow.camera.far = far;
     sun.shadow.bias = -0.0002;
     sun.shadow.normalBias = 0.025;
     sun.shadow.radius = 2.5;

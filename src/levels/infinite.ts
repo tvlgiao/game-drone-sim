@@ -11,7 +11,7 @@ import { encodeSeed } from '../world/seed-code';
 import { spawnFromSeed } from '../world/spawn';
 import { createWorld, GEN_VERSION, type World } from '../world/world';
 import type { LevelRuntime } from './runtime';
-import { outdoorEnv, timeFromSeed } from './skies';
+import { outdoorEnv } from './skies';
 import { streamedRuntime, type StreamedLevelOptions } from './world-runtime';
 
 export const INFINITE_MAX_AGL = 120;
@@ -61,7 +61,7 @@ export function infiniteLevel(world: World): OutdoorLevel {
     id: 'infinite',
     kind: 'outdoor',
     name: 'Infinite World',
-    env: outdoorEnv(timeFromSeed(seed), INFINITE_VIEW, 0.55),
+    env: outdoorEnv('afternoon', INFINITE_VIEW, 0.55),
     bounds: { kind: 'rect', min: [-INFINITE_RADIUS, -INFINITE_RADIUS], max: [INFINITE_RADIUS, INFINITE_RADIUS], maxAgl: INFINITE_MAX_AGL },
     rings: seedRunRings(world, sp.position, sp.yaw),
     spawn: { position: sp.position, yaw: sp.yaw },

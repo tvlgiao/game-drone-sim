@@ -5,7 +5,7 @@
  */
 import type { LevelId } from '../../types';
 
-export type Cc0SetId = 'concrete' | 'brick' | 'wood' | 'plaster' | 'asphalt' | 'grass' | 'bark';
+export type Cc0SetId = 'concrete' | 'brick' | 'wood' | 'plaster' | 'asphalt' | 'grass' | 'bark' | 'rock' | 'soil';
 export type PbrMapName = 'albedo' | 'normal' | 'arm';
 
 export interface Cc0Set {
@@ -25,12 +25,18 @@ export const CC0_SETS: Readonly<Record<Cc0SetId, Cc0Set>> = {
   plaster: { slug: 'painted_plaster_wall', title: 'Painted Plaster Wall', authors: 'Amal Kumar', tileMeters: 2 },
   grass: { slug: 'leafy_grass', title: 'Leafy Grass', authors: 'Charlotte Baglioni', tileMeters: 2 },
   bark: { slug: 'bark_brown_02', title: 'Bark Brown 02', authors: 'Rob Tuytel', tileMeters: 1 },
+  // an aerial scan (50 m in reality): mountain faces seen from a drone read at this scale
+  rock: { slug: 'aerial_rocks_02', title: 'Aerial Rocks 02', authors: 'Rob Tuytel', tileMeters: 50 },
+  soil: { slug: 'forest_ground_04', title: 'Forest Ground 04', authors: 'Rico Cilliers, Rob Tuytel', tileMeters: 3.15 },
 };
 
 /** Sets each level may load (the Quest budget test sums these per level). */
 export const LEVEL_TEXTURE_SETS: Readonly<Partial<Record<LevelId, readonly Cc0SetId[]>>> = {
   'night-loft': ['concrete', 'brick', 'wood', 'plaster'],
   training: ['grass', 'asphalt', 'bark'],
+  alpine: ['grass', 'rock', 'soil'],
+  infinite: ['grass', 'rock', 'soil'],
+  city: ['grass', 'concrete', 'brick'],
 };
 
 const URLS = import.meta.glob<string>('./cc0/*/*.webp', { eager: true, query: '?url', import: 'default' });

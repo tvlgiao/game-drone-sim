@@ -13,6 +13,7 @@ import { InstanceLayer } from './scatter-view';
 import { instancedMaterials, type InstanceUniforms } from './terrain-materials';
 import { carModel, LAMP_HEX, streetLightModel, unitBox, unitCylinder } from './scatter-models';
 import { CAR_STRIDE, KERB_STRIDE, LIGHT_STRIDE, type CityFurniture } from '../../levels/city-furniture';
+import type { MaterialSource } from '../materials/library';
 
 /** packed instance code: kind in the high bits, the building seed below (exact in float32) */
 const KIND_SHIFT = 1048576;
@@ -22,6 +23,9 @@ const FACADE_PARS = /* glsl */ `
 uniform float uDusk;
 uniform float uLit;
 uniform sampler2D uDetail;
+uniform sampler2D uBrick;
+uniform sampler2D uConcrete;
+uniform vec2 uWallScale;
 varying vec3 vFLocal;
 varying vec3 vFN;
 varying vec3 vFSize;
@@ -131,6 +135,16 @@ if ( n.y > 0.5 ) {
   // weathering: vertical streaks, a darker base
   float streak = texture2D( uDetail, vec2( u * 0.05, yAbs * 0.004 ) ).g;
   wallCol *= ( 0.86 + 0.24 * streak ) * ( 0.8 + 0.2 * smoothstep( 0.0, 6.0, yAbs ) ) * ( 0.9 + 0.2 * grain );
+  // the library's brick and concrete (CC0 scans where loaded) as wall texture near the drone, by their mean
+  float nearK = 1.0 - smoothstep( 45.0, 180.0, length( vViewPosition ) );
+  if ( nearK > 0.0 && style > 0.5 ) {
+    vec2 wuv = vec2( u, yAbs );
+    vec3 tb = style == 2.0 ? texture2D( uBrick, wuv * uWallScale.x ).rgb / max( texture2D( uBrick, vec2( 0.5 ), 16.0 ).rgb, vec3( 0.03 ) )
+      : texture2D( uConcrete, wuv * uWallScale.y ).rgb / max( texture2D( uConcrete, vec2( 0.5 ), 16.0 ).rgb, vec3( 0.03 ) );
+    float tl = dot( tb, vec3( 0.2126, 0.7152, 0.0722 ) );
+    vec3 det = style == 2.0 ? mix( vec3( tl ), tb, 0.6 ) : vec3( tl );
+    wallCol *= mix( vec3( 1.0 ), clamp( det, 0.0, 2.0 ), nearK * ( style == 2.0 ? 0.95 : 0.7 ) );
+  }
   // curtain walls: dark spandrel band at each slab
   if ( style == 0.0 && isStore < 0.5 ) wallCol = mix( wallCol, glassTint * 0.5, step( 0.04, fv ) * step( fv, winV0 - 0.02 ) * ( 1.0 - topBand ) );
   vec3 nearC = mix( mix( wallCol, glass, win ), trim, frame );
@@ -278,13 +292,22 @@ export class CityView {
   private readonly outskirts: Outskirts;
   private readonly furniture: CityFurniture;
 
-  constructor(city: City, outskirts: Outskirts, furniture: CityFurniture, field: GroundField, detail: THREE.Texture, shared: InstanceUniforms, opts: CityViewOptions) {
+  constructor(city: City, outskirts: Outskirts, furniture: CityFurniture, field: GroundField, detail: THREE.Texture, shared: InstanceUniforms, lib: MaterialSource, opts: CityViewOptions) {
     this.group.name = 'city';
     this.lit.value = opts.facadeDetail ? 1 : 0;
     this.city = city;
     this.outskirts = outskirts;
     this.furniture = furniture;
     const box = unitBox(0xffffff);
+    const walls = { uBrick: { value: null as THREE.Texture | null }, uConcrete: { value: null as THREE.Texture | null }, uWallScale: { value: new THREE.Vector2(1, 1) } };
+    lib.watchSet('brick', (set, tile) => {
+      walls.uBrick.value = set.albedo;
+      walls.uWallScale.value.x = 1 / tile;
+    });
+    lib.watchSet('concrete', (set, tile) => {
+      walls.uConcrete.value = set.albedo;
+      walls.uWallScale.value.y = 1 / tile;
+    });
     const { material, depth } = instancedMaterials(
       {
         key: 'facade',
@@ -296,7 +319,7 @@ export class CityView {
         afterRoughness: 'roughnessFactor = fRough;',
         afterMetalness: 'metalnessFactor = fMetal;',
         afterLightMaps: '#if defined( RE_IndirectSpecular )\n  radiance *= fRefl;\n#endif',
-        uniforms: { uDusk: this.dusk, uLit: this.lit, uDetail: { value: detail } },
+        uniforms: { uDusk: this.dusk, uLit: this.lit, uDetail: { value: detail }, ...walls },
       },
       shared,
     );
