@@ -5,8 +5,10 @@ import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js
 export interface AddOptions {
   /** world-space box-projected UVs with this tile size in metres; omit to keep geometry UVs */
   uvTile?: number;
-  /** per-vertex colour (materials with vertexColors) */
-  color?: THREE.ColorRepresentation;
+  /** per-vertex colour (materials with vertexColors); components may exceed 1 for HDR glow */
+  color?: THREE.ColorRepresentation | readonly [number, number, number];
+  /** per-vertex roughness, metalness (materials flagged `userData.vertexRM`) */
+  rm?: readonly [number, number];
   castShadow?: boolean;
 }
 
@@ -36,13 +38,15 @@ export class StaticBatcher {
     if (g !== geometry) geometry.dispose();
     g.applyMatrix4(matrix);
     for (const name of Object.keys(g.attributes)) {
-      if (name !== 'position' && name !== 'normal' && name !== 'uv') g.deleteAttribute(name);
+      if (name !== 'position' && name !== 'normal' && name !== 'uv' && name !== 'aRM') g.deleteAttribute(name);
     }
     if (!g.attributes.normal) g.computeVertexNormals();
     if (opts.uvTile !== undefined) boxProjectUV(g, opts.uvTile);
     if (!g.attributes.uv) g.setAttribute('uv', new THREE.Float32BufferAttribute(new Float32Array(g.attributes.position.count * 2), 2));
     if ((material as THREE.MeshStandardMaterial).vertexColors) {
-      _c.set(opts.color ?? 0xffffff);
+      const col = opts.color ?? 0xffffff;
+      if (Array.isArray(col)) _c.setRGB(col[0]!, col[1]!, col[2]!);
+      else _c.set(col as THREE.ColorRepresentation);
       const n = g.attributes.position.count;
       const arr = new Float32Array(n * 3);
       for (let i = 0; i < n; i++) {
@@ -51,6 +55,16 @@ export class StaticBatcher {
         arr[i * 3 + 2] = _c.b;
       }
       g.setAttribute('color', new THREE.BufferAttribute(arr, 3));
+    }
+    if (material.userData.vertexRM && !g.attributes.aRM) {
+      const [r, m] = opts.rm ?? [0.6, 0];
+      const n = g.attributes.position.count;
+      const arr = new Float32Array(n * 2);
+      for (let i = 0; i < n; i++) {
+        arr[i * 2] = r;
+        arr[i * 2 + 1] = m;
+      }
+      g.setAttribute('aRM', new THREE.BufferAttribute(arr, 2));
     }
     g.morphAttributes = {};
     b.parts.push(g);
