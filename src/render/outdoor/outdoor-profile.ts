@@ -18,7 +18,10 @@ export interface OutdoorProfile {
   treesLod1: number;
   /** rocks and boulders drawn (Quest: off, one draw saved per eye) */
   rocks: boolean;
-  /** City: street trees, lights, parked cars and kerbs are drawn within this distance of the drone (inside the fog) */
+  /**
+   * City: street trees, lights, parked cars and kerbs are drawn within this distance of the drone (inside the fog;
+   * high: the sun cascades draw them again, twice)
+   */
   furnitureRange: number;
   /** City: raised kerbs (no collider; the ground shader paints the kerb line anyway) */
   kerbs: boolean;
@@ -42,7 +45,7 @@ export const OUTDOOR_PROFILES: Readonly<Record<QualityTier, OutdoorProfile>> = {
   high: {
     stream: { radius: 4, lod0: 1.5, lod1: 2.5, maxInFlight: 5 },
     farRadius: 20,
-    fog: 3200, treesLod0: 1100, treesLod1: 10000, rocks: true, furnitureRange: Infinity, kerbs: true, uploads: 2, sunShadows: true, facadeDetail: true, waterDetail: true, outskirts: 1,
+    fog: 3200, treesLod0: 1100, treesLod1: 10000, rocks: true, furnitureRange: 450, kerbs: true, uploads: 2, sunShadows: true, facadeDetail: true, waterDetail: true, outskirts: 1,
   },
   medium: {
     stream: { radius: 3, lod0: 0.75, lod1: 1.5, maxInFlight: 4 },

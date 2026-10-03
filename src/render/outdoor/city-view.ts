@@ -398,9 +398,12 @@ export class CityView {
     for (const l of [lights, cars, kerbs]) l.end();
   }
 
-  /** Quest: no lit windows (07 §7). */
+  /** Quest: no lit windows (07 §7), and no roof units or tanks (a Quest frame cannot spare their triangles). */
   setFacadeDetail(on: boolean): void {
     this.lit.value = on ? 1 : 0;
+    const [ac, tank] = this.props as [InstanceLayer, InstanceLayer];
+    ac.mesh.visible = on && ac.count > 0;
+    tank.mesh.visible = on && tank.count > 0;
   }
 
   /** 0 by day .. 1 at dusk: lit windows and storefronts. */

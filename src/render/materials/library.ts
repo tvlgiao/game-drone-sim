@@ -121,6 +121,8 @@ export interface TerrainOptions {
   snow?: boolean;
   /** base maps in world XZ metres instead of mesh UVs (heightfield chunks have none); default false */
   worldUv?: boolean;
+  /** share of the base map's contrast kept as detail under the vertex colours (0..1); default 1 */
+  detail?: number;
 }
 
 export interface TextureSet {
@@ -461,7 +463,7 @@ export class MaterialLibrary implements MaterialSource {
     const soilScan = o.soil ? this.scanned.get('soil') : undefined;
     const soilSet = o.soil ? (soilScan ?? this.textures('gravel')) : null;
     const patch: EnvPatch = {
-      detail: o.vertexColors ?? true,
+      detail: (o.vertexColors ?? true) ? (o.detail ?? true) : false,
       terrain: {
         rock: { albedo: rockSet.albedo, arm: rockSet.arm, tileMeters: rockMeters },
         rockAttribute: o.rockAttribute === undefined ? 'aRock' : o.rockAttribute,

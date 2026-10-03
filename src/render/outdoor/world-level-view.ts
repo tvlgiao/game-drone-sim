@@ -165,6 +165,8 @@ export class WorldLevelView implements LevelView {
       snow: true,
       envMapIntensity: 0.8,
       worldUv: true,
+      // the procedural stand-in (low tier) is a coarser grain than the scan: less of it
+      detail: lowTier ? 0.35 : 0.7,
     });
     this.roadMat = roadMaterial(this.detail);
     this.waterMat = waterMaterial(sky, this.ripple, this.profile.waterDetail);
@@ -203,6 +205,9 @@ export class WorldLevelView implements LevelView {
     // the environment is captured above the take-off, clear of the drone and the pilot
     const groundY = rt.terrain ? rt.terrain.heightAt(s[0], s[2]) : 0;
     this.probe = { position: new THREE.Vector3(s[0], Math.max(s[1], groundY) + 6, s[2]), near: 0.5, far: 3000, minSize: 64, always: false };
+    // the dome rides with the camera; until the first frame it must surround the probe (a capture from outside
+    // the sphere would see no sky at all)
+    this.dome.follow(this.probe.position);
   }
 
   /** Stand-in environment (the sky over a hazy ground) until / unless the GameView captures the level. */
@@ -243,6 +248,8 @@ export class WorldLevelView implements LevelView {
     this.scatter.setDusk(dusk);
     this.city?.setDusk(dusk);
     this.placeSun(this.shadowAt.lengthSq() > 0 ? this.shadowAt : new THREE.Vector3(...this.level.spawn.position));
+    // the GameView re-captures from the probe right away: the dome must surround it (the next frame moves it back)
+    this.dome.follow(this.probe.position);
   }
 
   private fogDistance(): number {
