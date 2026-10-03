@@ -302,7 +302,7 @@ export class DroneModel {
             label: (g, m) => batch.add('hard', mats.hard, toLabelUV(g), m, { ...opts, color: 0xffffff }),
           }
         : {
-            carbon: (g, m) => batch.add('lite', mats.lite, setSwatch(g, SWATCH.gloss), m, { ...opts, color: 0x1c1d21 }),
+            carbon: (g, m) => batch.add('lite', mats.lite, setSwatch(g, SWATCH.tpu), m, { ...opts, color: 0x1c1d21 }),
             hard: (g, m, sw, color) => batch.add('lite', mats.lite, setSwatch(g, sw), m, { ...opts, color }),
             label: (g, m) => batch.add('lite', mats.lite, toLabelUV(g), m, { ...opts, color: 0xffffff }),
           };
