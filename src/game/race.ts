@@ -85,7 +85,7 @@ function courseOf(level: RaceLevel): RaceCourse {
     return { rings: level.rings, spawn: level.spawn, key: level.name, bounds: { kind: 'room', maxAgl: level.room.size[1] }, surfaces: createSurfaces(level.props), field: FLAT_GROUND };
   }
   const d = level.def;
-  return { rings: d.rings, spawn: d.spawn, key: d.id, bounds: d.bounds, surfaces: level.surfaces, field: heightField(level) };
+  return { rings: d.rings, spawn: d.spawn, key: d.bestKey ?? d.id, bounds: d.bounds, surfaces: level.surfaces, field: heightField(level) };
 }
 
 type Mode = 'race' | 'freefly' | null;

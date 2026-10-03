@@ -11,6 +11,9 @@ import { loadSettings, saveSettings, type Settings } from './core/settings';
 import { hoverThrottle } from './physics/drone-params';
 import { RaceController, migrateBestTimes, readBestTime } from './game/race';
 import { LEVELS, buildLevel, levelEntry, loadLastLevel, nextLevel, saveLastLevel, type LevelRuntime } from './levels/registry';
+import { levelEvents, type ActiveLevel } from './levels/level-events';
+import { lastPlayedWorld, loadWorlds, recordPlayed, saveWorlds } from './game/worlds';
+import { LoadingOverlay } from './ui/loading-overlay';
 import { InputManager, KEY_STICKS } from './input/input-manager';
 import { TutorialMachine, loadTutorialRecord, shouldOfferTutorial, type TutorialCtx, type TutorialEvent } from './game/tutorial';
 import { TutorialUi, type TutorialFinishAction } from './ui/tutorial-ui';
@@ -41,6 +44,11 @@ const XR_PANEL_PERIOD = 0.1;
  * Browser) would otherwise recompute for a full-screen moving scene every frame.
  */
 const MENU_SETTLE_FRAMES = 2;
+/** a generated level that is still not ready after this long is flown anyway (terrain physics is analytic) */
+const LEVEL_READY_TIMEOUT_MS = 30_000;
+/** the loading overlay only appears when building takes longer than this */
+const LOADING_DELAY_MS = 120;
+const GENERATED_LEVELS: ReadonlySet<LevelId> = new Set<LevelId>(['city', 'alpine', 'infinite']);
 const FLYING = new Set(['countdown', 'racing', 'crashed', 'freefly']);
 
 function safeStorage(): Storage | null {
@@ -75,11 +83,16 @@ function boot(caps: EditionCaps): void {
   const selftest = params.get('selftest') === '1';
   const hud = new Hud(uiRoot, (a) => onAction(a));
   bootHud = hud;
+  const loading = new LoadingOverlay(uiRoot);
   const gpu = probeGpu();
   const resolveTier = (s: Settings): QualityTier => (s.quality === 'auto' ? pickTier(gpu, device.form) : s.quality);
   let tier = resolveTier(settings);
   migrateBestTimes(storage);
-  let level: LevelRuntime = buildLevel(loadLastLevel(storage));
+  /** the Infinite world played last (saved worlds store), so a relaunch returns to it */
+  const lastWorld = (): { seed: number; gen: number } | null => lastPlayedWorld(loadWorlds(storage));
+  const firstLevel = loadLastLevel(storage);
+  const firstWorld = firstLevel === 'infinite' ? lastWorld() : null;
+  let level: LevelRuntime = buildLevel(firstLevel, firstWorld?.seed, firstWorld?.gen);
 
   let view: GameView;
   try {
@@ -94,6 +107,7 @@ function boot(caps: EditionCaps): void {
   const race = new RaceController(level, storage);
   const input = new InputManager(window, settings, device.touch);
   const audio = new GameAudio();
+  audio.setAmbience(level.def.env.ambience.kind, level.def.env.ambience.gain);
   const loop = new FixedLoop(PHYSICS_DT, 250);
   const fpsMeter = new FpsMeter();
   const dynRes = new DynamicResolution(targetFps(device.form));
@@ -166,6 +180,8 @@ function boot(caps: EditionCaps): void {
   const zeroThrottle: ControlInput = { throttle: 0, yaw: 0, pitch: 0, roll: 0 };
   let cameraMode: CameraMode = 'los';
   let respawnPending = false;
+  /** debug hook: physics paused while flying (beauty shots / perf captures hold the drone where it was placed) */
+  let holdPose = false;
   let override: ControlInput | null = null;
   const injected: Partial<ButtonEvents> = {};
   let hasInjected = false;
@@ -258,42 +274,129 @@ function boot(caps: EditionCaps): void {
 
   /** bumps on every switch request: a slower build that resolves after a newer request is dropped */
   let levelSeq = 0;
+  /** the loaded level's `ready` has resolved */
+  let levelReadyFlag = false;
+
+  function activeLevel(rt: LevelRuntime): ActiveLevel {
+    const c = rt.content;
+    return { id: rt.def.id, seed: c ? c.seed : null, code: c?.kind === 'terrain' && rt.def.id === 'infinite' ? c.code : null };
+  }
 
   /**
-   * Swap the level in view, physics, race and camera rig (the old level's GPU resources are freed),
-   * remember it, and park the drone on its spawn. Resolves false when superseded by a newer request.
+   * Waits for a level's `ready` (the chunks around the spawn) with the loading overlay up after a short delay,
+   * reporting progress on the level event bus. Resolves false when superseded; a stalled build gives up waiting
+   * after LEVEL_READY_TIMEOUT_MS (the analytic terrain is always there).
    */
-  async function startLevel(id: LevelId): Promise<boolean> {
-    const seq = ++levelSeq;
-    if (id === level.def.id) return true;
-    if (!levelEntry(id)) return false;
-    let next: ReturnType<typeof buildLevel>;
+  async function waitReady(rt: LevelRuntime, seq: number, title: string): Promise<boolean> {
+    let done = false;
+    const ready = rt.ready.then(() => {
+      done = true;
+    });
+    const t0 = performance.now();
+    while (!done) {
+      if (seq !== levelSeq) return false;
+      const elapsed = performance.now() - t0;
+      if (elapsed > LEVEL_READY_TIMEOUT_MS) {
+        console.warn('Level not ready after', LEVEL_READY_TIMEOUT_MS, 'ms; flying anyway', rt.def.id);
+        break;
+      }
+      if (elapsed > LOADING_DELAY_MS && !loading.visible) loading.show(title);
+      const progress = rt.progress?.() ?? 0;
+      loading.set(progress);
+      levelEvents.emit({ type: 'loading', id: rt.def.id, seed: rt.content?.seed ?? null, progress });
+      await Promise.race([ready, new Promise((r) => setTimeout(r, 100))]);
+    }
+    loading.set(1);
+    return seq === levelSeq;
+  }
+
+  /** Infinite: the world just flown goes to the top of the saved worlds ("World K7Q2" until renamed). */
+  function rememberWorld(rt: LevelRuntime): void {
+    const c = rt.content;
+    if (rt.def.id !== 'infinite' || c?.kind !== 'terrain') return;
     try {
-      next = buildLevel(id);
-      await next.ready;
+      saveWorlds(storage, recordPlayed(loadWorlds(storage), c.seed, c.world.spec.genVersion, Date.now()).store);
+    } catch (err) {
+      console.warn('Could not record the played world', err);
+    }
+  }
+
+  /**
+   * Swap the level in view, physics, race and camera rig (the old level's GPU resources and workers are freed),
+   * remember it, and park the drone on its spawn. `seed` picks the Infinite world (default: the last one played,
+   * else a new random world); the same level with the same seed is a no-op. Resolves false when superseded.
+   */
+  async function startLevel(id: LevelId, opts: { seed?: number; genVersion?: number } = {}): Promise<boolean> {
+    const seq = ++levelSeq;
+    const seed = opts.seed === undefined ? undefined : opts.seed >>> 0;
+    if (id === level.def.id && (seed === undefined || seed === level.content?.seed)) return true;
+    const entry = levelEntry(id);
+    if (!entry) return false;
+    const title = `Building ${entry.name}`;
+    let next: LevelRuntime;
+    try {
+      if (GENERATED_LEVELS.has(id)) {
+        // generation runs on this thread for a moment: put the overlay up and let it paint first
+        loading.show(title);
+        await new Promise((r) => requestAnimationFrame(() => r(null)));
+        if (seq !== levelSeq) return false;
+      }
+      const last = seed === undefined && id === 'infinite' ? lastWorld() : null;
+      next = buildLevel(id, seed ?? last?.seed, seed === undefined ? last?.gen : opts.genVersion);
     } catch (err) {
       // building failed (e.g. GPU context lost): keep the current level, tell the pilot, never reject
       console.error('Level failed to load', id, err);
-      if (seq === levelSeq) toast("Couldn't load that level — staying here");
+      if (seq === levelSeq) {
+        loading.hide();
+        toast("Couldn't load that level — staying here");
+        levelEvents.emit({ type: 'failed', id, error: err instanceof Error ? err.message : String(err) });
+      }
       return false;
     }
-    if (seq !== levelSeq) return false;
+    if (!(await waitReady(next, seq, title))) {
+      next.dispose?.();
+      return false;
+    }
     try {
       view.loadLevel(next);
     } catch (err) {
       // the old scenery may already be gone: the only safe way back is a reload
       console.error('Level failed to load', id, err);
+      loading.hide();
+      next.dispose?.();
       hud.setError(`The level couldn't be loaded (${err instanceof Error ? err.message : String(err)}). Reload to continue.`);
       return false;
     }
+    const old = level;
     level = next;
+    levelReadyFlag = true;
     sim.world.setLevel(next);
     race.setLevel(next);
+    old.dispose?.();
+    audio.setAmbience(next.def.env.ambience.kind, next.def.env.ambience.gain);
     saveLastLevel(storage, id);
+    rememberWorld(next);
     toSpawn();
     publishLevels();
+    loading.hide();
     menuRenders = 0; // the new scenery must show behind the menu
+    levelEvents.emit({ type: 'loaded', level: activeLevel(next) });
     return true;
+  }
+
+  // The level remembered from the last session streams in behind the menu.
+  {
+    const boot = level;
+    const seq = levelSeq;
+    const name = levelEntry(boot.def.id)?.name ?? boot.def.name;
+    void waitReady(boot, seq, `Building ${name}`).then((ok) => {
+      if (!ok || level !== boot) return;
+      levelReadyFlag = true;
+      loading.hide();
+      menuRenders = 0;
+      rememberWorld(boot);
+      levelEvents.emit({ type: 'loaded', level: activeLevel(boot) });
+    });
   }
 
   /**
@@ -420,7 +523,7 @@ function boot(caps: EditionCaps): void {
         break;
       case 'level': {
         const mode = a.mode;
-        void startLevel(a.id).then((ok) => {
+        void startLevel(a.id, { seed: a.seed, genVersion: a.genVersion }).then((ok) => {
           if (ok) newSession(mode);
         });
         break;
@@ -789,7 +892,7 @@ function boot(caps: EditionCaps): void {
       // …and the right thumbstick flies speed, braking to a stop when released (Angle mode).
       sim.fc.positionHold = inp.source === 'xr';
       const control = status === 'countdown' ? { ...inp.control, throttle: 0 } : inp.control;
-      alpha = loop.advance(frameSec, (dt) => {
+      alpha = holdPose ? 1 : loop.advance(frameSec, (dt) => {
         prevPos.copy(sim.world.state.position);
         const contacts = sim.step(dt, control);
         const events = race.step(dt, prevPos, sim.world.state, contacts);
@@ -845,7 +948,8 @@ function boot(caps: EditionCaps): void {
     // A frozen view's frame time says nothing about the GPU, so dynamic resolution only adapts while rendering.
     // Resize before drawing: resizing the canvas clears it, and after the draw the cleared buffer would be shown.
     if (settings.quality === 'auto' && !inVr && !overlay) view.setRenderScale(dynRes.update(fpsMeter.frameMs));
-    const renderNow = !overlay || menuRenders < MENU_SETTLE_FRAMES;
+    // a streaming level keeps uploading its chunks behind a menu (still frames, the camera does not move)
+    const renderNow = !overlay || menuRenders < MENU_SETTLE_FRAMES || view.levelBusy;
     if (renderNow) {
       if (overlay) menuRenders++;
       view.frame({
@@ -975,8 +1079,26 @@ function boot(caps: EditionCaps): void {
     get level() {
       return level.def.id;
     },
-    /** switch level without starting a run (resolves false when superseded) */
-    startLevel: (id: LevelId) => startLevel(id),
+    /** switch level without starting a run (resolves false when superseded); `seed` picks the Infinite world */
+    startLevel: (id: LevelId, opts?: { seed?: number; genVersion?: number }) => startLevel(id, opts),
+    /** generated level in play: id, seed and (Infinite) world code */
+    get world() {
+      return level.content ? activeLevel(level) : null;
+    },
+    /** the loaded level's rings (scripted race runs) */
+    get rings() {
+      return level.def.rings;
+    },
+    /** ground height of the loaded level (seed determinism probes) */
+    heightAt: (x: number, z: number) => (level.terrain ? level.terrain.heightAt(x, z) : 0),
+    /** visible drawables per scene group (perf audits) */
+    census: () => view.census(),
+    /** streaming / instancing numbers of a generated level */
+    levelStats: () => view.levelStats(),
+    /** the loaded level's `ready` has resolved (chunks around the spawn built) */
+    get levelReady() {
+      return levelReadyFlag;
+    },
     /** tutorial state: phase, current step, open dialog, whether the card is up */
     get tutorial() {
       return { on: tutOn, phase: tutorial.phase, step: tutorial.step.id, index: tutorial.index, progress: tutorial.progress, dialog: tutUi.dialogOpen, vrOffer };
@@ -1020,6 +1142,14 @@ function boot(caps: EditionCaps): void {
     /** UI audit: render the fatal-error screen */
     showError: (msg: string) => hud.setError(msg),
     toast: (msg: string) => toast(msg),
+    /** debug: freeze physics in flight (the view keeps rendering) */
+    hold(on: boolean) {
+      holdPose = on;
+    },
+    /** debug: switch the flight camera */
+    setCamera(mode: CameraMode) {
+      cameraMode = mode;
+    },
     teleport(x: number, y: number, z: number, yaw = 0) {
       placeDrone(new Vector3(x, y, z), yaw);
     },

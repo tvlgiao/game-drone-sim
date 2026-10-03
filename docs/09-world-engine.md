@@ -196,6 +196,28 @@ builder.dispose();
   `lastPlayed`, keeps the 50 most recently played), `renameWorld` (trimmed, ≤ 24 chars, empty rejected),
   `deleteWorld`, `worldsByRecent`, `lastPlayedWorld`. Entry id = the code.
 
+## 9b. Generator v2 (`GEN_VERSION = 2`)
+
+New worlds are v2; v1 stays byte-identical (golden fixture) for saved seeds. Relief, rivers, lakes, villages and roads
+are the same; v2 branches on `genVersion` in the shared modules (`generators/v2.ts`, `scatter-v2.ts`,
+`chunk-gen-v2.ts`, `settlements.villageLayoutV2`, `terrain-field`):
+
+- Forests thin out up to slope 1.2 (`FOREST_MAX_SLOPE_V2`), conifers past 0.9; boulders on slopes over 0.9.
+- Species: conifer 0, broadleaf 1, scrub 2, birch 3 (`TREE_DIMENSIONS[3]`), clustered by the clump noise into
+  forest cores, mixed edges (birch, shrubs) and lone meadow trees.
+- Villages have no plateau: the ground is smoothed towards the low-pass height over a noise-warped falloff of at least
+  `VILLAGE_FALLOFF_V2` m, houses stand on the lowest corner of their footprint, the blend ring keeps the surrounding
+  biome (trees reach into its outer part, `VILLAGE_TREES_V2`); Voronoi garden parcels (`GARDEN_CELL`) with hedges along
+  some edges and tree clusters; houses within `ROAD_FACING_V2` of a road face it; the packed archetype is
+  `archetype + 4 · roof` (`houseArchetype`, `ROOF_COLOURS_V2`).
+- Fields (`fields.ts`): irregular Voronoi parcels (`FIELD_CELL` ≈ 70 m) on farmland noise and along roads, crops with
+  furrows, farm tracks on some edges; trees only along field edges (hedgerows). Ground colour varies in dry / lush /
+  dark patches at 350 m and 90 m.
+- Water: one quad of dilation under the banks, dipping below dry ground (smooth shoreline at every LOD).
+- `ChunkData.surface`: `SURFACE_STRIDE` bytes per vertex, rock and bank weights 0..255 (empty for v1).
+- Codes carry the version; `decodeSeed` / `parseSeedInput` accept every shipped version by default, and
+  `buildLevel(id, seed, genVersion)` replays a saved world with its own generator.
+
 ## 10. Known limits and deviations from 07
 
 - Rivers are zero contours of a low-frequency noise, not a drainage network: they can form loops and end where they

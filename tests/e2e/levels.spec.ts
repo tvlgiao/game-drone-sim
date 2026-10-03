@@ -70,9 +70,8 @@ test('level picker: cards with thumbnails and Race / Free Fly per level, focus o
   await click(page, 'Race');
   await expect.poll(() => hook(page, (d) => d.screen)).toBe('levels');
   const cards = page.locator('.ds-screen--levels .ds-lvl');
-  await expect(cards).toHaveCount(2);
-  await expect(cards.nth(0)).toContainText('Training Field');
-  await expect(cards.nth(1)).toContainText('Night Loft');
+  await expect(cards).toHaveCount(5);
+  for (const [i, name] of ['Training Field', 'Night Loft', 'City', 'Alpine Valley', 'Infinite World'].entries()) await expect(cards.nth(i)).toContainText(name);
   // a first-time pilot is on the beginner field
   await expect(cards.nth(0)).toContainText('Selected');
   // opened from Race: the current level's Race button has the focus

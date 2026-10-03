@@ -18,6 +18,7 @@ import { hash2, rehash, SALT, subSeed, u01 } from './rng';
 import { forestDensity, terrainSample, type TerrainSample } from './terrain-field';
 import { ROAD_HALF_WIDTH } from './roads';
 import type { World } from './world';
+import { chunkObjectsV2 } from './scatter-v2';
 
 export const CHUNK_SIZE = 128;
 export const TREE_CELL = 8;
@@ -29,7 +30,8 @@ export const HOUSE_STRIDE = 10;
 export const BRIDGE_STRIDE = 6;
 export const COLLIDER_STRIDE = 9;
 
-export const TREE_SPECIES = ['conifer', 'broadleaf', 'scrub'] as const;
+/** v1 uses the first three; generator v2 adds birch (3). */
+export const TREE_SPECIES = ['conifer', 'broadleaf', 'scrub', 'birch'] as const;
 export const SHAPE = { cylinder: 1, box: 2 } as const;
 export const OBJECT_KIND = { tree: 1, house: 2, rock: 3, bridge: 4 } as const;
 
@@ -38,6 +40,7 @@ export const TREE_DIMENSIONS: readonly { height: number; trunkRadius: number; cr
   { height: 12, trunkRadius: 0.3, crownRadius: 2.4, crownBase: 0.22 },
   { height: 9, trunkRadius: 0.3, crownRadius: 3, crownBase: 0.35 },
   { height: 2.2, trunkRadius: 0, crownRadius: 1.2, crownBase: 0 },
+  { height: 11, trunkRadius: 0.18, crownRadius: 1.9, crownBase: 0.4 },
 ];
 
 /** Rock collider half extents relative to its scale. */
@@ -53,14 +56,14 @@ export interface ChunkObjects {
 
 const climate: Climate = { moisture: 0, temperature: 0 };
 
-function slopeAt(w: World, x: number, z: number): number {
+export function slopeAt(w: World, x: number, z: number): number {
   const f = w.field;
   const gx = (f.heightAt(x + 1, z) - f.heightAt(x - 1, z)) * 0.5;
   const gz = (f.heightAt(x, z + 1) - f.heightAt(x, z - 1)) * 0.5;
   return Math.sqrt(gx * gx + gz * gz);
 }
 
-function pushTreeColliders(col: number[], species: number, x: number, y: number, z: number, scale: number): void {
+export function pushTreeColliders(col: number[], species: number, x: number, y: number, z: number, scale: number): void {
   const d = TREE_DIMENSIONS[species]!;
   const H = d.height * scale;
   if (d.trunkRadius > 0) {
@@ -71,12 +74,13 @@ function pushTreeColliders(col: number[], species: number, x: number, y: number,
   col.push(SHAPE.cylinder, OBJECT_KIND.tree, x, y + H - crownH / 2, z, d.crownRadius * scale, crownH / 2, 0, 0);
 }
 
-function pushBox(col: number[], kind: number, cx: number, cy: number, cz: number, hx: number, hy: number, hz: number, yaw: number): void {
+export function pushBox(col: number[], kind: number, cx: number, cy: number, cz: number, hx: number, hy: number, hz: number, yaw: number): void {
   col.push(SHAPE.box, kind, cx, cy, cz, hx, hy, hz, yaw);
 }
 
 /** Trees, rocks, houses and bridges anchored in chunk (cx, cz), with their colliders. */
 export function chunkObjects(w: World, cx: number, cz: number): ChunkObjects {
+  if (w.spec.genVersion >= 2) return chunkObjectsV2(w, cx, cz);
   const ox = cx * CHUNK_SIZE;
   const oz = cz * CHUNK_SIZE;
   const seed = w.spec.seed;

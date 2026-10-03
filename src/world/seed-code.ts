@@ -7,6 +7,7 @@
  * of one character, because an odd weight times a non-zero difference below 32 is never ≡ 0 (mod 32).
  * Versions 1–7 fit, which leaves generator room for years.
  */
+import { SUPPORTED_GEN_VERSIONS } from './world';
 
 const ALPHABET = '0123456789ABCDEFGHJKMNPQRSTVWXYZ';
 const MAX_VERSION = 7;
@@ -60,7 +61,7 @@ export function encodeSeed(seed: number, version: number): string {
  * Decodes a code typed by a person: case-insensitive, optional dash / spaces, Crockford aliases (O, I, L).
  * `supported` lists the generator versions this build can play.
  */
-export function decodeSeed(input: string, supported: readonly number[] = [1]): DecodeResult {
+export function decodeSeed(input: string, supported: readonly number[] = SUPPORTED_GEN_VERSIONS): DecodeResult {
   const clean = input.replace(/[\s-]/g, '').toUpperCase();
   if (clean.length !== 8) return { ok: false, error: 'length' };
   const symbols: number[] = [];
@@ -104,7 +105,7 @@ const BARE_CODE = /^[0-9A-Za-z]{8}$/;
  * hashed); an undashed 8-character code is used when its checksum matches, else it is text; digits are a
  * uint32 seed; anything else is hashed with FNV-1a.
  */
-export function parseSeedInput(input: string, supported: readonly number[] = [1]): SeedInput {
+export function parseSeedInput(input: string, supported: readonly number[] = SUPPORTED_GEN_VERSIONS): SeedInput {
   const t = input.trim();
   if (!t) return { kind: 'empty' };
   if (CODE_SHAPE.test(t)) {

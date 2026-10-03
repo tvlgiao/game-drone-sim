@@ -5,7 +5,7 @@
  */
 import type { BaseSample, BaseTerrain } from './base-terrain';
 import { baseSample } from './base-terrain';
-import { cellKey, dcos, dsin, LruCache, PI, TAU } from './math';
+import { cellKey, datan2, dcos, dsin, LruCache, PI, TAU } from './math';
 import { hash2, rehash, SALT, u01 } from './rng';
 
 export const VILLAGE_CELL = 512;
@@ -228,6 +228,52 @@ export function villageLayout(v: Village, blocked: (x: number, z: number, r: num
       const colour = palette[Math.floor(u01(rehash(hj, 4)) * palette.length)]!;
       out.push({ x, y: v.plateau, z, w: dm.w, d: dm.d, wallHeight: dm.wallHeight, roofHeight: dm.roofHeight, yaw: -theta - PI / 2, archetype, colour });
     }
+  }
+  return out;
+}
+
+/** v2 roof colours; a house stores its index as `archetype + 4 · roof` (archetype = value mod 4). */
+export const ROOF_COLOURS_V2: readonly number[] = [0x8e3b2c, 0x6b4a3a, 0x5c615f, 0x4f5358, 0xa0522d, 0x3d4a3a];
+const WALL_COLOURS_V2 = [0xe8dcc4, 0xd9c3a0, 0xf2efe6, 0xc98f6b, 0xb8c4c9, 0xe3cf9a, 0xa8b89a, 0xd6b89a, 0xefe3cf, 0x9fb0b8];
+/** a house closer than this to a road faces it */
+export const ROAD_FACING_V2 = 28;
+
+/** Nearest road point to a query: distance and the point itself (d = Infinity when none in reach). */
+export interface RoadNear {
+  d: number;
+  px: number;
+  pz: number;
+}
+
+/** Archetype of a packed house value (v2 stores the roof colour above it). */
+export function houseArchetype(packed: number): number {
+  return packed % 4;
+}
+
+/**
+ * Generator v2 village: the v1 rings and positions, but houses near a road turn their door (local +Z) to it,
+ * sizes vary ±25 %, walls get a wider palette and every house its own roof colour.
+ */
+export function villageLayoutV2(v: Village, blocked: (x: number, z: number, r: number) => boolean, road: (x: number, z: number, out: RoadNear) => RoadNear): House[] {
+  const near: RoadNear = { d: Infinity, px: 0, pz: 0 };
+  const out: House[] = [];
+  const base = villageLayout(v, blocked);
+  for (let i = 0; i < base.length; i++) {
+    const h = base[i]!;
+    const hh = hash2(v.hash, i, 7, SALT.villageLayout);
+    const arch = h.archetype;
+    const tower = arch === 3;
+    const w = tower ? h.w : h.w * (0.8 + 0.45 * u01(rehash(hh, 1)));
+    const d = tower ? h.d : h.d * (0.85 + 0.35 * u01(rehash(hh, 2)));
+    let yaw = h.yaw;
+    if (!tower) {
+      road(h.x, h.z, near);
+      if (near.d < ROAD_FACING_V2 && near.d > 1e-6) yaw = datan2(near.px - h.x, near.pz - h.z);
+    }
+    if (!tower && blocked(h.x, h.z, 0.5 * Math.sqrt(w * w + d * d) + 3)) continue;
+    const roof = Math.floor(u01(rehash(hh, 3)) * ROOF_COLOURS_V2.length);
+    const colour = arch === 2 ? h.colour : WALL_COLOURS_V2[Math.floor(u01(rehash(hh, 4)) * WALL_COLOURS_V2.length)]!;
+    out.push({ ...h, w, d, yaw, colour, archetype: arch + 4 * roof });
   }
   return out;
 }

@@ -17,6 +17,7 @@ import { chunkObjects, CHUNK_SIZE, COLLIDER_STRIDE, OBJECT_KIND, SHAPE } from '.
 import { ROAD_HALF_WIDTH } from './roads';
 import { BIOME, biomeSample, classify, FEATURE_CELL, terrainSample, type BiomeSample } from './terrain-field';
 import type { World } from './world';
+import { shadeV2, SURFACE_STRIDE, waterMeshV2 } from './chunk-gen-v2';
 
 export { CHUNK_SIZE } from './scatter';
 export type Lod = 0 | 1 | 2;
@@ -56,6 +57,11 @@ export interface ChunkData {
   positions: Float32Array;
   normals: Int8Array;
   colors: Uint8Array;
+  /**
+   * Generator v2: per-vertex surface weights, SURFACE_STRIDE bytes (rock, bank) 0..255, for the renderer's rock
+   * and wet-bank blending. Empty for v1 chunks.
+   */
+  surface: Uint8Array;
   minY: number;
   maxY: number;
   water: RibbonMesh;
@@ -311,6 +317,8 @@ export function* buildChunkSteps(w: World, req: ChunkRequest): Generator<void, C
   const positions = new Float32Array(nv * 3);
   const normals = new Int8Array(nv * 3);
   const colors = new Uint8Array(nv * 3);
+  const v2 = w.spec.genVersion >= 2;
+  const surface = new Uint8Array(v2 ? nv * SURFACE_STRIDE : 0);
   const bs = biomeSample();
   const ts = terrainSample();
   let minY = Infinity;
@@ -341,10 +349,11 @@ export function* buildChunkSteps(w: World, req: ChunkRequest): Generator<void, C
       climate.temperature = temp[v]!;
       const wx = ox + i * step;
       const wz = oz + j * step;
-      classify(base, ts, Math.sqrt(gx * gx + gz * gz), climate, farm[v]!, bs);
+      classify(base, ts, Math.sqrt(gx * gx + gz * gz), climate, farm[v]!, bs, w.spec.genVersion);
       const hv = hash2(w.spec.seed, Math.floor(wx), Math.floor(wz), SALT.colour);
       const stripe = u01(hash2(w.spec.seed, Math.floor(wx / 24), Math.floor(wz / 48), SALT.farm));
       shade(bs, stripe, u01(hv), colors, v * 3);
+      if (v2) shadeV2(bs, w.spec.seed, wx, wz, water[v]!, roadD[v]!, farm[v]!, lod, colors, v * 3, surface, v * SURFACE_STRIDE);
     }
   }
   const border = borderIndices(n);
@@ -358,11 +367,12 @@ export function* buildChunkSteps(w: World, req: ChunkRequest): Generator<void, C
       normals[dst * 3 + c] = normals[src * 3 + c]!;
       colors[dst * 3 + c] = colors[src * 3 + c]!;
     }
+    for (let c = 0; c < surface.length / nv; c++) surface[dst * SURFACE_STRIDE + c] = surface[src * SURFACE_STRIDE + c]!;
   }
 
-  // Water surface over every quad with a wet corner.
-  const wPos: number[] = [];
-  const wIdx: number[] = [];
+  // Water surface over every quad with a wet corner (v2: continuous, dilated under the banks).
+  let wPos: number[] = [];
+  let wIdx: number[] = [];
   const wMap = new Int32Array(side * side).fill(-1);
   const wetAt = (v: number): boolean => water[v]! > H[(Math.floor(v / side) + 1) * ext + (v % side) + 1]!;
   for (let j = 0; j < n; j++) {
@@ -385,6 +395,11 @@ export function* buildChunkSteps(w: World, req: ChunkRequest): Generator<void, C
       }
       wIdx.push(ids[0]!, ids[2]!, ids[1]!, ids[1]!, ids[2]!, ids[3]!);
     }
+  }
+  if (v2) {
+    const m = waterMeshV2(n, step, water, (v) => H[(Math.floor(v / side) + 1) * ext + (v % side) + 1]!);
+    wPos = m.positions;
+    wIdx = m.indices;
   }
   const waterMesh: RibbonMesh = {
     positions: Float32Array.from(wPos),
@@ -411,6 +426,7 @@ export function* buildChunkSteps(w: World, req: ChunkRequest): Generator<void, C
     positions,
     normals,
     colors,
+    surface,
     minY: minY - SKIRT_DEPTH,
     maxY,
     water: waterMesh,
@@ -434,7 +450,7 @@ export function buildChunk(w: World, req: ChunkRequest): ChunkData {
 
 /** Every buffer of a chunk result, for `postMessage` transfer lists. */
 export function chunkBuffers(c: ChunkData): ArrayBuffer[] {
-  const arrays = [c.positions, c.normals, c.colors, c.water.positions, c.water.colors, c.water.indices, c.roads.positions, c.roads.colors, c.roads.indices, c.trees, c.rocks, c.houses, c.bridges, c.colliders];
+  const arrays = [c.positions, c.normals, c.colors, c.surface, c.water.positions, c.water.colors, c.water.indices, c.roads.positions, c.roads.colors, c.roads.indices, c.trees, c.rocks, c.houses, c.bridges, c.colliders];
   const out: ArrayBuffer[] = [];
   for (const a of arrays) if (a.byteLength > 0 && !out.includes(a.buffer as ArrayBuffer)) out.push(a.buffer as ArrayBuffer);
   return out;
@@ -454,6 +470,8 @@ export function chunkDigest(c: ChunkData): string {
   };
   mixBytes(Float64Array.of(c.cx, c.cz, c.lod, c.seed, c.genVersion, c.originX, c.originZ, c.gridSize, c.minY, c.maxY));
   for (const a of [c.positions, c.normals, c.colors, c.water.positions, c.water.indices, c.roads.positions, c.roads.colors, c.roads.indices, c.trees, c.rocks, c.houses, c.bridges, c.colliders]) mixBytes(a);
+  // v2 only: v1 digests (golden fixture) stay byte-identical
+  if (c.surface.byteLength > 0) mixBytes(c.surface);
   return (h >>> 0).toString(16).padStart(8, '0');
 }
 

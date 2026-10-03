@@ -4,6 +4,19 @@ import { createSurfaces, type SurfaceProvider } from '../game/surfaces';
 import type { Collider, LevelDef, TerrainField } from '../types';
 import { ColliderGrid } from '../physics/collider-grid';
 import { FLAT_GROUND, type HeightField } from '../physics/terrain';
+import type { City } from '../world/city-gen';
+import type { Outskirts } from './city-outskirts';
+import type { CityFurniture } from './city-furniture';
+import type { World } from '../world/world';
+import type { ChunkStreamer } from './chunk-streamer';
+
+/**
+ * Generated scenery behind a level: a streamed terrain world (Alpine, Infinite) or the City. The renderer
+ * builds its meshes from this; physics reads `terrain` and the grid.
+ */
+export type WorldContent =
+  | { readonly kind: 'terrain'; readonly world: World; readonly stream: ChunkStreamer; readonly seed: number; readonly code: string }
+  | { readonly kind: 'city'; readonly city: City; readonly outskirts: Outskirts; readonly furniture: CityFurniture; readonly seed: number };
 
 /** Grid owner of a level's authored colliders (streamed chunks use their chunk keys). */
 export const LEVEL_OWNER = 'level';
@@ -22,6 +35,12 @@ export interface LevelRuntime {
   readonly surfaces: SurfaceProvider;
   /** resolves once the world around the spawn can be flown (authored levels: already resolved) */
   readonly ready: Promise<void>;
+  /** generated levels: the world the view renders (absent for authored levels) */
+  readonly content?: WorldContent;
+  /** 0..1 while `ready` is pending (loading overlay) */
+  progress?(): number;
+  /** stops background work (chunk workers) once the level is no longer used */
+  dispose?(): void;
 }
 
 export function createRuntime(def: LevelDef, terrain: TerrainField | null = null): LevelRuntime {

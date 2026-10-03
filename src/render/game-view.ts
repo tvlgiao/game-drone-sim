@@ -11,6 +11,7 @@ import { IndoorLevelView } from './indoor-level-view';
 import type { LevelView } from './level-view';
 import { Materials } from './materials';
 import { OutdoorLevelView } from './outdoor/outdoor-level-view';
+import { WorldLevelView } from './outdoor/world-level-view';
 import { PostFX } from './post';
 import { NEXT_COLOR, RingsView } from './rings-view';
 import { ContactShadow } from './vfx/contact-shadow';
@@ -57,6 +58,9 @@ const Y_AXIS = new THREE.Vector3(0, 1, 0);
 const REFERENCE_LIGHTING: QualityProfile = { ...QUALITY_PROFILES.high, shadows: false };
 /** Quest 2 budget (72 Hz, two eyes on a mobile GPU): no post FX, no shadow maps, small particle pools. */
 const XR_TIER: QualityTier = 'low';
+/** seconds at the minimum render scale before generated levels shorten their view distance (07 §7) */
+const VIEW_SCALE_AFTER = 3;
+const VIEW_SCALE_STEP = 0.75;
 /** head height used until the headset reports a pose (local-floor space) */
 const XR_DEFAULT_HEAD = new THREE.Vector3(0, 1.6, 0);
 
@@ -105,6 +109,9 @@ export class GameView {
   private shownFade = 0;
   private ringFlash = 0;
   private readonly ledColor = new THREE.Color();
+  /** seconds the render scale has sat at its 0.5 floor */
+  private lowScaleFor = 0;
+  private viewScaled = false;
 
   private readonly form: FormFactor;
 
@@ -173,7 +180,7 @@ export class GameView {
     this.level = level.def;
     this.look = levelLook(level.def);
     void this.library.preload(level.def.id);
-    this.levelView = this.buildLevelView(level.def);
+    this.levelView = this.buildLevelView(level);
     this.rings = new RingsView(level.def.rings);
     this.attachLevel(level);
 
@@ -196,14 +203,27 @@ export class GameView {
     this.level = level.def;
     this.look = levelLook(level.def);
     void this.library.preload(level.def.id);
-    this.levelView = this.buildLevelView(level.def);
+    this.levelView = this.buildLevelView(level);
     this.rings = new RingsView(level.def.rings);
     this.attachLevel(level);
     this.applyQuality();
   }
 
-  private buildLevelView(def: LevelDef): LevelView {
-    return def.kind === 'indoor' ? new IndoorLevelView(def, this.renderer, this.library, this.form) : new OutdoorLevelView(def, this.renderer, this.library);
+  private buildLevelView(level: LevelRuntime): LevelView {
+    const def = level.def;
+    if (def.kind === 'indoor') return new IndoorLevelView(def, this.renderer, this.library, this.form);
+    if (level.content) return new WorldLevelView(level, this.renderer, this.library, this.form);
+    return new OutdoorLevelView(def, this.renderer, this.library);
+  }
+
+  /** The scenery's far plane (generated levels see further than the rig's default). */
+  private applyCameraFar(): void {
+    const far = this.levelView.cameraFar;
+    if (far === undefined || far === this.rig.camera.far) return;
+    this.rig.camera.far = far;
+    this.rig.camera.updateProjectionMatrix();
+    this.xrCam.far = far;
+    this.xrCam.updateProjectionMatrix();
   }
 
   private attachLevel(level: LevelRuntime): void {
@@ -217,6 +237,9 @@ export class GameView {
     this.rig.setLevel(level);
     this.xrCam.far = this.rig.camera.far;
     this.xrCam.updateProjectionMatrix();
+    this.applyCameraFar();
+    this.lowScaleFor = 0;
+    this.viewScaled = false;
     this.ringFlash = 0;
     this.recenter = true;
     this.xrMode = null;
@@ -245,6 +268,7 @@ export class GameView {
     }
 
     const xr = r.xr.isPresenting;
+    this.adaptViewDistance(f.still ? 0 : dt);
     // outdoor LOS: the pilot watches the next ring, the course overview between laps
     this.rig.setFocus(f.nextRing >= 0 && f.nextRing < this.rings.count ? this.rings.ringPosition(f.nextRing, _focus) : null);
     this.rig.shake = !xr;
@@ -456,6 +480,46 @@ export class GameView {
     this.vfx.setWaterProbe(probe);
   }
 
+  /** Render scale pinned at 0.5 for VIEW_SCALE_AFTER s: generated levels shorten fog and streaming radius once. */
+  private adaptViewDistance(dt: number): void {
+    if (this.viewScaled || !this.levelView.setViewScale) return;
+    this.lowScaleFor = this.renderScale <= 0.5 + 1e-3 ? this.lowScaleFor + dt : 0;
+    if (this.lowScaleFor < VIEW_SCALE_AFTER) return;
+    this.viewScaled = true;
+    this.levelView.setViewScale(VIEW_SCALE_STEP);
+    this.applyCameraFar();
+  }
+
+  /** the level's scenery is still streaming in */
+  get levelBusy(): boolean {
+    return this.levelView.busy === true;
+  }
+
+  /** Visible drawables per top-level scene child (perf audits: what the draw calls are). */
+  census(): Record<string, { draws: number; tris: number }> {
+    const out: Record<string, { draws: number; tris: number }> = {};
+    for (const top of this.scene.children) {
+      top.traverseVisible((o) => {
+        const m = o as THREE.Mesh;
+        if (!m.isMesh && !(o as THREE.Points).isPoints && !(o as THREE.Line).isLine && !(o as THREE.Sprite).isSprite) return;
+        const key = `${top.name || top.type}/${o.name || o.type}`;
+        const e = out[key] ?? (out[key] = { draws: 0, tris: 0 });
+        e.draws++;
+        const g = m.geometry as THREE.BufferGeometry | undefined;
+        if (!g || !m.isMesh) return;
+        const n = g.index ? Math.min(g.index.count, g.drawRange.count) : (g.getAttribute('position')?.count ?? 0);
+        const inst = (g as THREE.InstancedBufferGeometry).isInstancedBufferGeometry ? (g as THREE.InstancedBufferGeometry).instanceCount : 1;
+        e.tris += Math.round((n / 3) * inst);
+      });
+    }
+    return out;
+  }
+
+  /** streaming / instancing numbers of generated levels (debug hook) */
+  levelStats(): Record<string, unknown> | null {
+    return this.levelView.stats?.() ?? null;
+  }
+
   setQuality(tier: QualityTier): void {
     if (tier === this.profile.tier) return;
     this.profile = qualityProfile(tier, this.form);
@@ -475,6 +539,7 @@ export class GameView {
     this.levelView.setQuality(p);
     this.cascades.apply(this.levelView.group, p);
     this.levelView.refreshShadows();
+    this.applyCameraFar();
     const sun = findSun(this.levelView.group);
     if (sun) this.sunDir.setFromMatrixPosition(sun.matrixWorld).sub(_v.setFromMatrixPosition(sun.target.matrixWorld)).normalize();
     this.applyEnvironment(p, look);
