@@ -18,9 +18,11 @@ uniform float uPx;
 varying vec3 vColor;
 varying float vAlpha;
 varying float vKind;
+varying float vSeed;
 #include <common>
 #include <fog_pars_vertex>
 void main() {
+  vSeed = aExtra.z;
   float age = uTime - aLife.x;
   float life = aLife.y;
   if (age < 0.0 || age > life) {
@@ -54,15 +56,30 @@ const FRAG = /* glsl */ `
 varying vec3 vColor;
 varying float vAlpha;
 varying float vKind;
+varying float vSeed;
 #include <common>
 #include <fog_pars_fragment>
+float pHash(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
+float pNoise(vec2 p) {
+  vec2 i = floor(p);
+  vec2 f = fract(p);
+  f = f * f * (3.0 - 2.0 * f);
+  return mix(mix(pHash(i), pHash(i + vec2(1.0, 0.0)), f.x), mix(pHash(i + vec2(0.0, 1.0)), pHash(i + vec2(1.0, 1.0)), f.x), f.y);
+}
 void main() {
   vec2 c = gl_PointCoord - 0.5;
   float d = length(c) * 2.0;
   if (d > 1.0) discard;
   float a;
   vec3 col = vColor;
-  if (vKind > 1.5) { a = (1.0 - d * d) * (1.0 - d * d) * 0.4; }
+  if (vKind > 1.5) {
+    // billowy puff: two octaves of noise, offset per particle, eat into the soft disc
+    float ang = vSeed * 6.2831;
+    vec2 q = mat2(cos(ang), -sin(ang), sin(ang), cos(ang)) * c * 1.5 + vSeed * 17.0;
+    float n = pNoise(q) * 0.65 + pNoise(q * 2.3 + 5.0) * 0.35;
+    a = (1.0 - d * d) * (1.0 - d * d) * mix(0.55, 1.0, smoothstep(0.2, 0.8, n)) * 0.42;
+    col *= 0.85 + 0.3 * n;
+  }
   else if (vKind > 0.5) { a = 1.0 - smoothstep(0.75, 1.0, d); col *= 0.7 + 0.3 * (1.0 - d); }
   else { float core = exp(-d * d * 6.0); a = core; col = mix(col, vec3(1.0), core * 0.3) * 2.2; }
   gl_FragColor = vec4(col, a * vAlpha);
@@ -81,6 +98,10 @@ export class ParticlePool {
   private dirtyEnd = -1;
   private wrapped = false;
   private time = 0;
+  /** last moment any particle is alive: the draw is skipped after it */
+  private until = -1;
+  /** total particles emitted (budget tests) */
+  emitted = 0;
 
   constructor(readonly capacity: number, additive: boolean) {
     this.data = new Float32Array(capacity * STRIDE);
@@ -105,6 +126,7 @@ export class ParticlePool {
     this.points = new THREE.Points(g, this.material);
     this.points.frustumCulled = false;
     this.points.renderOrder = additive ? 3 : 2;
+    this.points.visible = false;
   }
 
   /** Emit one particle. Positions/velocities in world space, m and m/s. */
@@ -130,6 +152,8 @@ export class ParticlePool {
     d[o + 13] = drag;
     d[o + 14] = kind;
     d[o + 15] = Math.random();
+    this.until = Math.max(this.until, this.time + delay + life);
+    this.emitted++;
     if (this.dirtyStart < 0) {
       this.dirtyStart = i;
       this.dirtyEnd = i;
@@ -143,6 +167,7 @@ export class ParticlePool {
     this.time = time;
     this.material.uniforms.uTime.value = time;
     this.material.uniforms.uPx.value = px;
+    this.points.visible = time <= this.until;
     if (this.dirtyStart >= 0) {
       this.buffer.clearUpdateRanges();
       if (this.wrapped || this.dirtyEnd < this.dirtyStart) {
