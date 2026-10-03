@@ -39,7 +39,9 @@ export type SfxId =
   | 'cowbell-1'
   | 'cowbell-2'
   | 'church-bell'
-  | 'tractor';
+  | 'tractor'
+  | 'wings'
+  | 'bleat';
 
 /** Rendered on start: everything the flight and menus need. */
 export const CORE_SFX: readonly SfxId[] = [
@@ -47,7 +49,9 @@ export const CORE_SFX: readonly SfxId[] = [
   'stinger-lap', 'stinger-best', 'beep', 'go', 'arm', 'disarm', 'batt-low', 'batt-crit', 'oob', 'inbounds', 'ui-hover', 'ui-select', 'ui-back', 'respawn',
 ];
 /** Rendered with the level that uses them (ambience one-shots and loops). */
-export const AMBIENT_SFX: readonly SfxId[] = ['bird-1', 'bird-2', 'bird-3', 'horn-1', 'horn-2', 'siren', 'cowbell-1', 'cowbell-2', 'church-bell', 'tractor'];
+export const AMBIENT_SFX: readonly SfxId[] = ['bird-1', 'bird-2', 'bird-3', 'horn-1', 'horn-2', 'siren', 'cowbell-1', 'cowbell-2', 'church-bell', 'tractor', 'wings', 'bleat'];
+/** Rendered with a level that has living-world sources (car horns, flocks taking off, herds). */
+export const LIFE_SFX: readonly SfxId[] = ['horn-1', 'horn-2', 'wings', 'cowbell-1', 'cowbell-2', 'bleat'];
 
 interface Kit {
   ctx: BaseAudioContext;
@@ -281,6 +285,53 @@ const RECIPES: Record<SfxId, Recipe> = {
   'bird-2': { len: 1.4, render: (k) => bird(k, 3, 2800, 0.9) },
   'bird-3': { len: 1.6, render: (k) => bird(k, 7, 4300, 1.8) },
   'horn-1': { len: 0.9, render: (k) => horn(k, 0, 0.45) },
+  // a flock taking off: a burst of soft wing claps, fast then thinning out
+  wings: {
+    len: 1.6,
+    render: (k) => {
+      for (let i = 0; i < 26; i++) {
+        const t = Math.pow(i / 26, 1.6) * 1.2 + k.r() * 0.03;
+        const a = 0.42 * (1 - i / 32) * (0.6 + 0.4 * k.r());
+        hiss(k, t, 'bandpass', 900 + k.r() * 900, 1.1, a, 0.004, 0.05);
+        hiss(k, t + 0.012, 'lowpass', 400, 0.7, a * 0.6, 0.002, 0.04);
+      }
+    },
+  },
+  // a sheep: a nasal, wavering 'baa' (buzz through a formant pair)
+  bleat: {
+    len: 0.9,
+    render: (k) => {
+      const f = 300 + k.r() * 80;
+      const o = k.ctx.createOscillator();
+      o.type = 'sawtooth';
+      o.frequency.setValueAtTime(f, 0);
+      o.frequency.linearRampToValueAtTime(f * 0.9, 0.7);
+      const vib = k.ctx.createOscillator();
+      vib.frequency.value = 7 + k.r() * 3;
+      const vd = k.ctx.createGain();
+      vd.gain.value = f * 0.06;
+      vib.connect(vd).connect(o.frequency);
+      const g = k.ctx.createGain();
+      g.gain.setValueAtTime(0, 0);
+      g.gain.linearRampToValueAtTime(0.16, 0.06);
+      g.gain.setValueAtTime(0.14, 0.5);
+      g.gain.linearRampToValueAtTime(0, 0.75);
+      for (const [fc, q, a] of [[900, 6, 1], [2300, 8, 0.5]] as const) {
+        const b = k.ctx.createBiquadFilter();
+        b.type = 'bandpass';
+        b.frequency.value = fc;
+        b.Q.value = q;
+        const bg = k.ctx.createGain();
+        bg.gain.value = a * 2.5;
+        o.connect(b).connect(bg).connect(g);
+      }
+      g.connect(k.out);
+      for (const x of [o, vib]) {
+        x.start(0);
+        x.stop(0.8);
+      }
+    },
+  },
   'horn-2': {
     len: 1.2,
     render: (k) => {

@@ -23,7 +23,8 @@ import { MusicPlayer } from './music/player';
 import type { OfflineFactory } from './music/render';
 import { songFor } from './music/songs';
 import { FLAT_PROBE, levelProbe, type AudioProbe } from './probe';
-import { CORE_SFX, renderBank, type SfxId } from './sfx-bank';
+import { CORE_SFX, LIFE_SFX, renderBank, type SfxId } from './sfx-bank';
+import { LifeSounds, type LifeHubLike } from './life-sounds';
 import { SfxPlayer, VoicePool } from './sfx';
 import { CRASH_SFX, surfaceOf, type Surface } from './surface';
 
@@ -63,6 +64,8 @@ export interface AudioSettings {
 export interface AudioLevel {
   def: { id: LevelId };
   terrain: TerrainField | null;
+  /** the living world (cars, turbines, herds, flocks; docs/12): voices for its nearest sources */
+  life?: LifeHubLike | null;
 }
 
 /** Anything with a world matrix: the rendered camera (in a headset, the head pose). */
@@ -117,6 +120,10 @@ export class GameAudio {
   private motor: MotorSound | null = null;
   private music: MusicPlayer | null = null;
   private readonly director = new MusicDirector();
+  /** the living world's voices for the current level (null: none / not built yet) */
+  private life: LifeSounds | null = null;
+  /** main-thread cost of the life voices' update, smoothed (ms) */
+  private lifeMs = 0;
   /** a level load is on screen: the music holds a muffled calm mix (never silence, never the old level's beat) */
   private loading = false;
   /** the new level's song waits for the hand-off (`levelMusic`) */
@@ -372,6 +379,9 @@ export class GameAudio {
     if (!level || !this.root) return;
     const token = this.levelToken;
     const now = ctx.currentTime;
+    // the old level's life voices fall silent and stop listening to its hub (they go with its scope)
+    this.life?.detach();
+    this.life = null;
     if (this.levelScope) {
       const old = this.levelScope;
       this.levelScope = null;
@@ -384,7 +394,9 @@ export class GameAudio {
     this.probe = level.terrain ? levelProbe(level, this.tier.lite) : FLAT_PROBE;
     if (!this.songPending) this.music?.setSong(songFor(level.def.id));
     const profile = this.profile;
-    const needed = profileSounds(profile).filter((id) => !this.bank.has(id));
+    const sounds = profileSounds(profile);
+    if (level.life) sounds.push(...LIFE_SFX);
+    const needed = [...new Set(sounds)].filter((id) => !this.bank.has(id));
     const make = (): void => {
       if (token !== this.levelToken || !this.ctx || !this.root) return;
       this.makeLevelScope(profile);
@@ -417,7 +429,10 @@ export class GameAudio {
     this.reverbIn!.connect(conv);
     conv.connect(this.reverbOut!);
     glide(this.reverbOut!.gain, profile.reverbMix, ctx.currentTime, 0.2);
-    this.ambience = new Ambience(profile, {
+    const hub = this.level?.life ?? null;
+    // a level whose life has a real tractor drops the profile's fixed one (full tiers; lite draws no tractor)
+    const ambienceProfile = hub && !lite ? { ...profile, emitters: profile.emitters.filter((e) => e.kind !== 'tractor') } : profile;
+    this.ambience = new Ambience(ambienceProfile, {
       scope,
       out: fade,
       noise: this.noise!,
@@ -428,6 +443,22 @@ export class GameAudio {
       probe: this.probe,
       random: this.random,
     });
+    if (hub) {
+      const pool = this.ambientPool!;
+      const bank = this.bank;
+      this.life = new LifeSounds(hub, {
+        scope,
+        out: fade,
+        noise: this.noise!,
+        lite,
+        model: 'equalpower',
+        random: this.random,
+        play: (id, x, y, z, gain, rate) => {
+          const buf = bank.get(id);
+          if (buf) pool.play(buf, gain, rate, 0, x, y, z);
+        },
+      });
+    }
     this.levelScope = scope;
   }
 
@@ -591,6 +622,12 @@ export class GameAudio {
       a.now = now;
       a.dt = step;
       this.ambience.update(a);
+    }
+    if (this.life) {
+      // the living world's nearest cars, turbines, the tractor and herds follow the listener
+      const t0 = typeof performance !== 'undefined' ? performance.now() : 0;
+      this.life.update(lx, ly, lz, now, step);
+      if (t0) this.lifeMs = this.lifeMs * 0.9 + (performance.now() - t0) * 0.1;
     }
     const st = race.status;
     glide(this.ambienceState!.gain, st === 'paused' ? 0.3 : st === 'menu' ? 0.6 : 1, now, 0.3);
@@ -769,6 +806,7 @@ export class GameAudio {
     released: number;
     level: LevelId | null;
     ambience: { wind: number; river: number; rush: number; village: number; events: number } | null;
+    life: { cars: number; ambient: number; horns: number; wings: number; carVoices: number; ambientVoices: number; ms: number } | null;
     motor: MotorSound['last'] | null;
     bank: number;
   } {
@@ -793,6 +831,7 @@ export class GameAudio {
       released: this.stats.released,
       level: this.level?.def.id ?? null,
       ambience: this.ambience ? { ...this.ambience.last } : null,
+      life: this.life ? { ...this.life.last, carVoices: this.life.cars.slots, ambientVoices: this.life.ambient.slots, ms: this.lifeMs } : null,
       motor: this.motor ? this.motor.last : null,
       bank: this.bank.size,
     };

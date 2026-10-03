@@ -1315,13 +1315,15 @@ function boot(caps: EditionCaps): void {
     lighting: [0.9, 'Preparing lighting'],
     warm: [0.95, 'Opening menu'],
   };
-  void view
+  const bootReady = view
     .prepare((step, f) => {
       const [at, label] = BOOT_STEP[step] ?? [0.95, 'Opening menu'];
       bootProgress(at + 0.06 * f, label);
     })
     .catch((err: unknown) => console.error('Boot level failed to prepare', err))
     .finally(() => {
+      // the audio graph too, still behind the splash: built later it would be one long task under the menus
+      audio.prepare();
       bootPreparing = false;
       menuRenders = 0;
       bootProgress(0.97, 'Opening menu');
@@ -1330,7 +1332,6 @@ function boot(caps: EditionCaps): void {
   // Idle menu time readies what the first level load would otherwise wait for: the audio graph, the texture and
   // world workers (their scripts load and compile now), and the next likely level's texture sets.
   whenIdle(() => {
-    audio.prepare();
     view.materials.warmWorker();
     void loadWorldViews().catch(() => undefined);
     prewarmWorldWorkers();
@@ -1508,8 +1509,11 @@ function boot(caps: EditionCaps): void {
     },
     touch: { layer: touchUi?.layer ?? null, sticks: input.touch.sticks },
   };
-  (window as unknown as { __drone: unknown }).__drone = hook;
-  if (selftest) void import('./ui/selftest').then((m) => m.runSelfTest(hook, settings.stickMode));
+  // automation sees the game once its boot level is ready (as when the boot was one synchronous task)
+  void bootReady.then(() => {
+    (window as unknown as { __drone: unknown }).__drone = hook;
+    if (selftest) void import('./ui/selftest').then((m) => m.runSelfTest(hook, settings.stickMode));
+  });
 }
 
 /** the boot's HUD, once created: a later fatal error reuses it instead of stacking a second UI */

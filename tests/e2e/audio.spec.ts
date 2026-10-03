@@ -91,9 +91,10 @@ test('every level plays its theme and ambience without console errors', async ({
       const m = (window as unknown as { __drone: Hook }).__drone.audioMix;
       return m.music.song === song && m.music.playing && m.ambience !== null;
     }, song, { timeout: 40_000 });
+    // the theme starts at the loading screen's hand-off; the free-fly mix follows on the next audio update
+    await expect.poll(async () => (await hook(page)).music.state).toBe('chill');
     const m = await hook(page);
     expect(m.level).toBe(id);
-    expect(m.music.state).toBe('chill');
     await page.evaluate(() => (window as unknown as { __drone: Hook }).__drone.action({ type: 'menu' }));
   }
   // switching levels does not pile up nodes: back on Training, the graph is about the size it was
@@ -109,8 +110,9 @@ test('pausing muffles the music and mutes the motors; resuming opens it again', 
   await page.getByRole('button', { name: 'Free Fly' }).click();
   await page.getByRole('button', { name: /^Free Fly · / }).first().click();
   await page.waitForFunction(() => {
-    const m = (window as unknown as { __drone: Hook }).__drone.audioMix;
-    return m.music.state === 'chill' && m.music.playing;
+    const d = (window as unknown as { __drone: Hook & { loading: { blocking: boolean } } }).__drone;
+    // the pilot has control once the loading screen's hand-off releases it
+    return d.audioMix.music.state === 'chill' && d.audioMix.music.playing && !d.loading.blocking;
   }, null, { timeout: 30_000 });
   await expect.poll(async () => (await hook(page)).music.cutoff).toBeGreaterThan(10000);
   const open = await hook(page);
