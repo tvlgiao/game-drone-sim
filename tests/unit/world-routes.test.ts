@@ -76,10 +76,11 @@ describe('city', () => {
     expect(downtownTall).toBeGreaterThan(5);
     expect(city.skybridges.length / 6).toBe(2);
     expect(city.trees.length).toBeGreaterThan(0);
-    // pilot stands on a roof
+    // the pilot stands on the street a few metres behind the take-off, clear of every building
     const [px, py, pz] = city.pilot;
-    expect(py).toBeGreaterThan(1.7);
-    expect(clearanceAt(px, py - 1.7 - 0.01, pz, city.colliders.map((c) => c.shape))).toBeLessThanOrEqual(0.01);
+    expect(py).toBe(1.7);
+    expect(Math.hypot(px - city.spawn.position[0], pz - city.spawn.position[2])).toBeLessThan(10);
+    expect(clearanceAt(px, py - 0.85, pz, city.colliders.map((c) => c.shape))).toBeGreaterThan(1);
   });
 
   it('clearPoint lifts a point out of a building to roof + ring radius + clearance', () => {

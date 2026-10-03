@@ -318,6 +318,11 @@
   width: 8px;
 }
 
+.ds-ui.ds-touch-on .ds-att {
+  width: 40px;
+  height: 40px;
+}
+
 .ds-ui.ds-touch-on .ds-big {
   font-size: 26px;
 }

@@ -55,6 +55,19 @@ climb is braked, P on altitude → PI on vertical speed, tilt-compensated), full
 with the stick at rest and the quad idles on the ground until the first push up.
 "Hold" (real FPV gimbal, manual throttle, no altitude hold) stays available in Settings.
 
+### 3.2 Acro on touch (after the 1.0.5 report "Acro always falls")
+
+Acro does not self-level: the right stick sets a rotation rate and a centred stick keeps whatever
+attitude the quad has. Measured on the iPhone profile, a thumb resting ≈ 30 % forward (pitch 0.26) for
+1.5 s turned a hovering quad to 102° (belly up); past ≈ 69° the altitude hold cannot hold
+(cos-tilt floor 0.35), the motors saturate and it falls at 15 m/s. Aids, with the Acro physics unchanged:
+
+- touch Acro flies the roll / pitch **centre rate halved** (`TOUCH_ACRO_CENTER_SCALE`; max rate and expo
+  kept, so full-stick flips still go round; custom rates are flown as set): the same thumb now gives 67°;
+- the first switch to Acro on the touch sticks shows a one-time tip (no self-level, centre holds the
+  attitude, Angle for stable flight), remembered in storage;
+- in Acro the telemetry panel shows a small artificial horizon that turns red belly up.
+
 ## 4. Full-screen flow
 
 1. Start screen on touch devices shows **"Tap to play full screen"** — the tap is the user

@@ -56,6 +56,10 @@ const ALT_POS_MAX_V = 1; // m/s
  * ~10 m/s with the throttle at zero. Acro without altitude hold keeps Betaflight's uncapped airmode.
  */
 export const AIRMODE_BOOST_LIMIT = 0.06;
+/** voltage low-pass for the sag compensation (s): smooths the load sag of fast throttle moves */
+const VBAT_TAU = 0.1;
+/** compensated hover point cap: full stick keeps some range above it on a flat pack */
+const VBAT_MID_MAX = 0.9;
 /** Position hold (DJI 'P' with GPS/optical flow): pitch/roll stick → horizontal speed, centre brakes. */
 export const POS_MAX_SPEED = 4; // m/s at full stick
 const POS_KV = 1.6; // (m/s²)/(m/s) speed error → acceleration
@@ -112,6 +116,8 @@ export class FlightController {
   private readonly lpfPitch = new LowPass1(GYRO_LPF_HZ);
   private readonly lpfYaw = new LowPass1(GYRO_LPF_HZ);
   private readonly motorOut: number[] = [0, 0, 0, 0];
+  /** pack voltage the throttle curve is compensated for (low-passed loaded volts; 0 = not sampled yet) */
+  private vbat = 0;
 
   private readonly euler = new Euler();
   private readonly qd = new Quaternion();
@@ -189,7 +195,20 @@ export class FlightController {
     return out;
   }
 
+  /**
+   * Battery sag compensation (Betaflight vbat_sag_compensation at 100 %): thrust scales with (V / V_full)², so the
+   * curve's hover point is raised by V_full / V. A centred stick then hovers at any charge instead of sinking
+   * faster and faster as the pack drains (≈ 6 % less thrust at 16.3 V).
+   */
+  private compensatedMid(dt: number, state: DroneState): number {
+    const v = state.batteryVoltage;
+    if (!(v > 0)) return this.throttleMid;
+    this.vbat = this.vbat > 0 ? this.vbat + (v - this.vbat) * Math.min(1, dt / VBAT_TAU) : v;
+    return Math.min(VBAT_MID_MAX, (this.throttleMid * this.params.battery.full) / this.vbat);
+  }
+
   private resetLoops(): void {
+    this.vbat = 0;
     this.altI = 0;
     this.holdZ = Number.NaN;
     this.pidRoll.reset();
@@ -240,7 +259,7 @@ export class FlightController {
       this.pidYaw.relax(dt, I_RELAX_TAU);
     }
 
-    const u = throttleOutput(input.throttle, this.throttleMid, this.throttleExpo, this.throttleLimit);
+    const u = throttleOutput(input.throttle, this.compensatedMid(dt, state), this.throttleExpo, this.throttleLimit);
     const idle = this.params.idle;
     const collective = this.altitudeHold ? this.altitudeCollective(dt, input.throttle, state) : u * u;
     const boost = this.mode === 'acro' && !this.altitudeHold ? Infinity : AIRMODE_BOOST_LIMIT;

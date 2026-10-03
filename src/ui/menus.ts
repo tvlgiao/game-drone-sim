@@ -240,7 +240,7 @@ const ROW_DEFS: Row[] = [
   {
     id: 'ratePreset',
     label: 'Rates',
-    hint: 'Stick sensitivity (Betaflight Actual)',
+    hint: 'Stick sensitivity (Betaflight Actual) · touch Acro: half the centre rate',
     kind: 'enum',
     options: [
       { value: 'beginner', label: 'Beginner' },

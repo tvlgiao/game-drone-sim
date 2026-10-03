@@ -15,6 +15,7 @@ import { KEY_STICKS, type InputExtras } from '../input/input-manager';
 import { isCanvas, pointerLockSupported, releasePointerLock, requestPointerLock } from '../input/mouse';
 import { ACTION_LABEL, actionGlyphs, channelHints, glyphHtml, glyphsHtml, hintScheme, keyCluster, keyGlyph, padGlyph, type HintAction, type HintScheme } from './input-glyphs';
 import { CH_NAME } from './mode-labels';
+import { attitudeOf, type Attitude } from './acro-aid';
 import { GP } from '../input/gamepad';
 
 export type { UiAction, ScreenName, FinishData } from './menus';
@@ -48,6 +49,9 @@ export interface HudFrame {
 
 /** Numeric text refresh interval (ms) — ~20 Hz is plenty for humans and avoids DOM churn at 120 fps. */
 const TEXT_INTERVAL = 50;
+/** artificial horizon: pitch shown up to ±ATT_PITCH_MAX deg, ATT_PITCH_PCT % of the ball per degree */
+const ATT_PITCH_MAX = 60;
+const ATT_PITCH_PCT = 0.5;
 const STICK_TRAVEL = 0.36; // fraction of the stick-well diameter the dot can travel from centre
 /** mouse stick dot travel in % of the dot (dot = 1/6 of the circle, edge at 0.42 of the diameter) */
 const MOUSE_TRAVEL = 0.42 * 600;
@@ -125,7 +129,9 @@ type Ref =
   | 'cAgl'
   | 'map'
   | 'mapTerrain'
-  | 'mapOver';
+  | 'mapOver'
+  | 'att'
+  | 'attBall';
 
 const TICKS_HTML = tapeTicks()
   .map((t) => `<i class="ds-compass__tick${t.major ? ' is-major' : ''}" style="left:${t.pct.toFixed(3)}%">${t.label ? `<b>${t.label}</b>` : ''}</i>`)
@@ -186,6 +192,7 @@ const HUD_HTML = `
       <div class="ds-tele__row"><span class="ds-label">Alt</span><span class="ds-num" data-r="alt">0.0</span><span class="ds-unit" data-r="altUnit">m</span></div>
       <div class="ds-tele__row" data-r="batt"><span class="ds-label">Bat</span><span class="ds-num" data-r="battCell">16.8</span><span class="ds-unit">V</span></div>
     </div>
+    <div class="ds-att" data-r="att" role="img" aria-label="Attitude" hidden><div class="ds-att__ball" data-r="attBall"></div><i class="ds-att__wings"></i></div>
   </div>
   <div class="ds-hud__br ds-panel">
     <div class="ds-mstick" data-r="mstick" hidden><div class="ds-mstick__well"><i class="ds-mstick__ring"></i><i class="ds-mstick__dot" data-r="mdot"></i></div><span class="ds-mstick__lbl" data-r="mlbl"></span></div>
@@ -218,6 +225,7 @@ export class Hud {
   private flashAt = -Infinity;
   private source: InputSource | null = null;
   private settingsRef: Settings | null = null;
+  private readonly attitude: Attitude = { rollDeg: 0, pitchDeg: 0, inverted: false };
   private stickL = [9, 9];
   private stickR = [9, 9];
   private throttle = 9;
@@ -331,6 +339,7 @@ export class Hud {
     }
 
     this.text(r.modeText, f.mode === 'acro' ? 'ACRO' : 'ANGLE');
+    this.updateAttitude(f);
     this.cls(r.mode, f.mode === 'acro' ? 'is-acro' : '');
     this.text(r.cam, CAMERA_LABEL[f.camera]);
     const armed = f.drone.armed;
@@ -457,7 +466,7 @@ export class Hud {
     }
   }
 
-  toast(msg: string): void {
+  toast(msg: string, ms = 2800): void {
     const box = this.refs.toasts;
     const t = document.createElement('div');
     t.className = 'ds-toast';
@@ -468,7 +477,7 @@ export class Hud {
     setTimeout(() => {
       t.classList.add('is-out');
       setTimeout(() => t.remove(), 400);
-    }, 2800);
+    }, ms);
   }
 
   setError(msg: string): void {
@@ -890,6 +899,21 @@ export class Hud {
       if (this.status !== 'crashed') this.text(this.refs.center, '');
       this.placeToasts();
     }, ms);
+  }
+
+  /**
+   * Acro only: the artificial horizon (Acro does not self-level, so this is how a pilot sees a quad that is
+   * rolled over or inverted). The ball turns against the roll and slides with the pitch; red while belly up.
+   */
+  private updateAttitude(f: HudFrame): void {
+    const r = this.refs;
+    const on = f.mode === 'acro';
+    if (r.att.hidden !== !on) r.att.hidden = !on;
+    if (!on) return;
+    const a = attitudeOf(f.drone.orientation, this.attitude);
+    const shift = Math.max(-ATT_PITCH_MAX, Math.min(ATT_PITCH_MAX, a.pitchDeg)) * ATT_PITCH_PCT;
+    this.style(r.attBall, `rotate(${(-a.rollDeg).toFixed(1)}deg) translateY(${shift.toFixed(1)}%)`);
+    r.att.classList.toggle('is-inv', a.inverted);
   }
 
   private text(el: HTMLElement, v: string): void {

@@ -3,7 +3,8 @@ import * as THREE from 'three';
 import type { CameraMode, DroneState, LevelDef, OutdoorLevel } from '../types';
 import { FPV_FOV_V_RANGE } from '../core/camera-limits';
 import { heightField, isRuntime, type LevelRuntime } from '../levels/runtime';
-import type { ColliderGrid, GridCollider } from '../physics/collider-grid';
+import { boxTopAt, type ColliderGrid, type GridCollider } from '../physics/collider-grid';
+import type { ColliderShape } from '../types';
 import { FLAT_GROUND, findDryGround, type HeightField } from '../physics/terrain';
 import { CAMERA_PIVOT, LENS_OFFSET } from './drone-model';
 
@@ -58,6 +59,18 @@ export const RELOCATE_FADE_SECONDS = 0.3;
 export const RELOCATE_BEHIND = 35;
 export const PILOT_EYE_HEIGHT = 1.7;
 const OCCLUSION_SAMPLES = 16;
+/** re-plant search: distances (m) from the drone, tried in order, and 30° turns off "behind" per distance */
+const RELOCATE_RADII = [RELOCATE_BEHIND, 25, 50, 15, 70, 100] as const;
+const RELOCATE_TURNS = [0, 1, -1, 2, -2, 3, -3, 4, -4, 5, -5, 6] as const;
+/** a roof is a stand only up to this far above the drone (no pilots on top of a 200 m tower) */
+const RELOCATE_ROOF_ABOVE = 12;
+/** the pilot's body (feet → just over the eye) keeps this far (m) from every collider */
+const PILOT_BODY_MARGIN = 0.4;
+/** after a search that found no spot, wait this long (s) before trying again */
+const RELOCATE_RETRY = 1;
+/** sight line ends left out of the occlusion test (m): the eye itself, and a drone sitting on a roof */
+const SIGHT_END_EYE = 0.2;
+const SIGHT_END_DRONE = 0.3;
 
 const _pos = new THREE.Vector3();
 const _q = new THREE.Quaternion();
@@ -73,6 +86,8 @@ const _right = new THREE.Vector3();
 const _camUp = new THREE.Vector3();
 const _mp = new THREE.Vector3();
 const _dry = { x: 0, z: 0 };
+const _eye = new THREE.Vector3();
+const _best = new THREE.Vector3();
 
 /** Target LOS vertical FOV (deg) at `range` metres on a large level. */
 export function losFovForRange(range: number): number {
@@ -87,12 +102,61 @@ export function isLargeLevel(def: OutdoorLevel): boolean {
   return Math.max(b.max[0] - b.min[0], b.max[1] - b.min[1]) >= LARGE_LEVEL_EXTENT;
 }
 
+/** Segment a → b (parameter window t0..t1) against a yawed box (slab test in the box frame). */
+export function segmentHitsBox(a: THREE.Vector3, b: THREE.Vector3, sh: Extract<ColliderShape, { kind: 'box' }>, t0: number, t1: number): boolean {
+  const yaw = sh.yaw ?? 0;
+  const c = Math.cos(yaw);
+  const s = Math.sin(yaw);
+  const ax = a.x - sh.center[0];
+  const az = a.z - sh.center[2];
+  const dx = b.x - a.x;
+  const dz = b.z - a.z;
+  // world → local = R_y(−yaw), as boxTopAt
+  const o = [c * ax - s * az, a.y - sh.center[1], s * ax + c * az];
+  const d = [c * dx - s * dz, b.y - a.y, s * dx + c * dz];
+  let lo = t0;
+  let hi = t1;
+  for (let k = 0; k < 3; k++) {
+    const h = sh.half[k]!;
+    if (Math.abs(d[k]!) < 1e-9) {
+      if (Math.abs(o[k]!) > h) return false;
+      continue;
+    }
+    let ta = (-h - o[k]!) / d[k]!;
+    let tb = (h - o[k]!) / d[k]!;
+    if (ta > tb) [ta, tb] = [tb, ta];
+    if (ta > lo) lo = ta;
+    if (tb < hi) hi = tb;
+    if (lo > hi) return false;
+  }
+  return true;
+}
+
+/** A shape comes within `m` of the vertical column (x, z) between y0 and y1 (tori by their bounding box). */
+function shapeNearColumn(sh: ColliderShape, x: number, z: number, y0: number, y1: number, m: number): boolean {
+  if (sh.kind === 'box') {
+    const yaw = sh.yaw ?? 0;
+    const c = Math.cos(yaw);
+    const s = Math.sin(yaw);
+    const dx = x - sh.center[0];
+    const dz = z - sh.center[2];
+    return Math.abs(c * dx - s * dz) <= sh.half[0] + m && Math.abs(s * dx + c * dz) <= sh.half[2] + m && y1 >= sh.center[1] - sh.half[1] && y0 <= sh.center[1] + sh.half[1];
+  }
+  if (sh.kind === 'cylinder') {
+    return Math.hypot(x - sh.center[0], z - sh.center[2]) <= sh.radius + m && y1 >= sh.center[1] - sh.halfHeight && y0 <= sh.center[1] + sh.halfHeight;
+  }
+  const r = sh.majorRadius + sh.tubeRadius;
+  return Math.hypot(x - sh.center[0], z - sh.center[2]) <= r + m && y1 >= sh.center[1] - r && y0 <= sh.center[1] + r;
+}
+
 /**
  * Outdoor camera constraint: nothing (terrain, collider-grid boxes) may stand between the drone and
  * the camera, and the camera never goes below `clearance` over the ground.
  */
 export class OutdoorConstraint {
   private readonly found: GridCollider[] = [];
+  /** sight-line and pilot-spot queries (kept apart from `found`, which pullCamera fills) */
+  private readonly sight: GridCollider[] = [];
 
   constructor(
     readonly field: HeightField,
@@ -136,6 +200,54 @@ export class OutdoorConstraint {
       if (_mp.y < this.field.heightAt(_mp.x, _mp.z)) return true;
     }
     return false;
+  }
+
+  /**
+   * Line of sight a → b blocked by the terrain or by a collider-grid box (buildings, bridges, slabs; trees and
+   * other cylinders do not hide the drone). The last SIGHT_END_DRONE m at b and the first SIGHT_END_EYE m at a are
+   * left out, so a drone sitting on a roof is still in sight.
+   */
+  sightBlocked(a: THREE.Vector3, b: THREE.Vector3): boolean {
+    if (this.terrainBlocks(a, b)) return true;
+    if (!this.grid) return false;
+    const len = a.distanceTo(b);
+    if (len < SIGHT_END_EYE + SIGHT_END_DRONE) return false;
+    const n = this.grid.query(Math.min(a.x, b.x), Math.min(a.y, b.y), Math.min(a.z, b.z), Math.max(a.x, b.x), Math.max(a.y, b.y), Math.max(a.z, b.z), this.sight);
+    const t0 = SIGHT_END_EYE / len;
+    const t1 = 1 - SIGHT_END_DRONE / len;
+    for (let i = 0; i < n; i++) {
+      const sh = this.sight[i]!.shape;
+      if (sh.kind === 'box' && segmentHitsBox(a, b, sh, t0, t1)) return true;
+    }
+    return false;
+  }
+
+  /**
+   * Where a pilot at (x, z) would stand: the ground, or the highest box top under (x, z) that is at most `maxTop`;
+   * NaN when (x, z) lies inside a box rising above `maxTop` (a tower wall, not a place to stand).
+   */
+  standHeight(x: number, z: number, maxTop: number): number {
+    let stand = this.field.heightAt(x, z);
+    if (!this.grid) return stand;
+    const n = this.grid.query(x, -Infinity, z, x, Infinity, z, this.sight);
+    for (let i = 0; i < n; i++) {
+      const top = boxTopAt(this.sight[i]!.shape, x, z);
+      if (top === -Infinity || top <= stand) continue;
+      if (top > maxTop) return Number.NaN;
+      stand = top;
+    }
+    return stand;
+  }
+
+  /** The pilot's body (a column from `feet` to just over the eye at (x, z)) is clear of every collider. */
+  bodyClear(x: number, feet: number, z: number): boolean {
+    if (!this.grid) return true;
+    const m = PILOT_BODY_MARGIN;
+    const y0 = feet + 0.05;
+    const y1 = feet + PILOT_EYE_HEIGHT + 0.2;
+    const n = this.grid.query(x - m, y0, z - m, x + m, y1, z + m, this.sight);
+    for (let i = 0; i < n; i++) if (shapeNearColumn(this.sight[i]!.shape, x, z, y0, y1, m)) return false;
+    return true;
   }
 
   private raise(cam: THREE.Vector3, clearance: number): void {
@@ -213,6 +325,8 @@ export class CameraRig {
   private relocatable = false;
   private losFov = LOS_FOV_V;
   private occludedFor = 0;
+  /** seconds before another re-plant search after one that found no safe spot */
+  private relocRetry = 0;
   /** 0 idle, 1 fading out, 2 fading in */
   private relocPhase = 0;
   /** relocation needs a non-VR view: the headset teleports its own way */
@@ -269,6 +383,7 @@ export class CameraRig {
     this.focus = null;
     this.losFov = LOS_FOV_V;
     this.occludedFor = 0;
+    this.relocRetry = 0;
     this.relocPhase = 0;
     this.fade = 0;
     this.relocations = 0;
@@ -526,7 +641,7 @@ export class CameraRig {
   }
 
   /**
-   * Re-plants the LOS pilot when the drone is out of range or hidden behind terrain for too long: in
+   * Re-plants the LOS pilot when the drone is out of range or hidden behind terrain or buildings for too long: in
    * LOS behind a fade (out, move, in), otherwise at once since the pilot is not on screen.
    */
   private updateRelocation(f: RigInput, dt: number): void {
@@ -535,12 +650,14 @@ export class CameraRig {
       this.relocPhase = 0;
       this.fade = 0;
       this.occludedFor = 0;
+      this.relocRetry = 0;
       return;
     }
     if (this.relocPhase === 0) {
+      this.relocRetry = Math.max(0, this.relocRetry - dt);
       const d = f.drone.position;
-      this.occludedFor = oc.terrainBlocks(this.pilot, d) ? this.occludedFor + dt : 0;
-      if (this.pilot.distanceTo(d) <= RELOCATE_RANGE && this.occludedFor <= RELOCATE_OCCLUDED_SECONDS) return;
+      this.occludedFor = oc.sightBlocked(this.pilot, d) ? this.occludedFor + dt : 0;
+      if (this.relocRetry > 0 || (this.pilot.distanceTo(d) <= RELOCATE_RANGE && this.occludedFor <= RELOCATE_OCCLUDED_SECONDS)) return;
       if (f.mode !== 'los' || f.instant) {
         this.replant(f.drone);
         return;
@@ -559,25 +676,51 @@ export class CameraRig {
     if (this.fade <= 0) this.relocPhase = 0;
   }
 
-  /** Pilot 35 m behind the drone (against its horizontal velocity, else its heading), eye 1.7 m over dry ground. */
-  private replant(d: DroneState): void {
+  /**
+   * Re-plants the pilot near the drone: 35 m behind it (against its horizontal velocity, else its heading) when
+   * that spot works, else the next of RELOCATE_RADII × RELOCATE_TURNS. A spot is dry, the body there is clear of
+   * every collider (never inside a building), the pilot stands on the ground or on a roof at most
+   * RELOCATE_ROOF_ABOVE over the drone, and the eye sees the drone past terrain and buildings. With no clear view
+   * anywhere the first safe spot is taken; with no safe spot the pilot stays and the search waits RELOCATE_RETRY.
+   */
+  private replant(d: DroneState): boolean {
+    const oc = this.outdoorConstraint;
+    this.occludedFor = 0;
+    if (!oc) return false;
     _v.set(-d.velocity.x, 0, -d.velocity.z);
     if (_v.lengthSq() < 1) {
       _v.set(0, 0, -1).applyQuaternion(d.orientation).negate();
       _v.y = 0;
       if (_v.lengthSq() < 1e-6) _v.set(0, 0, 1);
     }
-    _v.normalize();
-    let x = d.position.x + _v.x * RELOCATE_BEHIND;
-    let z = d.position.z + _v.z * RELOCATE_BEHIND;
-    if (findDryGround(this.field, x, z, _dry)) {
-      x = _dry.x;
-      z = _dry.z;
+    const base = Math.atan2(_v.x, _v.z);
+    const maxTop = d.position.y + RELOCATE_ROOF_ABOVE;
+    let fallback = false;
+    for (const r of RELOCATE_RADII) {
+      for (const k of RELOCATE_TURNS) {
+        const a = base + (k * Math.PI) / 6;
+        if (!findDryGround(this.field, d.position.x + Math.sin(a) * r, d.position.z + Math.cos(a) * r, _dry)) continue;
+        const stand = oc.standHeight(_dry.x, _dry.z, maxTop);
+        if (Number.isNaN(stand) || !oc.bodyClear(_dry.x, stand, _dry.z)) continue;
+        _eye.set(_dry.x, stand + PILOT_EYE_HEIGHT, _dry.z);
+        if (!oc.sightBlocked(_eye, d.position)) return this.plantAt(_eye);
+        if (!fallback) {
+          fallback = true;
+          _best.copy(_eye);
+        }
+      }
     }
-    this.pilot.set(x, this.field.heightAt(x, z) + PILOT_EYE_HEIGHT, z);
+    if (fallback) return this.plantAt(_best);
+    this.relocRetry = RELOCATE_RETRY;
+    return false;
+  }
+
+  private plantAt(eye: THREE.Vector3): boolean {
+    this.pilot.copy(eye);
     this.occludedFor = 0;
     this.headInit = false;
     this.relocations++;
+    return true;
   }
 
   private updateChase(f: RigInput, dt: number): void {

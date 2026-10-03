@@ -29,18 +29,19 @@ describe('City', () => {
   const rt = cityRuntime();
   const def = outdoor(rt);
 
-  it('1.2 km square, 250 m ceiling, 18 rings, no relocation, every building in the collider grid', () => {
+  it('1.2 km square, 250 m ceiling, 18 rings, relocation on, every building in the collider grid', () => {
     expect(def.bounds).toEqual({ kind: 'rect', min: [-CITY_HALF, -CITY_HALF], max: [CITY_HALF, CITY_HALF], maxAgl: CITY_CEILING });
     expect(CITY_CEILING).toBe(250);
     expect(def.rings.length).toBe(18);
-    expect(def.relocatePilot).toBeFalsy();
+    expect(def.relocatePilot).toBe(true);
     expect(rt.content?.kind).toBe('city');
     expect(rt.grid!.size).toBeGreaterThanOrEqual(def.statics.length);
     if (rt.content?.kind !== 'city') return;
     expect(def.statics.length).toBeGreaterThan(rt.content.city.colliders.length);
-    // the pilot stands on a low roof (a building top under the feet)
+    // the pilot stands on the street at the start line (the ground under the feet)
     const [px, py, pz] = def.pilot;
     expect(rt.surfaces.topBelow(px, py, pz)).toBeCloseTo(py - 1.7, 3);
+    expect(py).toBeCloseTo(1.7, 6);
   });
 
   it('outskirts stay outside the playable blocks, sorted outwards; only the near ring gets colliders', () => {
@@ -78,6 +79,7 @@ describe('Alpine Valley', () => {
   });
 
   it('spawn on dry, gentle ground clear of objects; the pilot on a knoll that sees the spawn', () => {
+    // (the knoll lies between the take-off and the first ring: pilot-los.test.ts checks the range)
     if (!field || rt.content?.kind !== 'terrain') throw new Error('terrain expected');
     const [sx, sy, sz] = def.spawn.position;
     expect(sy).toBeCloseTo(field.heightAt(sx, sz) + 0.06, 6);

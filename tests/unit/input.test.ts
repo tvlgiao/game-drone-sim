@@ -44,7 +44,8 @@ describe('throttle mapping', () => {
   it('left stick: full range, down = 0, centre = 0.5, up = 1', () => {
     expect(stickToThrottle(1)).toBe(0);
     expect(stickToThrottle(0.97)).toBe(0); // low-end deadzone makes 0 reachable
-    expect(stickToThrottle(0)).toBeCloseTo(0.5, 1);
+    // a sprung stick at rest is exactly the hover point (the end deadzones used to pull it to 0.495)
+    expect(stickToThrottle(0)).toBe(0.5);
     expect(stickToThrottle(-1)).toBe(1);
     expect(stickToThrottle(-0.99)).toBe(1);
   });
@@ -59,7 +60,7 @@ describe('throttle mapping', () => {
   it('right trigger: 0..1 with end deadzones', () => {
     expect(triggerToThrottle(0)).toBe(0);
     expect(triggerToThrottle(0.01)).toBe(0);
-    expect(triggerToThrottle(0.5)).toBeCloseTo(0.5, 1);
+    expect(triggerToThrottle(0.5)).toBe(0.5);
     expect(triggerToThrottle(1)).toBe(1);
     expect(triggerToThrottle(1.2)).toBe(1);
   });

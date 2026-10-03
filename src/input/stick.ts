@@ -32,11 +32,15 @@ export function applyAxialDeadzone(v: number, deadzone: number): number {
 export const THROTTLE_LOW_DEADZONE = 0.02;
 export const THROTTLE_HIGH_DEADZONE = 0.01;
 
+/**
+ * End deadzones, rescaled per half so the centre stays exactly 0.5: a sprung gamepad stick (or a released
+ * touch stick) at rest must command the curve's hover point, not 0.495 (≈ 1.4 % short on thrust, a slow sink).
+ */
 function throttleEnds(t: number, low: number): number {
   const hi = 1 - THROTTLE_HIGH_DEADZONE;
   if (t <= low) return 0;
   if (t >= hi) return 1;
-  return (t - low) / (hi - low);
+  return t <= 0.5 ? (0.5 * (t - low)) / (0.5 - low) : 0.5 + (0.5 * (t - 0.5)) / (hi - 0.5);
 }
 
 /**

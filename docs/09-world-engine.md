@@ -185,7 +185,7 @@ builder.dispose();
   - `roofProps` (`ROOF_PROP_STRIDE = 7`: kind 0 AC / 1 tank / 2 antenna, x, y base, z, sx, sy, sz),
     `skybridges` (x, y, z centre, w, h, d), the pass-through slab on four stilts (block 4, 9), a park block with
     trees in the scatter layout (absolute coordinates), the river channel in block column 14.
-  - `colliders: Collider[]` (≈ 1 700 boxes / cylinders), `pilot` (on a low roof at the south edge),
+  - `colliders: Collider[]` (≈ 1 700 boxes / cylinders), `pilot` (street, 4 m behind the take-off),
     `spawn` (street, facing east), `rings` (18: street-canyon slalom at 15–25 m, rooftop hop, street dive,
     under / over the skybridges; ≈ 2.7 km; every ring ≥ 3 m from colliders and ground, tested over 25 seeds).
   - `cityTerrainField(city, genVersion)`: flat y = 0 with the river channel (bed −4 m, water −0.8 m).

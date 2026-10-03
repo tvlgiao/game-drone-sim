@@ -43,7 +43,9 @@ import { terrainMinimapSampler } from './ui/minimap';
 import type { OutdoorHud } from './ui/hud';
 import { worldField } from './levels/runtime';
 import { TouchControls } from './ui/touch-controls';
-import type { ButtonEvents, CameraMode, ControlInput, DroneState, GameEvent, InputFrame, LevelId, QualityTier, RaceSnapshot } from './types';
+import { AcroTip, ACRO_TIP_MS } from './ui/acro-aid';
+import { RATE_PRESETS, axisRatesFrom, touchAcroRates } from './control/rates';
+import type { AxisRates, ButtonEvents, CameraMode, ControlInput, DroneState, GameEvent, InputFrame, LevelId, QualityTier, RaceSnapshot } from './types';
 
 const PHYSICS_DT = 1 / 1000;
 const CAMERA_CYCLE: CameraMode[] = ['los', 'fpv', 'chase'];
@@ -85,6 +87,7 @@ function boot(caps: EditionCaps): void {
   const canvas = document.getElementById('game') as HTMLCanvasElement;
   const uiRoot = document.getElementById('ui') as HTMLElement;
   const storage = safeStorage();
+  const acroTip = new AcroTip(storage);
   let settings: Settings = loadSettings(storage);
 
   const device = detectDevice(window);
@@ -201,12 +204,19 @@ function boot(caps: EditionCaps): void {
   /** the flying pad was unplugged during a crash: pause as soon as the respawn ends */
   let pauseAfterRespawn = false;
 
+  /** FC rates per input: the settings' rates, and the touch Acro variant (applySettings fills both) */
+  let padRates: AxisRates = axisRatesFrom(RATE_PRESETS.freestyle);
+  let thumbRates: AxisRates = padRates;
+
   function applySettings(s: Settings): void {
     settings = s;
     menuRenders = 0; // quality / FOV changes must show behind the settings screen
     sim.fc.mode = s.flightMode;
     const r = s.rates;
-    sim.fc.rates = { roll: { ...r.roll }, pitch: { ...r.pitch }, yaw: { ...r.yaw } };
+    padRates = { roll: { ...r.roll }, pitch: { ...r.pitch }, yaw: { ...r.yaw } };
+    // the pilot's own (custom) rates are flown as set on every input
+    thumbRates = s.ratePreset === 'custom' ? padRates : touchAcroRates(r);
+    sim.fc.rates = padRates;
     sim.fc.angleMaxTiltDeg = s.angleMaxTiltDeg;
     sim.fc.throttleExpo = s.throttleExpo;
     sim.fc.throttleLimit = s.throttleLimit;
@@ -932,7 +942,10 @@ function boot(caps: EditionCaps): void {
       sim.fc.mode = settings.flightMode;
       saveSettings(settings, storage);
       hud.setSettings(settings);
-      toast(`${settings.flightMode.toUpperCase()} mode`);
+      // the first switch to Acro on the touch sticks explains the missing self-level (the tutorial has its own card)
+      const tip = tutOn && tutorial.active ? null : acroTip.take(input.activeSource, settings.flightMode);
+      if (tip) hud.toast(tip, ACRO_TIP_MS);
+      else toast(`${settings.flightMode.toUpperCase()} mode`);
     }
     if (b.cycleCamera) cameraMode = CAMERA_CYCLE[(CAMERA_CYCLE.indexOf(cameraMode) + 1) % CAMERA_CYCLE.length];
     if (b.reset) race.requestReset();
@@ -1113,6 +1126,8 @@ function boot(caps: EditionCaps): void {
       // Sources whose throttle springs back to centre fly with altitude hold, centre = hover (DJI 'A/Atti' style):
       // keyboard keys, Quest thumbsticks and touch auto-centre sticks (input-manager holdsAltitude).
       sim.fc.altitudeHold = input.altitudeHold(tutRunning ? { ...settings, flightMode: sim.fc.mode } : settings);
+      // thumbs on glass fly Acro on softer centre rates (rates.ts TOUCH_ACRO_CENTER_SCALE)
+      sim.fc.rates = inp.source === 'touch' && sim.fc.mode === 'acro' ? thumbRates : padRates;
       // …and the right thumbstick flies speed, braking to a stop when released (Angle mode).
       sim.fc.positionHold = inp.source === 'xr';
       const control = status === 'countdown' ? { ...inp.control, throttle: 0 } : inp.control;
