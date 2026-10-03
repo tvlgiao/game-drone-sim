@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { precacheUrls, swSource } from '../../build/offline-sw';
+import { WORLD_WORKER_RE, assertWorkerPrecached, precacheUrls, swSource } from '../../build/offline-sw';
 import { legacyGameUrl } from '../../src/landing/legacy';
 import { storeBadgeHtml, storeBadgesHtml } from '../../src/site/badge';
 import { STORE_LINKS } from '../../src/site/stores';
@@ -56,5 +56,14 @@ describe('offline service worker', () => {
   it('the generated worker lists them', () => {
     expect(swSource(files, 'abc')).toContain('"./play/"');
     expect(swSource(files, 'abc')).toContain("const CACHE = 'dronesim-abc'");
+  });
+
+  it('the build fails when the world chunk worker is not precached, and passes once it is', () => {
+    expect(() => assertWorkerPrecached(files)).toThrow(/world chunk worker/);
+    const withWorker = [...files, 'assets/world-worker-BxQ1a9Zz.js'];
+    expect(() => assertWorkerPrecached(withWorker)).not.toThrow();
+    expect(swSource(withWorker, 'abc')).toContain('"./assets/world-worker-BxQ1a9Zz.js"');
+    expect(WORLD_WORKER_RE.test('assets/world-worker.js.map')).toBe(false);
+    expect(WORLD_WORKER_RE.test('assets/my-world-worker-x.js')).toBe(false);
   });
 });

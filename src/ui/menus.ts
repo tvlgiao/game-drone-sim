@@ -52,7 +52,7 @@ export type UiAction =
   | { type: 'race' }
   | { type: 'freefly' }
   /** level picker: switch to that level (if needed) and start a run */
-  | { type: 'level'; id: LevelId; mode: LevelMode }
+  | { type: 'level'; id: LevelId; mode: LevelMode; /** Infinite: the world to play */ seed?: number }
   | { type: 'resume' }
   | { type: 'menu' }
   | { type: 'retry' }
