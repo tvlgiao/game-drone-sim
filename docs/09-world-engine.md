@@ -128,6 +128,18 @@ buildChunk(world, { cx, cz, lod: 0 | 1 | 2, objects?: boolean }): ChunkData
   11.7 / 15.4 ms (Alpine); LOD1 ≈ 3 ms; LOD2 ≈ 2 ms. Budget 40 ms (test). Under a full parallel test run the p95 rises
   to ≈ 25 ms.
 
+### Rendering a chunk (`src/render/outdoor/terrain-view.ts`, docs/10 §11)
+
+- Chunk meshes, the batched LOD2 rings and the far backdrop draw with the material library's terrain
+  (`library.terrain`, docs/10 §5): the `colors` palette (sRGB bytes, linearised in the shader) over the grass
+  set as detail, world-space UVs.
+- `surface` reaches the GPU as two normalised byte attributes over one interleaved buffer with the same
+  layout (`addSurfaceAttributes`): `aRock` (`SURFACE_ROCK`) → triplanar rock, `aWet` (`SURFACE_BANK`) → darker,
+  glossier banks with soil detail. v1 chunks (empty `surface`) read 0; rock still shows on slopes past ~25°.
+- `water`: drawn with the shared water material; every water vertex sits on a grid point, so its depth over
+  the chunk's own ground gives the shore foam (`shoreFoam`: 1 where the bank rises over the surface, 0 by
+  ~1.1 m of depth) as the `aShore` attribute. Water and road ribbons carry straight-up normals.
+
 ## 6. Building chunks off the main thread
 
 ```ts
@@ -179,6 +191,14 @@ builder.dispose();
   - `cityTerrainField(city, genVersion)`: flat y = 0 with the river channel (bed −4 m, water −0.8 m).
   - `cityObstacles(city, x, z, range)` for the camera rig / ring checks.
 
+- **Time of day**: `EnvDef.time` names the sky preset a level was built with (`outdoorEnv`): City `dusk`,
+  Alpine `alpine` (golden hour in thin air), Infinite `afternoon` (day — the per-seed `timeFromSeed` is kept
+  for tools but no longer picks the sky). Settings → Time of day overrides it (`levelTime(env, setting)`;
+  golden hour on Alpine stays its own variant); the view swaps sky, sun, fog, water and look at runtime.
+  `SkyDef.haze` is the fog / aerial colour where it differs from the horizon (dusk).
+- `worldField(runtime)` returns the world engine field behind a generated level (Alpine / Infinite: the
+  world's; City: `cityTerrainField`) for water, biome and minimap queries; null for authored levels.
+
 ## 9. Seeds, codes and saves (WP-G / WP-J)
 
 - **Code**: 8 Crockford base32 characters shown as `XXXX-XXXX`, 40 bits = **3-bit generator version + 32-bit seed
@@ -195,6 +215,19 @@ builder.dispose();
   or filtered, never a throw), `saveWorlds`, `recordPlayed(store, seed, gen, now)` (adds "World K7Q2", touches
   `lastPlayed`, keeps the 50 most recently played), `renameWorld` (trimmed, ≤ 24 chars, empty rejected),
   `deleteWorld`, `worldsByRecent`, `lastPlayedWorld`. Entry id = the code.
+
+**In the game** (`src/main.ts`):
+
+- Level cards: Infinite is `kind: 'seeded'` (Free Fly + Worlds…) with the last world flown as its note.
+  A `level` action carries `seed` / `gen`; `startLevel(id, { seed, gen })` then `newSession(mode)`.
+- `?world=CODE` at boot (and a Capacitor `appUrlOpen` URL): `parseWorldParam` → `playWorld` (recorded as
+  played), `history.replaceState` without the parameter, Infinite free fly; a code that does not decode only
+  toasts ("That world link is not valid — check the code" / "…needs a newer version"). A reload returns to the
+  last level and world, so the ground is the same.
+- VR card: Y cycles the levels; arriving on Infinite resumes the last world (`resumeOrNewWorld`).
+- HUD: outdoor levels get `HudFrame.outdoor` (AGL, the LOS pilot's spot, the next ring while racing) and a
+  minimap sampler per level (`terrainMinimapSampler(worldField(rt), bounds)`, City blocks drawn as buildings);
+  the XR cards get the world code, AGL / pilot distance and the units.
 
 ## 9b. Generator v2 (`GEN_VERSION = 2`)
 

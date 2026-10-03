@@ -36,7 +36,7 @@ export const LEVEL_TEXTURE_SETS: Readonly<Partial<Record<LevelId, readonly Cc0Se
   training: ['grass', 'asphalt', 'bark'],
   alpine: ['grass', 'rock', 'soil'],
   infinite: ['grass', 'rock', 'soil'],
-  city: ['grass', 'concrete', 'brick'],
+  city: ['concrete', 'brick'],
 };
 
 const URLS = import.meta.glob<string>('./cc0/*/*.webp', { eager: true, query: '?url', import: 'default' });

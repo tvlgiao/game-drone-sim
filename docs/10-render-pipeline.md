@@ -3,7 +3,8 @@
 What every level, the drone and the VFX sit on. Owner files: `src/render/post.ts`, `src/render/effects/**`,
 `src/render/looks.ts`, `src/render/ibl.ts`, `src/render/shadows.ts`, `src/render/lights.ts`,
 `src/render/outdoor/sky.ts`, `src/render/materials/**`, the renderer set-up in `src/render/game-view.ts`,
-and the tier knobs in `src/core/quality.ts`.
+and the tier knobs in `src/core/quality.ts`. The generated worlds (City, Alpine Valley, Infinite) sit on the
+same pipeline through `src/render/outdoor/world-level-view.ts` (§11; the world engine side is docs/09).
 
 ## 1. Frame, end to end
 
@@ -40,6 +41,14 @@ and how much of the level's hemisphere light to keep when the captured environme
 | --- | --- | --- |
 | Night Loft | ACES Filmic | deepest blacks and the most saturated neon / ring emissives of the three; AgX read flat and pastel at night even with a punchy grade, Neutral too clean for a moody interior |
 | Training | Khronos PBR Neutral | daylight albedos (grass, cones, pad paint) stay true; ACES pushed the sky cyan-white and the grass yellow, AgX greyed both |
+| Worlds · day (`afternoon`, `noon`) | Khronos PBR Neutral | as Training; saturation 0.84 / 0.9 (aerial greens are olive, not toy green) |
+| Worlds · golden hour (`golden`, Alpine's `alpine`), dawn | ACES Filmic | warm highlights roll off instead of clipping yellow; amber highlight / blue shadow split |
+| Worlds · dusk (City) | ACES Filmic | lit windows, lamps and the ring LEDs carry the frame; exposure 1.1, bloom floor 2.4 |
+
+Generated worlds take the look of the **time of day** they are drawn at (`levelLook(def, time)`, Settings →
+Time of day, Auto = the level's own: City dusk, Alpine golden hour, Infinite day). Their aerial haze is the
+sky's haze colour (`SkyDef.haze`, else the horizon) — the same colour the level fades its `FogExp2` to — at
+0.0005–0.0007 /m with a 150 m scale height (valley floors haze, peaks stay crisp), and `ringGain` 1.5–2.3.
 
 Bloom: the look's threshold is a floor under the level view's `bloomThreshold`. Outdoors it is 4 (scene
 units): the sun's Mie halo peaks around 3, and a lower threshold turned the halo into a hard-edged
@@ -70,6 +79,9 @@ Look test: `render-preview.html?level=training&cam=chase&tm=agx|aces|neutral`.
     0.55, training 0.5): the capture already holds that ambient. No tier gets both PMREM and SH.
   - Drone, particles, rings, markers and VR furniture are hidden for the captures. The level view's own
     `environment` (analytic sky / hand-built dark loft) is only the fallback if a capture throws.
+  - Generated worlds capture from 6 m over the take-off, out to 3 km, with the chunks the streamer already
+    built uploaded first; the sky dome (which rides with the camera) is moved around the probe for the
+    capture — from outside its sphere the probe saw no sky at all. A time-of-day change re-captures.
 - **Loft without shadow maps** (low, VR): the moon is off (unshadowed it washed every wall facing it in
   cold blue); the window pools draw its light on the floor, the wall-washer spot stays on, and the SH probe
   carries the warm room ambient — low reads like ultra's room.
@@ -84,6 +96,10 @@ Look test: `render-preview.html?level=training&cam=chase&tm=agx|aces|neutral`.
 
 `shadows.ts` swaps the level's `DirectionalLight` (named `sun`, else the first) for the cascaded light and
 restores it on a lower tier or a level switch. Level views keep authoring a plain directional sun.
+A level view may set `shadowFar` (the cascades' reach): generated worlds 260 m, the City 420 m (towers). On
+ultra / high the cascades replace the worlds' old drone-following shadow box; that box only runs on a tier
+with shadow maps but no cascades whose outdoor profile asks for sun shadows (none today: medium worlds have
+no sun shadow, low / VR the blob).
 
 ## 5. Material system (`src/render/materials/`)
 
@@ -142,23 +158,35 @@ await lib.preload('training');                              // GameView does thi
 
 Each feature is a define, so a combination is one program (`customProgramCacheKey` = the feature set).
 
-### Terrain hook (for the outdoor worlds)
+### Terrain hook (the generated worlds use it)
 
 ```ts
 const ground = level.terrain({
   base: 'grass',              // base layer preset (grass | gravel | asphalt | concrete), CC0 where loaded
   uvMeters: 1,                // geometry UVs in metres
-  rockAttribute: 'aRock',     // float 0..1 per vertex → triplanar rock (procedural `rock` set)
+  worldUv: true,              // …or world XZ metres (heightfield chunks carry no UVs)
+  detail: 0.55,               // share of the base map's contrast kept under the vertex colours
+  normalScale: 0.45,          // base normal map strength
+  rockAttribute: 'aRock',     // float 0..1 per vertex → triplanar rock (`rock`: CC0 Aerial Rocks 02 where loaded)
   wetAttribute: 'aWet',       // float 0..1 per vertex → darker, glossier, flatter (river / lake banks)
-  slopeRock: 0.55,            // optional: rock also where 1 − normal.y > 0.55
-  rockMeters: 3,              // rock tile size (m)
+  slopeRock: 0.1,             // optional: rock also where 1 − normal.y > 0.1 (full at +0.15)
+  rockMeters: 11,             // fine rock tile (m)
+  rockMacroMeters: 61,        // optional coarse triplanar sample: carries a face from afar, fine one fades by 80–360 m
+  rockTint: 0x6c6c6a,         // optional: the scan brings detail (contrast ×1.45), the level its colour
+  soil: true,                 // optional: soil scan (Forest Ground 04) on dark bare earth and wet banks
+  srgbColors: true,           // vertex colours are sRGB bytes (the world engine's palette): linearised
+  snow: true,                 // whitest vertex colours: a third of the grain, smoother, no rock
   vertexColors: true,         // default: the geometry's `color` is the palette, the base map only adds detail
 });
 ```
 
 Attributes that the geometry does not carry read as 0 (pass `null` to compile without them). The rock
-layer samples three planar projections in world space, so cliffs do not stretch; normals flatten towards
-the mesh normal under rock and water. Same options → same material.
+layer samples three planar projections in world space, so cliffs do not stretch; under rock and water the
+base normal map flattens towards the mesh normal and the rock's own luminance becomes a screen-space bump
+(faded out past ~220 m). Same options → same material. The rock and soil layers start on the procedural
+stand-ins (rock, gravel) and the library swaps the scans into the material's uniforms when they arrive
+(`Entry.onScan`). Custom shaders get the same behaviour from `scope.watchSet(preset, cb)`: called now with
+the procedural maps and again with the scan (City facades: brick, concrete).
 
 ## 6. Assets
 
@@ -171,18 +199,23 @@ the mesh normal under rock and water. Same options → same material.
 | asphalt_02 | asphalt | 1.03 MB |
 | leafy_grass | grass | 1.07 MB |
 | bark_brown_02 | bark | 0.76 MB |
+| aerial_rocks_02 | rock (terrain rock layer, 50 m real tile) | 0.80 MB |
+| forest_ground_04 | soil (terrain soil layer) | 0.93 MB |
 
 Loft: `slab` (floor) and `concrete` (sills) → concrete_floor_worn_001, `brick` / `paintedBrick` → red_brick,
 `plaster` → the columns, `wood` → deck, door, crates, shelves. Training: `grass` → meadow and field (as
 detail), `asphalt` → landing pad, `bark` → tree trunks and branches.
 
-Total 4.1 MB (budget 12 MB). Per level: loft 1.2 MB, training 2.9 MB (Quest budget 6 MB; the VR tier
-loads none). Files live in `src/render/materials/cc0/` rather than `public/`: Vite emits them as hashed
+Generated worlds: Alpine and Infinite → grass + rock + soil (2.8 MB), City → concrete + brick for the facade
+detail (0.7 MB).
+
+Total 5.8 MB (budget 12 MB). Per level: loft 1.2 MB, training 2.9 MB, Alpine / Infinite 2.8 MB, City 0.7 MB
+(Quest budget 6 MB; the VR tier loads none). Files live in `src/render/materials/cc0/` rather than `public/`: Vite emits them as hashed
 assets, so the web build, the offline worker's precache and the native (Capacitor) build all carry them
 without base-path logic. Re-fetch with `python3 scripts/fetch-cc0-textures.py`.
 `tests/unit/asset-budget.test.ts` enforces the budgets, the manifest and the licence credits.
 
-**Offline worker**: `build/offline-sw.ts` precaches every emitted file, so the 4.1 MB is downloaded at
+**Offline worker**: `build/offline-sw.ts` precaches every emitted file, so the 5.8 MB is downloaded at
 install even by a player who only flies one level. Acceptable at this size; past ~10 MB the worker should
 precache the core and cache texture sets on first use (runtime cache-first), since the procedural maps
 already cover a cold offline start.
@@ -259,3 +292,23 @@ cylinder above 24 % of the height and inside the trunk radius below it (unit-tes
 draws / triangles. Quest before this work: loft 140 draws / 228 k, training 52 / 221 k (same harness).
 Training ultra / high triangles are mostly the grass tufts (30 k / 20 k instances). Measured with
 `scratchpad` scripts equivalent to `scripts/beauty-shots.mjs` + `__drone.stats()` inside the IWER session.
+
+## 11. Generated worlds (City, Alpine Valley, Infinite)
+
+`outdoor/world-level-view.ts` puts the world engine's content (docs/09) on this pipeline; the X1 renderer's own
+terrain shader, water shader and drone-following shadow box are gone or demoted.
+
+| piece | how |
+| --- | --- |
+| ground | `library.terrain` (§5) over every chunk, the LOD2 batch and the far backdrop: grass detail under the generator's palette, rock by `aRock` + slope (two-scale triplanar, tinted, bump), wet banks by `aWet`, soil on dark bare earth, snow, world UVs. CC0 grass / rock / soil on ultra–medium, procedural on low / VR |
+| water | rivers, lakes, the City river: a `MeshStandardMaterial` (`outdoor/water.ts`) — near-black body, Fresnel reflection of the captured environment (analytic sky gradient without one), two scrolling ripple normals flattened with distance (one analytic ripple on Quest), lacy shore foam from `aShore` (depth over the chunk grid). The level's `waterProbe` (`worldField(rt).waterLevelAt`) goes to `GameView.setWaterProbe`: prop wash over water sprays off the surface |
+| sky / time of day | `SkyDome` + stand-in PMREM per sky preset; `GameView.setTimeOfDay(setting)` → `WorldLevelView.setTime` swaps sky, sun, hemisphere, fog colour, water sky and lit windows, then the look (§2) and a fresh capture |
+| sun / shadows | the level's `sun` → `SunCascades` on ultra / high (`shadowFar` 260 m, City 420 m); trees, buildings and furniture cast, chunks receive |
+| IBL | one capture from 6 m over the take-off (§3); trees take a full share of it (`envMapIntensity` 1), the ground 0.8 |
+| haze | `FogExp2` to the sky's haze colour at the profile's view distance + the post aerial haze in the same colour |
+| City | facades: one instanced draw (X1's facade shader) with the library's brick / concrete (`watchSet`) as wall texture within ~180 m, lit rooms dimmer and warmer at dusk, panes reflecting a share of the capture |
+| trees | X1's species + impostors; crown lumps / conifer tiers shade with their rounded shape (bent facet normals) |
+| rings | the shared `RingsView` with the look's `ringGain` (day 2.2–2.3, golden 1.9, dawn 1.8, dusk 1.5) |
+| view distance | Settings → View distance × the adaptive step: `scaledProfile(profile, k)` — short 0.5, medium 0.75, long 1.3 (fog and the batched backdrop only; the streamed radius keeps the tier's budget) |
+
+Budgets: §11.1 (filled in from the measurement run).
