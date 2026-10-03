@@ -23,6 +23,10 @@ const SALT_MACRO = 77;
 const SALT_MACRO_FINE = 78;
 
 const SAND = [0xb9, 0xab, 0x86];
+/** grass verge between two parcels: a light seam, never the darker ground underneath */
+const VERGE = [0x86, 0xa2, 0x55];
+/** furrow / garden-row contrast per LOD: rows finer than the grid would only alias into a moiré */
+export const ROW_CONTRAST: readonly number[] = [1, 0.5, 0];
 const GRAVEL = [0x8e, 0x88, 0x7a];
 const DRY = [0xa6, 0x9e, 0x5c];
 const DARK = [0x3f, 0x66, 0x30];
@@ -46,7 +50,8 @@ const RGB = [0, 0, 0];
  * Recolours one vertex (3 bytes at `o`) for v2 and writes its surface weights. `roadD` / `farm` are the sample's
  * road distance and farmland noise.
  */
-export function shadeV2(b: BiomeSample, seed: number, wx: number, wz: number, waterSurface: number, roadD: number, farm: number, out: Uint8Array, o: number, surface: Uint8Array, so: number): void {
+export function shadeV2(b: BiomeSample, seed: number, wx: number, wz: number, waterSurface: number, roadD: number, farm: number, lod: number, out: Uint8Array, o: number, surface: Uint8Array, so: number): void {
+  const rows = ROW_CONTRAST[lod] ?? 0;
   const c = RGB;
   c[0] = out[o]!;
   c[1] = out[o + 1]!;
@@ -69,9 +74,11 @@ export function shadeV2(b: BiomeSample, seed: number, wx: number, wz: number, wa
       parcelAt(seed, SALT_FIELDS, FIELD_CELL, wx, wz, P);
       let crop = CROP_COLOURS[cropOf(P.id)]!;
       const ang = PI * u01(rehash(P.id, 9));
-      const furrow = Math.floor((wx * dcos(ang) + wz * dsin(ang)) / 5) % 2 === 0 ? 0.92 : 1.06;
-      const t = smoothstep(0.45, 0.6, fw) * smoothstep(0.5, 2.5, P.edge);
-      blend(c, [crop[0]! * furrow, crop[1]! * furrow, crop[2]! * furrow], t);
+      const furrow = 1 + rows * (Math.floor((wx * dcos(ang) + wz * dsin(ang)) / 5) % 2 === 0 ? -0.08 : 0.06);
+      // the seam between two fields is a light grass verge (exposing the ground below drew dark straight lines)
+      const verge = (1 - smoothstep(0.3, 1.4, P.edge)) * 0.55;
+      const fc = [mix(crop[0]! * furrow, VERGE[0]!, verge), mix(crop[1]! * furrow, VERGE[1]!, verge), mix(crop[2]! * furrow, VERGE[2]!, verge)];
+      blend(c, fc, smoothstep(0.45, 0.6, fw));
       if (onTrack(P) && fw > 0.5) {
         crop = TRACK_COLOUR;
         blend(c, crop, 0.9);
@@ -81,9 +88,10 @@ export function shadeV2(b: BiomeSample, seed: number, wx: number, wz: number, wa
     if (b.village > 0) {
       parcelAt(seed, SALT_GARDENS, GARDEN_CELL, wx, wz, P);
       const kind = Math.floor(u01(rehash(P.id, 4)) * GARDEN_COLOURS.length);
-      let g = GARDEN_COLOURS[kind]!;
-      if (kind === 1 && Math.floor((wx + wz) / 1.5) % 2 === 0) g = [0x5e, 0x7a, 0x3e];
-      blend(c, g, smoothstep(0.3, 0.8, b.village) * smoothstep(0.3, 1.5, P.edge) * 0.85);
+      let g: readonly number[] = GARDEN_COLOURS[kind]!;
+      if (kind === 1 && rows === 1 && Math.floor((wx + wz) / 1.5) % 2 === 0) g = [0x5e, 0x7a, 0x3e];
+      const verge = (1 - smoothstep(0.2, 1.0, P.edge)) * 0.5;
+      blend(c, [mix(g[0]!, VERGE[0]!, verge), mix(g[1]!, VERGE[1]!, verge), mix(g[2]!, VERGE[2]!, verge)], smoothstep(0.3, 0.8, b.village) * 0.85);
     }
   }
   let bank = 0;

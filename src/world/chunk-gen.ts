@@ -353,7 +353,7 @@ export function* buildChunkSteps(w: World, req: ChunkRequest): Generator<void, C
       const hv = hash2(w.spec.seed, Math.floor(wx), Math.floor(wz), SALT.colour);
       const stripe = u01(hash2(w.spec.seed, Math.floor(wx / 24), Math.floor(wz / 48), SALT.farm));
       shade(bs, stripe, u01(hv), colors, v * 3);
-      if (v2) shadeV2(bs, w.spec.seed, wx, wz, water[v]!, roadD[v]!, farm[v]!, colors, v * 3, surface, v * SURFACE_STRIDE);
+      if (v2) shadeV2(bs, w.spec.seed, wx, wz, water[v]!, roadD[v]!, farm[v]!, lod, colors, v * 3, surface, v * SURFACE_STRIDE);
     }
   }
   const border = borderIndices(n);

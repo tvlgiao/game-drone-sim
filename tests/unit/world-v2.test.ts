@@ -8,7 +8,10 @@ import { describe, expect, it } from 'vitest';
 import { CAR_SIZE, CAR_STRIDE, cityFurniture } from '../../src/levels/city-furniture';
 import { FIELD_CELL, SALT_FIELDS, fieldWeight, onTrack, parcel, parcelAt } from '../../src/world/fields';
 import { buildChunk, chunkDigest, CHUNK_SIZE, LOD_QUADS } from '../../src/world/chunk-gen';
-import { SURFACE_BANK, SURFACE_ROCK, SURFACE_STRIDE } from '../../src/world/chunk-gen-v2';
+import { shadeV2, SURFACE_BANK, SURFACE_ROCK, SURFACE_STRIDE } from '../../src/world/chunk-gen-v2';
+import { BIOME, biomeSample } from '../../src/world/terrain-field';
+import { dcos, dsin, PI } from '../../src/world/math';
+import { rehash, u01 } from '../../src/world/rng';
 import { CITY_HALF, CITY_PITCH, CITY_RING_CLEARANCE, CITY_STREET, generateCity, streetLine } from '../../src/world/city-gen';
 import { ROAD_HALF_WIDTH } from '../../src/world/roads';
 import { distanceToShape } from '../../src/world/routes';
@@ -305,6 +308,71 @@ describe('v2 chunk surfaces', () => {
     }
     expect(steep).toBeGreaterThan(10);
     expect(steepRock / steep).toBeGreaterThan(0.9);
+  });
+});
+
+describe('field colours', () => {
+  const SEED = 21;
+  const shadeAt = (x: number, z: number, lod: number, base: [number, number, number]): number[] => {
+    const b = biomeSample();
+    b.biome = BIOME.meadow;
+    b.height = 30;
+    const out = Uint8Array.from(base);
+    shadeV2(b, SEED, x, z, -Infinity, 500, 0.5, lod, out, 0, new Uint8Array(SURFACE_STRIDE), 0);
+    return [out[0]!, out[1]!, out[2]!];
+  };
+  const lum = (c: number[]): number => 0.2126 * c[0]! + 0.7152 * c[1]! + 0.0722 * c[2]!;
+
+  it('the seam between two fields is never darker than the fields (it drew dark straight lines over dark ground)', () => {
+    const p = parcel();
+    let seams = 0;
+    for (let k = 0; k < 40; k++) {
+      // walk from one cell's feature point towards a far point until the parcel changes: that is a seam
+      parcelAt(SEED, SALT_FIELDS, FIELD_CELL, 300 + k * 57, 200 + k * 31, p);
+      const ax = p.px;
+      const az = p.pz;
+      const id = p.id;
+      let sx = ax;
+      let sz = az;
+      for (let t = 0; t < 140; t += 0.25) {
+        sx = ax + t * 0.8;
+        sz = az + t * 0.6;
+        parcelAt(SEED, SALT_FIELDS, FIELD_CELL, sx, sz, p);
+        if (p.id !== id) break;
+      }
+      const other = { x: p.px, z: p.pz };
+      const dark: [number, number, number] = [0x20, 0x30, 0x18];
+      const seam = lum(shadeAt(sx, sz, 2, dark));
+      const inside = Math.min(lum(shadeAt(ax, az, 2, dark)), lum(shadeAt(other.x, other.z, 2, dark)));
+      expect(seam).toBeGreaterThanOrEqual(inside * 0.8);
+      seams++;
+    }
+    expect(seams).toBe(40);
+  });
+
+  it('crop rows fade out with LOD: full at LOD0, half at LOD1, none at LOD2', () => {
+    const p = parcel();
+    const contrast = [0, 0, 0];
+    for (let k = 0; k < 20; k++) {
+      parcelAt(SEED, SALT_FIELDS, FIELD_CELL, 500 + k * 71, -300 + k * 43, p);
+      const ang = PI * u01(rehash(p.id, 9));
+      const dx = dcos(ang);
+      const dz = dsin(ang);
+      // two points in neighbouring 5 m furrow bands near the cell centre
+      const s = p.px * dx + p.pz * dz;
+      const s0 = Math.floor(s / 5) * 5 + 2.5;
+      const ax = p.px + (s0 - s) * dx;
+      const az = p.pz + (s0 - s) * dz;
+      for (const lod of [0, 1, 2]) {
+        const a = shadeAt(ax, az, lod, [0x50, 0x70, 0x30]);
+        const b = shadeAt(ax + 5 * dx, az + 5 * dz, lod, [0x50, 0x70, 0x30]);
+        contrast[lod] = Math.max(contrast[lod]!, Math.abs(lum(a) - lum(b)));
+      }
+    }
+    expect(contrast[0]!).toBeGreaterThan(6);
+    expect(contrast[1]!).toBeLessThan(contrast[0]! * 0.7);
+    expect(contrast[1]!).toBeGreaterThan(2);
+    expect(contrast[2]!).toBeLessThan(2.5);
   });
 });
 
