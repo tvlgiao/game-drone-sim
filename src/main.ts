@@ -20,6 +20,7 @@ import { encodeSeed } from './world/seed-code';
 import { prewarmWorldWorkers } from './world/worker/chunk-builder';
 import { GEN_VERSION } from './world/world';
 import { afterPaint, whenIdle, yieldToMain } from './core/yield';
+import { browserVersionProbe, reloadForNewVersion } from './core/stale-chunk';
 import type { LevelMode } from './ui/level-select';
 import { InputManager, KEY_STICKS } from './input/input-manager';
 import { TutorialMachine, loadTutorialRecord, shouldOfferTutorial, type TutorialCtx, type TutorialEvent } from './game/tutorial';
@@ -554,6 +555,9 @@ function boot(caps: EditionCaps): void {
       if (!swapped) next?.dispose?.();
       // superseded by a newer load, or cancelled with Back before the swap: that one owns the screen and the
       // shared state now (Back already reported the cancel); a broken swap still needs the reload below
+      if (seq !== levelSeq || (!swapped && cancelToken !== loadCancel)) return false;
+      // a chunk this (old) page asks for may be gone after a deploy: onto the new build, once
+      if (!swapped && (await reloadForNewVersion(err, browserVersionProbe(), sessionStore(), () => location.reload()))) return false;
       if (seq !== levelSeq || (!swapped && cancelToken !== loadCancel)) return false;
       loadingLevel = null;
       audio.setLoading(false);
@@ -1600,6 +1604,15 @@ function prefetchBootSurfaces(level: LevelId): Promise<void> {
   }
 }
 
+/** sessionStorage, or null where the browser blocks it */
+function sessionStore(): Storage | null {
+  try {
+    return window.sessionStorage;
+  } catch {
+    return null;
+  }
+}
+
 /** Boot splash progress (index.html's bar): bundle, then level and assets, then the menu's first frame. */
 function bootProgress(f: number, text?: string): void {
   (window as { __bootProgress?: (f: number, text?: string) => void }).__bootProgress?.(f, text);
@@ -1646,6 +1659,12 @@ async function start(): Promise<void> {
   await afterPaint();
   safeBoot(caps);
 }
+
+// any other lazy chunk Vite fails to preload after a deploy: onto the new build, once
+window.addEventListener('vite:preloadError', (e) => {
+  const ev = e as Event & { payload?: unknown };
+  void reloadForNewVersion(ev.payload, browserVersionProbe(), sessionStore(), () => location.reload());
+});
 
 // a failed lazy import (offline, no cache), ownership check or boot shows the error screen
 void start().catch((err: unknown) => {

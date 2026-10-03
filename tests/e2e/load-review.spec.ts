@@ -88,6 +88,37 @@ test.describe('network-controlled loads', () => {
   });
 });
 
+test.describe('stale chunks', () => {
+  test.use({ serviceWorkers: 'block' });
+
+  test('C4: a chunk deleted by a deploy reloads the page once onto the new build, then shows the error', async ({ page }) => {
+    // the old build's world chunk is gone; the server's page now names a newer entry script
+    await page.route(WORLD_CHUNK, (r) => r.fulfill({ status: 404, body: 'gone' }));
+    await page.route(/\/play\/\?.*version-check=/, async (r) => {
+      const res = await r.fetch();
+      const html = (await res.text()).replace(/main-[\w-]+\.js/, 'main-NEWBUILD.js');
+      await r.fulfill({ response: res, body: html });
+    });
+    let loads = 0;
+    page.on('load', () => loads++);
+    await boot(page);
+    // the first failing fetch of it (the idle prefetch, or picking City) reloads the page onto the new build
+    await page.waitForTimeout(4000);
+    if (loads === 1) {
+      await hook(page, (d) => d.showScreen('levels'));
+      await page.locator('[data-act="level-freefly:city"]').click();
+    }
+    await expect.poll(() => loads, { timeout: 20_000 }).toBe(2);
+    await page.waitForFunction(() => !!(window as unknown as Partial<W>).__drone, null, { timeout: 60_000 });
+    // still broken after the reload: the error with Retry, no second reload
+    await hook(page, (d) => d.showScreen('levels'));
+    await page.locator('[data-act="level-freefly:city"]').click();
+    await expect(page.locator('[data-act="load-retry"]')).toBeVisible({ timeout: 20_000 });
+    await page.waitForTimeout(1500);
+    expect(loads).toBe(2);
+  });
+});
+
 test('A3: a load that breaks after the old scenery is gone says so (reload), never offers Retry on a broken scene', async ({ page }) => {
   await boot(page);
   await hook(page, (d) => {
