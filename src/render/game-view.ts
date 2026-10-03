@@ -583,7 +583,7 @@ export class GameView {
     this.scaleHemiLights(this.scene.environment !== null && this.envCapture !== null ? look.hemiWithIbl : 1);
     if (p.post) {
       if (!this.post) this.post = new PostFX(r, this.scene, this.rig.camera);
-      this.post.setBloomThreshold(this.levelView.bloomThreshold);
+      this.post.setBloomThreshold(Math.max(this.levelView.bloomThreshold, look.bloom.threshold));
       this.post.setSunDirection(this.sunDir);
       this.post.configure(p, look);
       this.post.setSize(this.width, this.height);

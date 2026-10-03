@@ -30,7 +30,7 @@ export interface SkyLook {
 export const DEFAULT_SKY_LOOK: Readonly<SkyLook> = {
   turbidity: 3.2,
   rayleigh: 1.0,
-  mieCoefficient: 0.004,
+  mieCoefficient: 0.0022,
   mieDirectionalG: 0.82,
   cloudCoverage: 0.3,
   cloudDensity: 0.55,

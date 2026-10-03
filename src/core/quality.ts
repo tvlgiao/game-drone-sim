@@ -55,7 +55,7 @@ export const QUALITY_PROFILES: Record<QualityTier, QualityProfile> = {
     glass: 'transmission', pbrTextures: true, textureSize: 1024, envSize: 256,
   },
   medium: {
-    tier: 'medium', shadows: true, shadowMapSize: 1024, post: true, bloom: true, smaa: false,
+    tier: 'medium', shadows: true, shadowMapSize: 1024, post: true, bloom: true, smaa: true,
     maxDpr: 1, particles: 500, envMap: true, pointLights: 4, shadowSpots: 0, shafts: true,
     sunCascades: false, ao: 'off', aerial: true, grain: false, menuDof: true, motionBlur: false,
     glass: 'reflective', pbrTextures: true, textureSize: 512, envSize: 128,

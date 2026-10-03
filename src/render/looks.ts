@@ -14,6 +14,7 @@ export interface LevelLook {
   /** renderer.toneMappingExposure: scene-referred linear light × exposure before the tone curve */
   exposure: number;
   grade: Readonly<Grade>;
+  /** threshold is a floor: the level view's own bloomThreshold wins when higher */
   bloom: { threshold: number; smoothing: number; intensity: number; radius: number };
   /** N8AO world-space radius (m) and strength */
   ao: { radius: number; intensity: number; falloff: number };
@@ -31,14 +32,14 @@ export interface LevelLook {
 
 /** Night Loft: warm practicals against cool moonlight, deep but not crushed blacks, teal-orange split. */
 const NIGHT: LevelLook = {
-  toneMapping: 'agx',
-  exposure: 1.35,
+  toneMapping: 'aces',
+  exposure: 1.2,
   grade: {
     lift: [0.012, 0.016, 0.03],
     gamma: [1.02, 1.0, 0.98],
     gain: [1.04, 1.0, 0.95],
-    contrast: 1.16,
-    saturation: 1.22,
+    contrast: 1.04,
+    saturation: 1.0,
     shadowTint: [-0.006, 0.004, 0.02],
     highlightTint: [0.02, 0.008, -0.012],
   },
@@ -63,7 +64,8 @@ const DAY: LevelLook = {
     shadowTint: [-0.004, 0.0, 0.012],
     highlightTint: [0.012, 0.006, -0.006],
   },
-  bloom: { threshold: 1.6, smoothing: 0.4, intensity: 0.6, radius: 0.7 },
+  // above the sun's Mie halo (~3 in scene units): only the disc, rings and sparks bloom, never a disk of sky
+  bloom: { threshold: 4, smoothing: 1.5, intensity: 0.6, radius: 0.7 },
   ao: { radius: 2.0, intensity: 2.0, falloff: 1.0 },
   vignette: { offset: 0.38, darkness: 0.38 },
   grain: 0.035,

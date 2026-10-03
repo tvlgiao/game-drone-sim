@@ -94,7 +94,8 @@ export class PostFX {
     this.profile = p;
     this.look = look;
     const effects: Effect[] = [];
-    if (p.smaa) effects.push(new SMAAEffect({ preset: p.tier === 'ultra' ? SMAAPreset.HIGH : SMAAPreset.MEDIUM }));
+    // medium (phones' default) gets the cheap preset: at DPR ≤ 1.5 un-antialiased edges crawl badly
+    if (p.smaa) effects.push(new SMAAEffect({ preset: p.tier === 'ultra' ? SMAAPreset.HIGH : p.tier === 'high' ? SMAAPreset.MEDIUM : SMAAPreset.LOW }));
     if (p.aerial && look.aerial) {
       this.aerial = new AerialPerspectiveEffect(this.camera);
       this.aerial.configure(look.aerial, this.sunDir);
