@@ -81,3 +81,34 @@ for (const level of ['night-loft', 'training']) {
     });
   }
 }
+
+type FlightHook = Hook & { analog: number; action: (a: { type: string }) => void; press: (b: string) => void; camera: string; screen: string };
+
+test('analog FPV feed: drawn in FPV on a post tier, never in LOS or on Low, off when the setting is off', async ({ browser }) => {
+  const run = async (quality: string, analogVideo: boolean) => {
+    const ctx = await browser.newContext({ viewport: { width: 1280, height: 720 } });
+    await skipTutorialOffer(ctx);
+    await ctx.addInitScript(([q, a]) => localStorage.setItem('drone-sim.settings', JSON.stringify({ quality: q, analogVideo: a, analogStrength: 0.5 })), [quality, analogVideo] as const);
+    const page = await ctx.newPage();
+    await page.goto('/play/');
+    await page.waitForFunction(() => !!(window as unknown as { __drone?: Hook }).__drone, null, { timeout: 30_000 });
+    await page.evaluate(() => (window as unknown as { __drone: FlightHook }).__drone.action({ type: 'freefly' }));
+    await page.waitForFunction(() => (window as unknown as { __drone: FlightHook }).__drone.screen === 'none', null, { timeout: 10_000 });
+    const levels: Record<string, number> = {};
+    for (let i = 0; i < 3; i++) {
+      const cam = await page.evaluate(() => (window as unknown as { __drone: FlightHook }).__drone.camera);
+      await page.waitForTimeout(900);
+      levels[cam] = await page.evaluate(() => (window as unknown as { __drone: FlightHook }).__drone.analog);
+      await page.evaluate(() => (window as unknown as { __drone: FlightHook }).__drone.press('cycleCamera'));
+    }
+    await ctx.close();
+    return levels;
+  };
+  const on = await run('high', true);
+  expect(on.fpv).toBeGreaterThan(0.4);
+  expect(on.los).toBe(0);
+  const low = await run('low', true);
+  expect(Object.values(low).every((v) => v === 0)).toBe(true);
+  const off = await run('high', false);
+  expect(off.fpv).toBe(0);
+});

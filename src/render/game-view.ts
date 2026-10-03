@@ -14,7 +14,7 @@ import { OutdoorLevelView } from './outdoor/outdoor-level-view';
 import { PostFX } from './post';
 import { RingsView } from './rings-view';
 import { ContactShadow } from './vfx/contact-shadow';
-import { VfxDirector } from './vfx/director';
+import { VfxDirector, type WaterProbe } from './vfx/director';
 import { XrPanel } from './xr-panel';
 import { HeadingArrow } from './heading-arrow';
 import { captureEnvironment, captureLightProbe } from './ibl';
@@ -98,6 +98,8 @@ export class GameView {
   private height = 1;
   private pendingRespawn = false;
   private bloomPulse = 0;
+  /** player's analog FPV feed strength (0 = off); applied × the FPV camera weight on tiers with post */
+  private analogStrength = 0;
   private ringFlash = 0;
   private readonly ledColor = new THREE.Color();
 
@@ -183,6 +185,7 @@ export class GameView {
    */
   loadLevel(level: LevelRuntime): void {
     this.cascades.detach();
+    this.vfx.setWaterProbe(null);
     this.dropCapture();
     this.levelView.dispose();
     this.rings.group.removeFromParent();
@@ -291,6 +294,7 @@ export class GameView {
       this.post.setAberration(f.still ? 0 : fast);
       this.post.setMotionBlur(f.still ? 0 : 0.5 * fast * fast);
       this.post.setStill(f.still ? f.drone.position : null);
+      this.post.setAnalog(f.still ? 0 : this.analogStrength * this.rig.fpvWeight);
       this.bloomPulse = Math.max(0, this.bloomPulse - dt * 2.5);
       this.post.setBloomBoost(1 + this.bloomPulse * 0.8);
       this.post.render(dt);
@@ -415,6 +419,27 @@ export class GameView {
     this.ringFlash = 1;
     this.bloomPulse = 1;
     this.vfx.ringPass(def, this.rings.ringColor(index), pos);
+  }
+
+  /**
+   * Analog FPV feed look, 0..1 (0 = off). Shown in FPV only, faded in with the camera blend; tiers without
+   * post (low, VR) never draw it.
+   */
+  setAnalogVideo(strength: number): void {
+    this.analogStrength = THREE.MathUtils.clamp(strength, 0, 1);
+  }
+
+  /** Analog feed level of the last frame (0 when off, outside FPV or without post), for tests. */
+  get analogLevel(): number {
+    return this.post?.analogLevel ?? 0;
+  }
+
+  /**
+   * Water under the course (outdoor levels with lakes / rivers): prop wash over water throws spray instead
+   * of dust. Null removes it; a level switch keeps whatever the new level installs.
+   */
+  setWaterProbe(probe: WaterProbe | null): void {
+    this.vfx.setWaterProbe(probe);
   }
 
   setQuality(tier: QualityTier): void {

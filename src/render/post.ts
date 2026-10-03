@@ -2,7 +2,7 @@
  * Post FX via pmndrs/postprocessing, in linear HDR until the tone curve:
  *
  *   RenderPass → N8AO (high+) → DoF (still menu frames) → motion blur (FPV at speed)
- *   → main EffectPass [SMAA, aerial haze, bloom, tone mapping, grade, vignette, grain] + dithering
+ *   → main EffectPass [SMAA, aerial haze, bloom, tone mapping, grade, analog FPV feed, vignette, grain] + dithering
  *   → chromatic aberration (FPV at speed)
  *
  * Convolution effects (SMAA, DoF, motion blur, CA) cannot share a pass, so the optional ones live in
@@ -32,6 +32,7 @@ import type { QualityProfile } from '../core/quality';
 import { AerialPerspectiveEffect } from './effects/aerial';
 import { ExposureEffect, GradeEffect } from './effects/grade';
 import { MotionBlurEffect } from './effects/motion-blur';
+import { createAnalogVideoEffect, type AnalogVideoEffect } from './vfx/analog-video';
 import type { LevelLook, ToneMapper } from './looks';
 
 const TONE_MODES: Record<ToneMapper, ToneMappingMode> = {
@@ -64,6 +65,8 @@ export class PostFX {
   private grade: GradeEffect | null = null;
   private tone: ToneMappingEffect | null = null;
   private exposure: ExposureEffect | null = null;
+  private analog: AnalogVideoEffect | null = null;
+  private analogIntensity = 0;
   private effects: Effect[] = [];
   private caOn = false;
   private bloomThreshold = 0.85;
@@ -116,7 +119,9 @@ export class PostFX {
     this.exposure = new ExposureEffect(look.exposure);
     this.tone = new ToneMappingEffect({ mode: TONE_MODES[look.toneMapping] });
     this.grade = new GradeEffect(look.grade);
-    effects.push(this.exposure, this.tone, this.grade, new VignetteEffect({ offset: look.vignette.offset, darkness: look.vignette.darkness }));
+    // the analog feed works on display-referred colour: after the tone curve and grade, before the lens vignette
+    this.analog = createAnalogVideoEffect(this.analogIntensity);
+    effects.push(this.exposure, this.tone, this.grade, this.analog, new VignetteEffect({ offset: look.vignette.offset, darkness: look.vignette.darkness }));
     if (p.grain && look.grain > 0) {
       const grain = new NoiseEffect({ blendFunction: BlendFunction.OVERLAY, premultiply: false });
       grain.blendMode.opacity.value = look.grain;
@@ -260,6 +265,20 @@ export class PostFX {
     return focus !== null;
   }
 
+  /**
+   * Analog FPV video look (scanlines, per-frame noise, rolling sync bar, softer chroma), 0 = off. It lives
+   * in the main pass, so it costs a few ALU ops per pixel and no extra pass; GameView drives it with the
+   * FPV camera weight × the player's setting.
+   */
+  setAnalog(intensity: number): void {
+    this.analogIntensity = THREE.MathUtils.clamp(intensity, 0, 1);
+    if (this.analog) this.analog.intensity = this.analogIntensity;
+  }
+
+  get analogLevel(): number {
+    return this.analogIntensity;
+  }
+
   /** Scene exposure on top of the look's (e.g. a respawn flash); 1 = the look as authored. */
   setExposureScale(k: number): void {
     if (this.exposure && this.look) this.exposure.exposure = this.look.exposure * k;
@@ -315,6 +334,7 @@ export class PostFX {
     this.grade = null;
     this.tone = null;
     this.exposure = null;
+    this.analog = null;
   }
 
   dispose(): void {

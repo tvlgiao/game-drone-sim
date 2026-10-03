@@ -50,6 +50,8 @@ describe('settings', () => {
       volume: 0.7,
       showFps: false,
       headingArrow: true,
+      analogVideo: true,
+      analogStrength: 0.35,
       deadzone: 0.05,
       touchThrottleCentre: true,
       touchSticksFixed: false,
@@ -133,6 +135,8 @@ describe('settings', () => {
       volume: 0,
       showFps: false,
       headingArrow: true,
+      analogVideo: true,
+      analogStrength: 0.35,
       deadzone: 0.05,
       touchThrottleCentre: true,
       touchSticksFixed: true,
@@ -169,6 +173,21 @@ describe('settings', () => {
     expect(loadSettings(st)).toEqual(custom);
     const old = loadSettings(mem({ [SETTINGS_KEY]: JSON.stringify({ v: 3, fovDeg: 120 }) }));
     expect(old).toMatchObject({ fovDeg: 120, mouseSensitivity: 1, mouseInvertY: false, mouseXAxis: 'roll', mouseStick: 'auto', mouseExpo: 0.2, mouseDeadzone: 0.03 });
+  });
+
+  it('analog FPV feed: on by default at a subtle strength, round-trips, clamps, and old saves get the default', () => {
+    expect(DEFAULT_SETTINGS.analogVideo).toBe(true);
+    expect(DEFAULT_SETTINGS.analogStrength).toBeGreaterThan(0.2);
+    expect(DEFAULT_SETTINGS.analogStrength).toBeLessThan(0.5);
+    const st = mem();
+    const custom = { ...DEFAULT_SETTINGS, analogVideo: false, analogStrength: 0.8 };
+    saveSettings(custom, st);
+    expect(loadSettings(st)).toEqual(custom);
+    expect(validateSettings({ analogStrength: 5 }).analogStrength).toBe(1);
+    expect(validateSettings({ analogStrength: 0 }).analogStrength).toBe(0.1);
+    expect(validateSettings({ analogVideo: 'yes' }).analogVideo).toBe(true);
+    const old = loadSettings(mem({ [SETTINGS_KEY]: JSON.stringify({ v: 3, fovDeg: 120 }) }));
+    expect(old).toMatchObject({ analogVideo: true, analogStrength: DEFAULT_SETTINGS.analogStrength });
   });
 
   it('migrates old throttleSource values and keeps other old fields', () => {

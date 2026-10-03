@@ -98,7 +98,7 @@ type Row =
   | (RowBase & { kind: 'range'; range: { min: number; max: number; step: number }; fmt: (v: number) => string; get: (s: Settings) => number; set: (s: Settings, v: number) => void })
   | (RowBase & { kind: 'bool'; on?: string; off?: string; get: (s: Settings) => boolean; set: (s: Settings, v: boolean) => void });
 
-type NumKey = 'cameraTiltDeg' | 'fovDeg' | 'volume' | 'deadzone' | 'throttleExpo' | 'throttleLimit' | 'angleMaxTiltDeg' | 'mouseSensitivity' | 'mouseExpo' | 'mouseDeadzone';
+type NumKey = 'cameraTiltDeg' | 'fovDeg' | 'analogStrength' | 'volume' | 'deadzone' | 'throttleExpo' | 'throttleLimit' | 'angleMaxTiltDeg' | 'mouseSensitivity' | 'mouseExpo' | 'mouseDeadzone';
 const rangeRow = (id: NumKey, label: string, hint: string, fmt: (v: number) => string): Row => ({
   id,
   label,
@@ -256,6 +256,17 @@ const ROW_DEFS: Row[] = [
   rangeRow('cameraTiltDeg', 'Camera tilt', 'FPV camera uptilt', (v) => `${Math.round(v)}°`),
   rangeRow('fovDeg', 'Field of view', FOV_HINT, (v) => `${Math.round(v)}°`),
   {
+    id: 'analogVideo',
+    label: 'Analog FPV feed',
+    hint: 'Scanlines and video noise in FPV, like an analog goggle feed (not on Low or in VR)',
+    kind: 'bool',
+    get: (s) => s.analogVideo,
+    set: (s, v) => {
+      s.analogVideo = v;
+    },
+  },
+  rangeRow('analogStrength', 'Analog strength', 'How strong the analog feed look is', pct),
+  {
     id: 'quality',
     label: 'Graphics',
     hint: 'Auto picks a tier from your GPU',
@@ -355,7 +366,7 @@ const TOUCH_ROWS: ReadonlySet<string> = new Set(['touchThrottleCentre', 'touchSt
 /** Rows hidden on touch devices (pointer-lock mouse flight is a desktop feature). */
 const MOUSE_ROWS: ReadonlySet<string> = new Set(['mouseStick', 'mouseSensitivity', 'mouseInvertY', 'mouseXAxis', 'mouseExpo', 'mouseDeadzone']);
 const ROWS = new Map(ROW_DEFS.map((r) => [r.id, r]));
-const SETTINGS_ROWS = ['stickMode', 'touchThrottleCentre', 'touchSticksFixed', 'throttleSource', 'flightMode', 'ratePreset', 'cameraTiltDeg', 'fovDeg', 'quality', 'volume', 'showFps', 'headingArrow', 'deadzone', ...MOUSE_ROWS];
+const SETTINGS_ROWS = ['stickMode', 'touchThrottleCentre', 'touchSticksFixed', 'throttleSource', 'flightMode', 'ratePreset', 'cameraTiltDeg', 'fovDeg', 'analogVideo', 'analogStrength', 'quality', 'volume', 'showFps', 'headingArrow', 'deadzone', ...MOUSE_ROWS];
 const CONTROLLER_ROWS = ['stickMode', 'throttleSource', 'squareGate', 'invert.throttle', 'invert.yaw', 'invert.pitch', 'invert.roll'];
 const CHANNELS: readonly Channel[] = ['throttle', 'yaw', 'pitch', 'roll'];
 const SLOT_NAME: Record<StickSlot, string> = { lx: 'LX', ly: 'LY', rx: 'RX', ry: 'RY' };

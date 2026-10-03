@@ -59,6 +59,10 @@ export interface Settings {
   showFps: boolean;
   /** arrow on the floor under the quad pointing where its nose faces (LOS / chase orientation aid) */
   headingArrow: boolean;
+  /** analog FPV video look in FPV (scanlines, noise, sync roll); tiers without post never show it */
+  analogVideo: boolean;
+  /** strength of the analog look, 0.1..1 */
+  analogStrength: number;
   deadzone: number;
   /** touch sticks: throttle springs back to centre (hover) instead of holding like a real gimbal */
   touchThrottleCentre: boolean;
@@ -103,6 +107,8 @@ export const DEFAULT_SETTINGS: Readonly<Settings> = Object.freeze({
   volume: 0.7,
   showFps: false,
   headingArrow: true,
+  analogVideo: true,
+  analogStrength: 0.35,
   deadzone: 0.05,
   touchThrottleCentre: true,
   touchSticksFixed: false,
@@ -132,6 +138,7 @@ export const SETTINGS_OPTIONS = {
   cameraTiltDeg: { min: 0, max: 45, step: 5 },
   fovDeg: { min: 80, max: 130, step: 5 },
   volume: { min: 0, max: 1, step: 0.1 },
+  analogStrength: { min: 0.1, max: 1, step: 0.05 },
   deadzone: { min: 0, max: 0.25, step: 0.01 },
   mouseSensitivity: { min: 0.5, max: 3, step: 0.1 },
   mouseXAxis: ['roll', 'yaw'] as const,
@@ -289,6 +296,8 @@ export function validateSettings(raw: unknown): Settings {
     volume: num(r.volume, o.volume, d.volume),
     showFps: bool(r.showFps, d.showFps),
     headingArrow: bool(r.headingArrow, d.headingArrow),
+    analogVideo: bool(r.analogVideo, d.analogVideo),
+    analogStrength: num(r.analogStrength, o.analogStrength, d.analogStrength),
     deadzone: num(r.deadzone, o.deadzone, d.deadzone),
     touchThrottleCentre: bool(r.touchThrottleCentre, d.touchThrottleCentre),
     touchSticksFixed: bool(r.touchSticksFixed, d.touchSticksFixed),

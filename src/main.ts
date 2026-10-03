@@ -191,6 +191,7 @@ function boot(caps: EditionCaps): void {
       view.setQuality(tier);
     }
     if (s.quality !== 'auto') view.setRenderScale(1);
+    view.setAnalogVideo(s.analogVideo ? s.analogStrength : 0);
   }
   applySettings(settings);
   hud.setSettings(settings);
@@ -966,6 +967,10 @@ function boot(caps: EditionCaps): void {
       };
     },
     stats: () => view.stats(),
+    /** analog FPV feed level drawn last frame (0 outside FPV, without post or with the setting off) */
+    get analog() {
+      return view.analogLevel;
+    },
     /** loaded level id */
     get level() {
       return level.def.id;
