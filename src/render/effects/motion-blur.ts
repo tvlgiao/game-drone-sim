@@ -7,10 +7,10 @@
 import * as THREE from 'three';
 import { BlendFunction, Effect, EffectAttribute } from 'postprocessing';
 
-const SAMPLES = 8;
+const SAMPLES = 10;
 const SHUTTER = 1 / 60;
 /** longest streak as a fraction of the screen: keeps whip pans readable */
-const MAX_BLUR = 0.035;
+const MAX_BLUR = 0.02;
 
 const FRAG = /* glsl */ `
 uniform mat4 blurProjInv;
@@ -32,8 +32,10 @@ void mainImage(const in vec4 inputColor, const in vec2 uv, const in float depth,
   }
   vel *= min(1.0, ${MAX_BLUR.toFixed(4)} / len);
   vec3 acc = vec3(0.0);
+  // per-pixel jitter (interleaved gradient noise) turns the discrete ghost copies into fine grain
+  float jitter = fract(52.9829189 * fract(dot(gl_FragCoord.xy, vec2(0.06711056, 0.00583715)))) - 0.5;
   for (int i = 0; i < ${SAMPLES}; i++) {
-    float t = float(i) / float(${SAMPLES - 1}) - 0.5;
+    float t = (float(i) + jitter) / float(${SAMPLES}) - 0.5 + 0.5 / float(${SAMPLES});
     acc += texture2D(inputBuffer, clamp(uv + vel * t, 0.0, 1.0)).rgb;
   }
   outputColor = vec4(acc / float(${SAMPLES}), inputColor.a);

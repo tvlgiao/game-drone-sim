@@ -127,7 +127,7 @@ export class PostFX {
     this.mainPass.dithering = true;
 
     if (p.menuDof) {
-      this.dof = new DepthOfFieldEffect(this.camera, { focusDistance: 3, focusRange: 1.6, bokehScale: 2.2, resolutionScale: 0.5 });
+      this.dof = new DepthOfFieldEffect(this.camera, { focusDistance: 3, focusRange: 1.6, bokehScale: 3, resolutionScale: 0.5 });
       this.dofPass = new EffectPass(this.camera, this.dof);
       this.dofPass.enabled = false;
       this.composer.addPass(this.dofPass);

@@ -306,7 +306,7 @@ export class GameView {
     } else if (this.post) {
       const fast = this.rig.fpvWeight * THREE.MathUtils.clamp((f.speed - 5) / 14, 0, 1);
       this.post.setAberration(f.still ? 0 : fast);
-      this.post.setMotionBlur(f.still ? 0 : fast * fast);
+      this.post.setMotionBlur(f.still ? 0 : 0.5 * fast * fast);
       this.post.setStill(f.still ? f.drone.position : null);
       this.bloomPulse = Math.max(0, this.bloomPulse - dt * 2.5);
       this.post.setBloomBoost(1 + this.bloomPulse * 0.8);
