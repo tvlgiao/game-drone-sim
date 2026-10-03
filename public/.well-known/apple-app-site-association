@@ -1,0 +1,13 @@
+{
+  "applinks": {
+    "apps": [],
+    "details": [
+      {
+        "appIDs": ["X6R8YNM53Z.com.cowork.dronesim"],
+        "components": [{ "/": "/play/*", "comment": "shared world links: /play/?world=CODE" }],
+        "appID": "X6R8YNM53Z.com.cowork.dronesim",
+        "paths": ["/play/*"]
+      }
+    ]
+  }
+}

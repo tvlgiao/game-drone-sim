@@ -12,6 +12,11 @@ import type { Plugin } from 'vite';
 
 const SKIP = [/\.map$/, /^\.well-known\//, /^sw\.js$/, /^screenshots\//];
 
+/** The built files the worker precaches (source maps, the app-link files, the worker itself and screenshots go). */
+export function precacheFiles(files: readonly string[]): string[] {
+  return files.filter((f) => !SKIP.some((re) => re.test(f))).sort();
+}
+
 function walk(dir: string, root = dir, out: string[] = []): string[] {
   for (const name of readdirSync(dir)) {
     const p = join(dir, name);
@@ -79,7 +84,7 @@ export function offlineServiceWorker(): Plugin {
       outDir = c.build.outDir;
     },
     closeBundle() {
-      const files = walk(outDir).filter((f) => !SKIP.some((re) => re.test(f))).sort();
+      const files = precacheFiles(walk(outDir));
       assertWorkerPrecached(files);
       const h = createHash('sha256');
       for (const f of files) h.update(f).update(readFileSync(join(outDir, f)));
