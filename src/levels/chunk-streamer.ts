@@ -347,11 +347,8 @@ export class ChunkStreamer {
 
   private checkReady(): void {
     if (this.readyDone || this.readyKeys.length === 0) return;
-    for (const k of this.readyKeys) {
-      const c = this.cellMap.get(k);
-      if (!c?.data) return;
-      if (this.grid && !this.registered.has(k)) return;
-    }
+    // syncColliders runs before this: a ready cell's objects are already in the grid
+    for (const k of this.readyKeys) if (!this.cellMap.get(k)?.data) return;
     this.readyDone = true;
     this.readyResolve?.();
     this.readyResolve = null;

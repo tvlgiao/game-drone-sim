@@ -39,22 +39,24 @@ async function frames(v: TerrainView, s: ChunkStreamer, x: number, z: number, ma
 
 describe('TerrainView uploads', () => {
   it('uploads nearest first, `uploads` per frame, except the 3 × 3 under the drone which never waits', async () => {
-    const { b, s, v } = setup({ maxInFlight: 64 }, 1);
+    const { b, s, v } = setup({ maxInFlight: 64, radius: 3 }, 1);
     s.prime(C * 0.5, C * 0.5);
     await flush();
-    expect(b.log.length).toBe(25);
+    expect(b.log.length).toBe(49);
     const order: number[] = [];
     v.update(C * 0.5, C * 0.5);
     // first frame: the whole 3 × 3 (urgent) plus one more
     expect(v.uploadsLastFrame).toBe(10);
     for (const c of v.shown.values()) order.push(c.dist);
-    for (let i = 0; i < 30; i++) {
+    for (let i = 0; i < 50; i++) {
       const before = new Set(v.shown.keys());
       v.update(C * 0.5, C * 0.5);
       expect(v.uploadsLastFrame).toBeLessThanOrEqual(1);
       for (const [k, c] of v.shown) if (!before.has(k)) order.push(c.dist);
     }
-    expect(v.shown.size).toBe(25);
+    expect(v.shown.size).toBe(49);
+    expect(order[10]).toBe(2);
+    expect(order[order.length - 1]).toBe(3);
     for (let i = 10; i < order.length; i++) expect(order[i]!).toBeGreaterThanOrEqual(order[i - 1]! - 1e-9);
   });
 
@@ -190,6 +192,42 @@ describe('ScatterView', () => {
     scatter.rebuild(v.shown);
     expect(scatter.counts().broadleaf0).toBe(9);
     expect(scatter.counts().broadleaf1).toBe(16);
+    // a big detailed budget is still only spent on LOD0 chunks
+    scatter.caps = { treesLod0: 20, treesLod1: 100 };
+    scatter.rebuild(v.shown);
+    expect(scatter.counts().broadleaf0).toBe(9);
+    scatter.dispose();
+  });
+
+  it('trees are taken nearest first whatever order the chunks are listed in', async () => {
+    const { s, o, v } = setup({ radius: 1 });
+    s.prime(C * 0.5, C * 0.5);
+    await frames(v, s, C * 0.5, C * 0.5);
+    const near = [...v.shown.values()].find((c) => c.cx === 0 && c.cz === 0)!;
+    const far = [...v.shown.values()].find((c) => c.cx === 1 && c.cz === 1)!;
+    // the farther chunk first in the map
+    const listed = new Map([
+      [far.key, far],
+      [near.key, near],
+    ]);
+    const scatter = new ScatterView(o, { uTime: { value: 0 } }, { treesLod0: 1, treesLod1: 0 });
+    scatter.rebuild(listed);
+    const a = (scatter.group.children as THREE.Mesh[]).find((m) => m.name === 'broadleaf0')!.geometry.getAttribute('aInst') as THREE.InstancedBufferAttribute;
+    expect(a.getX(0) + scatter.group.position.x).toBeCloseTo(64, 6);
+    scatter.dispose();
+  });
+
+  it('the single detailed tree goes to the chunk under the drone, also after the drone moved', async () => {
+    const { s, o, v } = setup({ radius: 2 });
+    s.prime(C * 0.5, C * 0.5);
+    await frames(v, s, C * 0.5, C * 0.5);
+    await frames(v, s, C * 3.5, C * 0.5);
+    const scatter = new ScatterView(o, { uTime: { value: 0 } }, { treesLod0: 1, treesLod1: 0 });
+    scatter.rebuild(v.shown);
+    const layer = (scatter.group.children as THREE.Mesh[]).find((m) => m.name === 'broadleaf0')!;
+    const a = layer.geometry.getAttribute('aInst') as THREE.InstancedBufferAttribute;
+    // the fake tree stands in the middle of its chunk: chunk (3, 0)
+    expect(a.getX(0) + scatter.group.position.x).toBeCloseTo(3 * C + 64, 6);
     scatter.dispose();
   });
 });

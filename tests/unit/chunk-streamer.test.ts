@@ -93,6 +93,24 @@ describe('ChunkStreamer requests', () => {
     for (let dz = -1; dz <= 1; dz++) for (let dx = -1; dx <= 1; dx++) expect(grid.has(colliderOwner(3 + dx, -2 + dz))).toBe(true);
   });
 
+  it('a build that arrives after the drone came back does not replace a better LOD', async () => {
+    const b = new ManualBuilder();
+    const s = streamer(b, null, { maxInFlight: 25 });
+    s.prime(C * 0.5, C * 0.5);
+    b.complete();
+    await flush();
+    const cell = s.cells.get(cellKey(1, 0))!;
+    expect(cell.data?.lod).toBe(0);
+    // away: (1, 0) wants LOD1 and asks for it; back before it arrives: LOD0 is wanted again
+    s.update(C * -0.5, C * 0.5);
+    expect(cell.loading).toBe(1);
+    s.update(C * 0.5, C * 0.5);
+    expect(cell.want).toBe(0);
+    b.complete();
+    await flush();
+    expect(cell.data?.lod).toBe(0);
+  });
+
   it('LOD changes keep the old data shown until the new LOD arrives', async () => {
     const b = new ManualBuilder();
     const s = streamer(b, null, { maxInFlight: 25 });

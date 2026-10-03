@@ -17,6 +17,8 @@ import { clearanceAt, worldObstacles } from '../../src/world/routes';
 import { decodeSeed } from '../../src/world/seed-code';
 import type { OutdoorLevel } from '../../src/types';
 import { InlineChunkBuilder } from '../../src/world/worker/chunk-builder';
+import { findLookout, seesOver } from '../../src/levels/spots';
+import type { TerrainField } from '../../src/world/terrain-field';
 
 const outdoor = (rt: LevelRuntime): OutdoorLevel => {
   if (rt.def.kind !== 'outdoor') throw new Error('expected an outdoor level');
@@ -130,6 +132,33 @@ describe('Infinite World', () => {
   });
 });
 
+describe('pilot lookout', () => {
+  const flat = (h: (x: number, z: number) => number): TerrainField => ({
+    seed: 0,
+    genVersion: 1,
+    preset: 'city',
+    maxHeight: 100,
+    minHeight: 0,
+    heightAt: h,
+    baseHeightAt: h,
+    waterLevelAt: () => -Infinity,
+    biomeAt: (_x, _z, out) => out,
+  });
+  const none = (): [] => [];
+
+  it('never picks a spot hidden from the spawn behind a ridge, nor a cliff top more than 25 m up', () => {
+    // a 6 m bank 12–30 m south of the spawn hides a plateau rising behind it: the knoll stays where the spawn is in sight
+    const wall = flat((x, z) => (x > -10 && z > 12 ? (z < 30 ? 6 : 4 + (z - 30) * 0.2) : 0));
+    const p = findLookout(wall, none, 0, 0, [0, 300]);
+    expect(p[2]).toBeLessThan(30);
+    expect(seesOver(wall, p[0], p[1], p[2], 0, 1, 0)).toBe(true);
+    // a 40 m mesa south of the spawn: the knoll may not be on it
+    const mesa = flat((_x, z) => (z > 40 ? 40 : z > 30 ? (z - 30) * 0.2 : 0));
+    const q = findLookout(mesa, none, 0, 0, [0, 300]);
+    expect(q[1] - 1.7).toBeLessThanOrEqual(25);
+  });
+});
+
 describe('level events', () => {
   it('delivers to every listener, survives a throwing one, remembers the loaded level and unsubscribes', () => {
     const bus = new LevelEvents();
@@ -170,6 +199,7 @@ describe('outdoor budgets (07 §7)', () => {
     expect(p.stream.radius).toBe(4);
     expect(p.fog).toBeCloseTo(OUTDOOR_PROFILES.ultra.fog * 0.75, 6);
     expect(scaledProfile(OUTDOOR_PROFILES.low, 0.75).stream.radius).toBe(2);
+    expect(scaledProfile(OUTDOOR_PROFILES.low, 0.5).stream.radius).toBe(2);
     expect(scaledProfile(OUTDOOR_PROFILES.high, 1)).toBe(OUTDOOR_PROFILES.high);
   });
 });
