@@ -1476,6 +1476,8 @@ export class Menus {
     const oss: [string, string][] = [
       ['three.js', 'MIT'],
       ['postprocessing', 'Zlib'],
+      ['N8AO', 'CC0'],
+      ['Poly Haven textures', 'CC0'],
       ['Capacitor', 'MIT'],
       ['IWER', 'MIT'],
       ['gl-matrix', 'MIT'],
