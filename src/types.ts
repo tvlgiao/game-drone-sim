@@ -269,6 +269,11 @@ export interface OutdoorLevel extends LevelBase {
   props: PropDef[];
   /** extra colliders that belong to no prop */
   statics: Collider[];
+  /**
+   * Free-roaming levels: re-plant the LOS pilot behind the drone when it flies out of range or stays
+   * hidden behind terrain (outside VR). Fixed-route levels (Training, City) leave it off.
+   */
+  relocatePilot?: boolean;
 }
 
 export type LevelDef = IndoorLevel | OutdoorLevel;

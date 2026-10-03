@@ -1,7 +1,10 @@
 /** FPV / Chase / LOS cameras with smooth mode transitions and shake. No per-frame allocations. */
 import * as THREE from 'three';
-import type { CameraMode, DroneState, LevelDef } from '../types';
+import type { CameraMode, DroneState, LevelDef, OutdoorLevel } from '../types';
 import { FPV_FOV_V_RANGE } from '../core/camera-limits';
+import { heightField, isRuntime, type LevelRuntime } from '../levels/runtime';
+import type { ColliderGrid, GridCollider } from '../physics/collider-grid';
+import { FLAT_GROUND, findDryGround, type HeightField } from '../physics/terrain';
 import { CAMERA_PIVOT, LENS_OFFSET } from './drone-model';
 
 const CHASE_BACK = 1.0;
@@ -34,7 +37,27 @@ const FPV_CEILING_GAP = 0.04;
 const INDOOR_FAR = 90;
 const OUTDOOR_FAR = 1200;
 /** outdoors the chase camera keeps this far above the ground (the room box inset indoors is 0.12) */
-const OUTDOOR_GROUND_CLEARANCE = 0.15;
+export const CHASE_GROUND_CLEARANCE = 0.35;
+/** the FPV lens sits a few cm above the ground when landed: only keep the near plane out of it */
+export const FPV_GROUND_CLEARANCE = 0.03;
+/** samples along drone → camera when looking for terrain / boxes in between */
+const MARCH_STEPS = 8;
+/** boxes are inflated by this much (m) so the near plane does not clip a wall the camera stops at */
+const BOX_MARGIN = 0.08;
+/** Large levels: the LOS FOV narrows with range, from 62° at ≤ 40 m to 28° at ≥ 200 m. */
+export const LOS_FOV_NEAR = { range: 40, fov: LOS_FOV_V } as const;
+export const LOS_FOV_FAR = { range: 200, fov: 28 } as const;
+/** 1/s: how fast the LOS FOV follows its range target */
+const LOS_FOV_RATE = 1.5;
+/** an outdoor level is large (range-dependent LOS FOV) when unbounded or at least this wide */
+export const LARGE_LEVEL_EXTENT = 200;
+/** Pilot relocation (levels with `relocatePilot`, outside VR). */
+export const RELOCATE_RANGE = 260;
+export const RELOCATE_OCCLUDED_SECONDS = 1.5;
+export const RELOCATE_FADE_SECONDS = 0.3;
+export const RELOCATE_BEHIND = 35;
+export const PILOT_EYE_HEIGHT = 1.7;
+const OCCLUSION_SAMPLES = 16;
 
 const _pos = new THREE.Vector3();
 const _q = new THREE.Quaternion();
@@ -48,6 +71,94 @@ const _up = new THREE.Vector3(0, 1, 0);
 const _x = new THREE.Vector3(1, 0, 0);
 const _right = new THREE.Vector3();
 const _camUp = new THREE.Vector3();
+const _mp = new THREE.Vector3();
+const _dry = { x: 0, z: 0 };
+
+/** Target LOS vertical FOV (deg) at `range` metres on a large level. */
+export function losFovForRange(range: number): number {
+  const t = THREE.MathUtils.clamp((range - LOS_FOV_NEAR.range) / (LOS_FOV_FAR.range - LOS_FOV_NEAR.range), 0, 1);
+  return LOS_FOV_NEAR.fov + (LOS_FOV_FAR.fov - LOS_FOV_NEAR.fov) * t;
+}
+
+export function isLargeLevel(def: OutdoorLevel): boolean {
+  const b = def.bounds;
+  if (b.kind === 'infinite') return true;
+  if (b.kind !== 'rect' || !b.min || !b.max) return false;
+  return Math.max(b.max[0] - b.min[0], b.max[1] - b.min[1]) >= LARGE_LEVEL_EXTENT;
+}
+
+/**
+ * Outdoor camera constraint: nothing (terrain, collider-grid boxes) may stand between the drone and
+ * the camera, and the camera never goes below `clearance` over the ground.
+ */
+export class OutdoorConstraint {
+  private readonly found: GridCollider[] = [];
+
+  constructor(
+    readonly field: HeightField,
+    readonly grid: ColliderGrid | null,
+  ) {}
+
+  /**
+   * Raises `cam` to `clearance` over the ground, then marches drone → camera in 8 steps and pulls the
+   * camera back to the last clear sample; a final raise keeps the clearance (horizontal offset kept).
+   */
+  pullCamera(from: THREE.Vector3, cam: THREE.Vector3, clearance = CHASE_GROUND_CLEARANCE): void {
+    this.raise(cam, clearance);
+    let n = 0;
+    if (this.grid) {
+      const m = BOX_MARGIN;
+      n = this.grid.query(
+        Math.min(from.x, cam.x) - m,
+        Math.min(from.y, cam.y) - m,
+        Math.min(from.z, cam.z) - m,
+        Math.max(from.x, cam.x) + m,
+        Math.max(from.y, cam.y) + m,
+        Math.max(from.z, cam.z) + m,
+        this.found,
+      );
+    }
+    let clear = 0;
+    for (let k = 1; k <= MARCH_STEPS; k++) {
+      const t = k / MARCH_STEPS;
+      _mp.lerpVectors(from, cam, t);
+      if (this.blocked(_mp, n)) break;
+      clear = t;
+    }
+    if (clear < 1) cam.lerpVectors(from, cam, clear);
+    this.raise(cam, clearance);
+  }
+
+  /** True when terrain rises above the segment a → b (excluding its ends), sampled `samples` times. */
+  terrainBlocks(a: THREE.Vector3, b: THREE.Vector3, samples = OCCLUSION_SAMPLES): boolean {
+    for (let k = 1; k < samples; k++) {
+      _mp.lerpVectors(a, b, k / samples);
+      if (_mp.y < this.field.heightAt(_mp.x, _mp.z)) return true;
+    }
+    return false;
+  }
+
+  private raise(cam: THREE.Vector3, clearance: number): void {
+    const g = this.field.heightAt(cam.x, cam.z) + clearance;
+    if (cam.y < g) cam.y = g;
+  }
+
+  private blocked(p: THREE.Vector3, n: number): boolean {
+    if (p.y < this.field.heightAt(p.x, p.z)) return true;
+    for (let i = 0; i < n; i++) {
+      const s = this.found[i]!.shape;
+      if (s.kind !== 'box') continue;
+      const yaw = s.yaw ?? 0;
+      const dx = p.x - s.center[0];
+      const dz = p.z - s.center[2];
+      const c = Math.cos(yaw);
+      const sn = Math.sin(yaw);
+      const m = BOX_MARGIN;
+      if (Math.abs(c * dx - sn * dz) <= s.half[0] + m && Math.abs(p.y - s.center[1]) <= s.half[1] + m && Math.abs(sn * dx + c * dz) <= s.half[2] + m) return true;
+    }
+    return false;
+  }
+}
 
 export interface RigInput {
   dt: number;
@@ -94,6 +205,22 @@ export class CameraRig {
   /** FPV ceiling (Infinity under open sky) */
   private ceiling = Infinity;
   private outdoor = false;
+  /** null indoors */
+  private outdoorConstraint: OutdoorConstraint | null = null;
+  private field: HeightField = FLAT_GROUND;
+  /** range-dependent LOS FOV (large outdoor levels) */
+  private largeLevel = false;
+  private relocatable = false;
+  private losFov = LOS_FOV_V;
+  private occludedFor = 0;
+  /** 0 idle, 1 fading out, 2 fading in */
+  private relocPhase = 0;
+  /** relocation needs a non-VR view: the headset teleports its own way */
+  allowRelocate = true;
+  /** 0..1 black fade over the view while the LOS pilot is re-planted */
+  fade = 0;
+  /** times the pilot has been re-planted on this level */
+  relocations = 0;
   /** outdoor LOS: where the pilot's head rests (next ring), null = the static overview */
   private focus: THREE.Vector3 | null = null;
   private readonly focusPoint = new THREE.Vector3();
@@ -112,12 +239,23 @@ export class CameraRig {
     this.configure(pilot, roomSize, null);
   }
 
-  /** Re-target the rig to a level (camera object kept: post FX and the XR dolly hold it). */
-  setLevel(def: LevelDef): void {
+  /**
+   * Re-target the rig to a level (camera object kept: post FX and the XR dolly hold it). A bare
+   * LevelDef is flat ground with no collider grid.
+   */
+  setLevel(level: LevelDef | LevelRuntime): void {
+    const def = isRuntime(level) ? level.def : level;
+    this.field = isRuntime(level) ? heightField(level) : FLAT_GROUND;
+    this.largeLevel = false;
+    this.relocatable = false;
     if (def.kind === 'indoor') {
+      this.outdoorConstraint = null;
       this.configure(def.pilot, def.room.size, null);
       return;
     }
+    this.outdoorConstraint = new OutdoorConstraint(this.field, isRuntime(level) ? level.grid : null);
+    this.largeLevel = isLargeLevel(def);
+    this.relocatable = def.relocatePilot === true;
     const c = new THREE.Vector3();
     for (const r of def.rings) c.add(_v.set(r.position[0], r.position[1], r.position[2]));
     if (def.rings.length > 0) c.divideScalar(def.rings.length);
@@ -129,6 +267,11 @@ export class CameraRig {
     this.pilot.set(pilot[0], pilot[1], pilot[2]);
     this.outdoor = roomSize === null;
     this.focus = null;
+    this.losFov = LOS_FOV_V;
+    this.occludedFor = 0;
+    this.relocPhase = 0;
+    this.fade = 0;
+    this.relocations = 0;
     if (roomSize) {
       const m = 0.18;
       this.bounds.min.set(-roomSize[0] / 2 + m, 0.12, -roomSize[2] / 2 + m);
@@ -138,7 +281,7 @@ export class CameraRig {
       this.overview.set(0, roomSize[1] * 0.28, -roomSize[2] * 0.08);
       this.camera.far = INDOOR_FAR;
     } else {
-      this.bounds.min.set(-Infinity, OUTDOOR_GROUND_CLEARANCE, -Infinity);
+      this.bounds.min.set(-Infinity, -Infinity, -Infinity);
       this.bounds.max.set(Infinity, Infinity, Infinity);
       this.ceiling = Infinity;
       this.overview.copy(overview ?? _v.set(this.pilot.x, this.pilot.y, this.pilot.z - 20));
@@ -166,9 +309,19 @@ export class CameraRig {
     return this.mode;
   }
 
-  /** Standing pilot's spot on the floor (y = 0) → `out`; returns the yaw facing the room overview. */
+  /** LOS pilot's eye (moves when the pilot is re-planted). */
+  get pilotEye(): THREE.Vector3 {
+    return this.pilot;
+  }
+
+  /** Current LOS vertical FOV target after smoothing (deg). */
+  get losFovDeg(): number {
+    return this.losFov;
+  }
+
+  /** Standing pilot's spot on the ground → `out`; returns the yaw facing the room overview. */
   losFloorAnchor(out: THREE.Vector3): number {
-    out.set(this.pilot.x, 0, this.pilot.z);
+    out.set(this.pilot.x, this.field.heightAt(this.pilot.x, this.pilot.z), this.pilot.z);
     _v2.copy(this.overview).sub(this.pilot);
     return yawOf(_v2);
   }
@@ -192,6 +345,8 @@ export class CameraRig {
       this.mode = f.mode;
       this.blend = f.instant ? 1 : 0;
     }
+    this.updateLosFov(f, dt);
+    this.updateRelocation(f, dt);
     this.updateChase(f, dt);
     this.updateHead(f, dt);
 
@@ -253,6 +408,7 @@ export class CameraRig {
       const tilt = setTilt * (1 - (1 - FPV_CEILING_TILT) * relief);
       if (relief > 0) this.fpvLens(f.drone, tilt, outPos);
       outPos.y = Math.min(outPos.y, this.ceiling - FPV_CEILING_GAP);
+      this.outdoorConstraint?.pullCamera(f.drone.position, outPos, FPV_GROUND_CLEARANCE);
       outQuat.copy(f.drone.orientation).multiply(_qt.setFromAxisAngle(_x, tilt));
       // settings FOV is horizontal-ish (like a real FPV camera); convert to vertical for three.
       const h = THREE.MathUtils.degToRad(THREE.MathUtils.clamp(f.fovDeg, 60, 150));
@@ -266,7 +422,7 @@ export class CameraRig {
       dirFromAngles(this.headYaw, this.headPitch, _v);
       this.losLook.copy(this.pilot).add(_v);
       lookQuat(outPos, this.losLook, outQuat);
-      this.fovV = LOS_FOV_V;
+      this.fovV = this.losFov;
     }
   }
 
@@ -275,7 +431,7 @@ export class CameraRig {
    * edge of the frame (dead-zone), with a critically damped spring like a human head.
    */
   private updateHead(f: RigInput, dt: number): void {
-    const halfV = THREE.MathUtils.degToRad(LOS_FOV_V / 2);
+    const halfV = THREE.MathUtils.degToRad(this.losFov / 2);
     const halfH = Math.atan(Math.tan(halfV) * this.camera.aspect);
     _v.copy(this.focus ?? this.overview).sub(this.pilot);
     const baseYaw = yawOf(_v);
@@ -351,12 +507,77 @@ export class CameraRig {
   }
 
   /**
-   * Keeps the chase camera inside the room (outdoors: above the ground). The ceiling only lowers it (horizontal offset kept): pulling
-   * it back along drone→camera would park it on the quad, looking up at its belly.
+   * Keeps the chase camera inside the room (the ceiling only lowers it, horizontal offset kept: pulling it back
+   * along drone→camera would park it on the quad, looking up at its belly); outdoors the OutdoorConstraint.
    */
   private pullInside(from: THREE.Vector3, cam: THREE.Vector3): void {
+    if (this.outdoorConstraint) {
+      this.outdoorConstraint.pullCamera(from, cam);
+      return;
+    }
     if (cam.y > this.bounds.max.y) cam.y = this.bounds.max.y;
     pullInsideBox(this.bounds, from, cam);
+  }
+
+  /** Large levels: the LOS FOV narrows with the pilot → drone range (smoothed); elsewhere fixed. */
+  private updateLosFov(f: RigInput, dt: number): void {
+    const target = this.largeLevel ? losFovForRange(this.pilot.distanceTo(f.drone.position)) : LOS_FOV_V;
+    this.losFov = f.instant ? target : this.losFov + (target - this.losFov) * (1 - Math.exp(-dt * LOS_FOV_RATE));
+  }
+
+  /**
+   * Re-plants the LOS pilot when the drone is out of range or hidden behind terrain for too long: in
+   * LOS behind a fade (out, move, in), otherwise at once since the pilot is not on screen.
+   */
+  private updateRelocation(f: RigInput, dt: number): void {
+    const oc = this.outdoorConstraint;
+    if (!oc || !this.relocatable || !this.allowRelocate) {
+      this.relocPhase = 0;
+      this.fade = 0;
+      this.occludedFor = 0;
+      return;
+    }
+    if (this.relocPhase === 0) {
+      const d = f.drone.position;
+      this.occludedFor = oc.terrainBlocks(this.pilot, d) ? this.occludedFor + dt : 0;
+      if (this.pilot.distanceTo(d) <= RELOCATE_RANGE && this.occludedFor <= RELOCATE_OCCLUDED_SECONDS) return;
+      if (f.mode !== 'los' || f.instant) {
+        this.replant(f.drone);
+        return;
+      }
+      this.relocPhase = 1;
+    }
+    if (this.relocPhase === 1) {
+      this.fade = Math.min(1, this.fade + dt / RELOCATE_FADE_SECONDS);
+      if (this.fade >= 1) {
+        this.replant(f.drone);
+        this.relocPhase = 2;
+      }
+      return;
+    }
+    this.fade = Math.max(0, this.fade - dt / RELOCATE_FADE_SECONDS);
+    if (this.fade <= 0) this.relocPhase = 0;
+  }
+
+  /** Pilot 35 m behind the drone (against its horizontal velocity, else its heading), eye 1.7 m over dry ground. */
+  private replant(d: DroneState): void {
+    _v.set(-d.velocity.x, 0, -d.velocity.z);
+    if (_v.lengthSq() < 1) {
+      _v.set(0, 0, -1).applyQuaternion(d.orientation).negate();
+      _v.y = 0;
+      if (_v.lengthSq() < 1e-6) _v.set(0, 0, 1);
+    }
+    _v.normalize();
+    let x = d.position.x + _v.x * RELOCATE_BEHIND;
+    let z = d.position.z + _v.z * RELOCATE_BEHIND;
+    if (findDryGround(this.field, x, z, _dry)) {
+      x = _dry.x;
+      z = _dry.z;
+    }
+    this.pilot.set(x, this.field.heightAt(x, z) + PILOT_EYE_HEIGHT, z);
+    this.occludedFor = 0;
+    this.headInit = false;
+    this.relocations++;
   }
 
   private updateChase(f: RigInput, dt: number): void {

@@ -1,7 +1,8 @@
 /** Race state machine: countdown, ordered ring passes, crash/respawn, timing and best-time persistence. DOM-free. */
 import { Vector3 } from 'three';
 import type { Contact, DroneState, GameEvent, RaceSnapshot, RaceStatus, RingDef, RoomLevelData, WorldBounds } from '../types';
-import { isRuntime, type LevelRuntime } from '../levels/runtime';
+import { heightField, isRuntime, type LevelRuntime } from '../levels/runtime';
+import { FLAT_GROUND, findDryGround, type HeightField } from '../physics/terrain';
 import { createSurfaces, type SurfaceProvider } from './surfaces';
 
 export const COUNTDOWN_SECONDS = 3;
@@ -13,6 +14,8 @@ export const UPSIDE_DOWN_DOT = -0.5;
 export const UPSIDE_DOWN_HEIGHT = 0.3;
 export const UPSIDE_DOWN_TIME = 1;
 export const RESPAWN_OFFSET = 1.2;
+/** How far (m) a checkpoint over water looks for dry ground before falling back to the level spawn. */
+export const DRY_SEARCH_RADIUS = 40;
 /** Seconds outside the level bounds (or above its ceiling) before the drone is respawned. */
 export const OUT_OF_BOUNDS_RESPAWN = 5;
 /** A step moving further than this is a teleport (respawn), never a ring pass. */
@@ -74,18 +77,15 @@ interface RaceCourse {
   key: string;
   bounds: WorldBounds;
   surfaces: SurfaceProvider;
-  ground: (x: number, z: number) => number;
+  field: HeightField;
 }
-
-const FLAT = (): number => 0;
 
 function courseOf(level: RaceLevel): RaceCourse {
   if (!isRuntime(level)) {
-    return { rings: level.rings, spawn: level.spawn, key: level.name, bounds: { kind: 'room', maxAgl: level.room.size[1] }, surfaces: createSurfaces(level.props), ground: FLAT };
+    return { rings: level.rings, spawn: level.spawn, key: level.name, bounds: { kind: 'room', maxAgl: level.room.size[1] }, surfaces: createSurfaces(level.props), field: FLAT_GROUND };
   }
   const d = level.def;
-  const t = level.terrain;
-  return { rings: d.rings, spawn: d.spawn, key: d.id, bounds: d.bounds, surfaces: level.surfaces, ground: t ? (x, z) => t.heightAt(x, z) : FLAT };
+  return { rings: d.rings, spawn: d.spawn, key: d.id, bounds: d.bounds, surfaces: level.surfaces, field: heightField(level) };
 }
 
 type Mode = 'race' | 'freefly' | null;
@@ -155,6 +155,7 @@ export class RaceController {
   private outTimer = 0;
   private outShown = 0;
   private readonly hit = new Vector3();
+  private readonly dry = { x: 0, z: 0 };
   private readonly storage: Storage | null;
   private level: RaceCourse;
 
@@ -263,21 +264,25 @@ export class RaceController {
   }
 
   /**
-   * Checkpoint: 1.2 m past the last passed ring along its direction, set down on the floor / prop top
+   * Checkpoint: 1.2 m past the last passed ring along its direction, set down on the ground / prop top
    * below it (respawns are disarmed: left in mid-air the quad would fall, crash and respawn forever),
-   * facing the next ring; else the level spawn.
+   * facing the next ring; else the level spawn. A checkpoint over water moves to the nearest dry ground
+   * within DRY_SEARCH_RADIUS (8 directions), else falls back to the spawn.
    */
   respawnPoint(): { position: Vector3; yaw: number } {
     const rings = this.level.rings;
-    if (this.mode !== 'race' || this.lastPassed < 0) {
-      const s = this.level.spawn;
-      return { position: new Vector3(s.position[0], s.position[1], s.position[2]), yaw: s.yaw };
-    }
+    const s = this.level.spawn;
+    const spawn = (): { position: Vector3; yaw: number } => ({ position: new Vector3(s.position[0], s.position[1], s.position[2]), yaw: s.yaw });
+    if (this.mode !== 'race' || this.lastPassed < 0) return spawn();
     const r = rings[this.lastPassed]!;
-    const x = r.position[0] + r.direction[0] * RESPAWN_OFFSET;
-    const z = r.position[2] + r.direction[2] * RESPAWN_OFFSET;
+    const field = this.level.field;
+    if (!findDryGround(field, r.position[0] + r.direction[0] * RESPAWN_OFFSET, r.position[2] + r.direction[2] * RESPAWN_OFFSET, this.dry, DRY_SEARCH_RADIUS)) return spawn();
+    const x = this.dry.x;
+    const z = this.dry.z;
     const air = r.position[1] + r.direction[1] * RESPAWN_OFFSET;
-    const pos = new Vector3(x, this.level.surfaces.topBelow(x, air, z) + this.level.spawn.position[1], z);
+    // the spawn's height over its own ground is the clearance a respawn keeps over the surface
+    const clearance = s.position[1] - field.heightAt(s.position[0], s.position[2]);
+    const pos = new Vector3(x, this.level.surfaces.topBelow(x, air, z) + clearance, z);
     const next = rings[this.lastPassed + 1];
     let yaw: number;
     if (next) {
@@ -378,7 +383,7 @@ export class RaceController {
       this.collisionCooldown = COLLISION_COOLDOWN;
       this.events.push({ type: 'collision', contact: worst });
     }
-    const agl = state.position.y - this.level.ground(state.position.x, state.position.z);
+    const agl = state.position.y - this.level.field.heightAt(state.position.x, state.position.z);
     if (bodyUpDot(state.orientation) < UPSIDE_DOWN_DOT && agl < UPSIDE_DOWN_HEIGHT) {
       this.upsideTimer += dt;
       if (this.upsideTimer > UPSIDE_DOWN_TIME) this.crash(state, 0);
@@ -390,7 +395,7 @@ export class RaceController {
   /** Soft bounds: a countdown while outside, then a respawn; flying back in cancels it. */
   private checkBounds(dt: number, state: DroneState): void {
     const p = state.position;
-    if (!outOfBounds(this.level.bounds, p.x, p.y, p.z, this.level.ground(p.x, p.z))) {
+    if (!outOfBounds(this.level.bounds, p.x, p.y, p.z, this.level.field.heightAt(p.x, p.z))) {
       if (this.outTimer > 0) this.events.push({ type: 'in-bounds' });
       this.outTimer = 0;
       this.outShown = 0;
