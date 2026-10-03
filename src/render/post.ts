@@ -150,7 +150,29 @@ export class PostFX {
     }
     this.caOn = false;
     this.applyScreenTarget();
+    this.warmUp();
     if (p.ao !== 'off') void this.loadAo(this.generation);
+  }
+
+  /**
+   * Compiles every pass now: the optional ones (DoF, motion blur, CA, a late N8AO) would otherwise compile
+   * on the frame they first switch on — a 0.3–1.5 s freeze on ANGLE/Metal in the middle of a flight. Renders
+   * once with everything on, then once as configured so a still menu frame shows the right image.
+   */
+  private warmUp(): void {
+    const optional = [this.dofPass, this.blurPass, this.caPass].filter((x): x is EffectPass => x !== null);
+    if (optional.length === 0 && !this.aoPass) return;
+    const was = optional.map((x) => x.enabled);
+    for (const x of optional) x.enabled = true;
+    if (this.mainPass) this.mainPass.renderToScreen = this.caPass === null;
+    if (this.caPass) this.caPass.renderToScreen = true;
+    this.composer.render(0);
+    optional.forEach((x, i) => (x.enabled = was[i]!));
+    this.blur?.reset();
+    this.applyScreenTarget();
+    // draw-call stats (renderer.info, reset per game frame) should describe a normal frame, not the warm-up
+    this.composer.getRenderer().info.reset();
+    this.composer.render(0);
   }
 
   /** N8AO is ~100 kB of shader code: fetched only on tiers that use it. */
@@ -175,6 +197,7 @@ export class PostFX {
     this.aoPass = pass;
     this.composer.addPass(pass, 1);
     pass.setSize(this.width, this.height);
+    this.warmUp();
   }
 
   private applyAoLook(pass: AoPass, look: Readonly<LevelLook>): void {
