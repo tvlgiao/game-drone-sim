@@ -289,7 +289,13 @@ describe('engine: buses and routing', () => {
       a.frame(drone([0.5, 0.5, 0.5, 0.5], false, undefined, undefined, 13.6), race('freefly'), 'fpv', EYE);
     }
     expect(a.debug().created).toBe(start);
-    for (let i = 0; i < 30; i++) {
+    // a sag blip shorter than a second stays quiet
+    for (let i = 0; i < 15; i++) {
+      ctx.currentTime += 0.05;
+      a.frame(drone([0.5, 0.5, 0.5, 0.5], true, undefined, undefined, 13.6), race('freefly'), 'fpv', EYE);
+    }
+    expect(a.debug().created).toBe(start);
+    for (let i = 0; i < 15; i++) {
       ctx.currentTime += 0.05;
       a.frame(drone([0.5, 0.5, 0.5, 0.5], true, undefined, undefined, 13.6), race('freefly'), 'fpv', EYE);
     }
@@ -322,11 +328,11 @@ describe('no node leaks', () => {
   it('50 level switches: live nodes and the connected graph return to the same size', { timeout: 120_000 }, async () => {
     // lite tier: smaller stems keep the instant "renders" quick
     const { a, ctx } = await engine('training', SOUND, true);
+    // time-based clean-up only (no flush()): faded songs and the old level go when their fade is over
     const settle = async (): Promise<void> => {
       await flush();
       ctx.currentTime += 5;
       a.frame(drone([0.5, 0.5, 0.5, 0.5]), race('freefly'), 'chase', EYE);
-      a.flush();
       ctx.endSources();
     };
     await settle();
