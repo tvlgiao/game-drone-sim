@@ -557,6 +557,49 @@ test.describe('touch devices', () => {
     expect(errors).toEqual([]);
   });
 
+  test('Acro on touch: the no-self-level tip once (then plain mode toasts), the attitude ball only in Acro', async ({ page }) => {
+    await boot(page);
+    await passGate(page);
+    await startFreeFly(page);
+    expect(await hook(page, (d) => d.mode)).toBe('angle');
+    const att = page.locator('.ds-att');
+    await expect(att).toBeHidden();
+    const mode = page.locator('[data-tbtn="toggleMode"]');
+    await mode.tap();
+    await expect.poll(() => hook(page, (d) => d.mode)).toBe('acro');
+    await expect(page.locator('.ds-toast', { hasText: 'no self-level' })).toHaveCount(1);
+    await expect(att).toBeVisible();
+    // the ball sits inside the telemetry panel and clears the buttons
+    const r = await page.evaluate(() => {
+      const a = document.querySelector('.ds-att')!.getBoundingClientRect();
+      const p = document.querySelector('.ds-hud__bl')!.getBoundingClientRect();
+      const btns = [...document.querySelectorAll('[data-tbtn]')].map((b) => b.getBoundingClientRect()).filter((b) => b.width > 0);
+      const hit = btns.some((b) => !(b.right <= a.left || b.left >= a.right || b.bottom <= a.top || b.top >= a.bottom));
+      return { inPanel: a.left >= p.left && a.right <= p.right && a.top >= p.top && a.bottom <= p.bottom, hit };
+    });
+    expect(r).toEqual({ inPanel: true, hit: false });
+    await page.screenshot({ path: test.info().outputPath('acro-tip.png') });
+    await mode.tap();
+    await expect.poll(() => hook(page, (d) => d.mode)).toBe('angle');
+    await expect(att).toBeHidden();
+    await mode.tap();
+    await expect.poll(() => hook(page, (d) => d.mode)).toBe('acro');
+    await expect(page.locator('.ds-toast', { hasText: 'ACRO mode' })).toHaveCount(1);
+    await expect(page.locator('.ds-toast', { hasText: 'no self-level' })).toHaveCount(1); // the first one, not a second
+    // remembered across launches
+    await page.reload();
+    await page.waitForFunction(() => !!(window as unknown as { __drone?: Hook }).__drone, null, { timeout: 30_000 });
+    await passGate(page);
+    await startFreeFly(page);
+    if ((await hook(page, (d) => d.mode)) === 'acro') await mode.tap();
+    await expect.poll(() => hook(page, (d) => d.mode)).toBe('angle');
+    await mode.tap();
+    await expect.poll(() => hook(page, (d) => d.mode)).toBe('acro');
+    await expect(page.locator('.ds-toast', { hasText: 'ACRO mode' })).toHaveCount(1);
+    await expect(page.locator('.ds-toast', { hasText: 'no self-level' })).toHaveCount(0);
+    expect(errors).toEqual([]);
+  });
+
   test('portrait on a phone shows the rotate overlay and pauses; landscape returns to the pause menu', async ({ page }, info) => {
     test.skip(!info.project.name.includes('iphone'), 'phones only');
     await boot(page);

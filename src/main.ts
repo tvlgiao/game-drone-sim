@@ -37,6 +37,7 @@ import { terrainMinimapSampler } from './ui/minimap';
 import type { OutdoorHud } from './ui/hud';
 import { worldField } from './levels/runtime';
 import { TouchControls } from './ui/touch-controls';
+import { AcroTip, ACRO_TIP_MS } from './ui/acro-aid';
 import type { ButtonEvents, CameraMode, ControlInput, DroneState, GameEvent, InputFrame, LevelId, QualityTier, RaceSnapshot } from './types';
 
 const PHYSICS_DT = 1 / 1000;
@@ -80,6 +81,7 @@ function boot(caps: EditionCaps): void {
   const canvas = document.getElementById('game') as HTMLCanvasElement;
   const uiRoot = document.getElementById('ui') as HTMLElement;
   const storage = safeStorage();
+  const acroTip = new AcroTip(storage);
   let settings: Settings = loadSettings(storage);
 
   const device = detectDevice(window);
@@ -814,7 +816,10 @@ function boot(caps: EditionCaps): void {
       sim.fc.mode = settings.flightMode;
       saveSettings(settings, storage);
       hud.setSettings(settings);
-      toast(`${settings.flightMode.toUpperCase()} mode`);
+      // the first switch to Acro on the touch sticks explains the missing self-level (the tutorial has its own card)
+      const tip = tutOn && tutorial.active ? null : acroTip.take(input.activeSource, settings.flightMode);
+      if (tip) hud.toast(tip, ACRO_TIP_MS);
+      else toast(`${settings.flightMode.toUpperCase()} mode`);
     }
     if (b.cycleCamera) cameraMode = CAMERA_CYCLE[(CAMERA_CYCLE.indexOf(cameraMode) + 1) % CAMERA_CYCLE.length];
     if (b.reset) race.requestReset();
