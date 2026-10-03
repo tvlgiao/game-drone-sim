@@ -17,6 +17,19 @@ export const RATE_PRESETS: Record<'beginner' | 'freestyle' | 'race', RateProfile
   race: { center: 240, max: 800, expo: 0.45 },
 };
 
+/**
+ * Touch sticks in Acro: roll and pitch centre sensitivity × this (max rate and expo kept, so full-stick flips
+ * still work). A thumb on glass has no spring to find centre and rests 10–30 % off it; at the preset centre rates
+ * that is 50–70 °/s of roll or pitch, which turns a hovering quad belly up in ≈ 1.5 s.
+ */
+export const TOUCH_ACRO_CENTER_SCALE = 0.5;
+
+/** Touch Acro rates (see TOUCH_ACRO_CENTER_SCALE) from the pilot's preset rates; yaw is left as it is. */
+export function touchAcroRates(r: AxisRates): AxisRates {
+  const soft = (p: RateProfile): RateProfile => ({ ...p, center: p.center * TOUCH_ACRO_CENTER_SCALE });
+  return { roll: soft(r.roll), pitch: soft(r.pitch), yaw: { ...r.yaw } };
+}
+
 /** Same profile on all three axes (deep copy, safe to mutate). */
 export function axisRatesFrom(r: RateProfile): AxisRates {
   return { roll: { ...r }, pitch: { ...r }, yaw: { ...r } };
