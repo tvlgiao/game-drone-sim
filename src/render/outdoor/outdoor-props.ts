@@ -1,13 +1,16 @@
 /**
- * Low-poly outdoor set pieces by PropDef.kind: flat-shaded vertex colours, merged per material through
- * the StaticBatcher. Every builder stays inside its prop's collider (cylinders: diameter × height), so
- * what the pilot sees is what the drone can hit. The wind sock's fabric stays live (it sways).
+ * Outdoor set pieces by PropDef.kind: field poles, cones and the wind sock as flat-shaded vertex colours
+ * merged per material through the StaticBatcher; trees go to the swaying vegetation; backdrop hills come
+ * back as smooth meadow-coloured geometry for the caller to merge with the ground. Every builder stays
+ * inside its prop's collider (cylinders: diameter × height), so what the pilot sees is what the drone can
+ * hit. The wind sock's fabric stays live (it sways).
  */
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import type { PropDef } from '../../types';
 import { StaticBatcher, trs } from '../batcher';
 import { mulberry32 } from '../textures';
+import type { VegBuilder } from './foliage';
 
 export const PALETTE = {
   poleRed: 0xe2462f,
@@ -18,17 +21,15 @@ export const PALETTE = {
   steel: 0x8d949c,
   sockOrange: 0xff7a2a,
   sockWhite: 0xf5f1e8,
-  trunk: 0x6b4a32,
-  leaves: [0x3f7d3a, 0x4f8f3f, 0x5c9a45, 0x376d3b],
-  conifer: [0x2f5f3d, 0x2b5537, 0x3a6d45],
-  hill: 0x4f7f4c,
-  hillHigh: 0x7c9f62,
+  hill: 0x5a7f55,
+  hillHigh: 0x86a070,
   line: 0xf4f1e8,
   teal: 0x2fd0c8,
 } as const;
 
 export interface OutdoorProps {
-  meshes: THREE.Mesh[];
+  /** smooth backdrop hills (position, normal, color, uv) for the ground material */
+  hills: THREE.BufferGeometry | null;
   /** wind-sock fabric, pivoting at the top of its pole */
   sock: THREE.Group | null;
   disposables: { dispose(): void }[];
@@ -39,9 +40,8 @@ export function lowPolyMaterial(): THREE.MeshStandardMaterial {
   return new THREE.MeshStandardMaterial({ vertexColors: true, flatShading: true, roughness: 0.85, metalness: 0 });
 }
 
-export function buildOutdoorProps(props: readonly PropDef[], mat: THREE.MeshStandardMaterial, parent: THREE.Object3D): OutdoorProps {
-  const batch = new StaticBatcher();
-  const out: OutdoorProps = { meshes: [], sock: null, disposables: [] };
+export function buildOutdoorProps(props: readonly PropDef[], mat: THREE.MeshStandardMaterial, parent: THREE.Object3D, veg: VegBuilder, batch: StaticBatcher): OutdoorProps {
+  const out: OutdoorProps = { hills: null, sock: null, disposables: [] };
   const hills: THREE.BufferGeometry[] = [];
   for (const p of props) {
     const [x, , z] = p.position;
@@ -58,7 +58,7 @@ export function buildOutdoorProps(props: readonly PropDef[], mat: THREE.MeshStan
         parent.add(out.sock);
         break;
       case 'tree':
-        tree(batch, mat, p);
+        veg.tree(p);
         break;
       case 'hill':
         hills.push(hill(p));
@@ -67,17 +67,10 @@ export function buildOutdoorProps(props: readonly PropDef[], mat: THREE.MeshStan
         break;
     }
   }
-  out.meshes = batch.build(parent);
   if (hills.length > 0) {
-    const g = mergeGeometries(hills)!;
+    out.hills = mergeGeometries(hills);
     for (const hg of hills) hg.dispose();
-    const m = new THREE.Mesh(g, mat);
-    m.name = 'hills';
-    m.receiveShadow = false;
-    parent.add(m);
-    out.meshes.push(m);
   }
-  for (const m of out.meshes) out.disposables.push(m.geometry);
   return out;
 }
 
@@ -141,64 +134,40 @@ function windsock(batch: StaticBatcher, mat: THREE.MeshStandardMaterial, x: numb
   return pivot;
 }
 
-/** Broadleaf (icosphere crown) or conifer (stacked cones) by hash of the id; trunk inside the collider. */
-function tree(batch: StaticBatcher, mat: THREE.Material, p: PropDef): void {
-  const [x, , z] = p.position;
-  const [crown, h] = p.size;
-  const rnd = mulberry32(hashId(p.id));
-  const yaw = p.yaw ?? 0;
-  const trunkH = h * 0.4;
-  batch.add('lowpoly', mat, new THREE.CylinderGeometry(0.14, 0.22, trunkH, 6), trs(x, trunkH / 2, z, yaw), { color: PALETTE.trunk });
-  const r = crown / 2;
-  if (rnd() < 0.45) {
-    const pick = PALETTE.conifer[Math.floor(rnd() * PALETTE.conifer.length)]!;
-    const tiers = 3;
-    const base = h * 0.25;
-    const th = (h - base) * 0.5;
-    for (let i = 0; i < tiers; i++) {
-      const y = base + th / 2 + (i * (h - base - th)) / (tiers - 1);
-      batch.add('lowpoly', mat, new THREE.ConeGeometry(r * (1 - i * 0.24), th, 7), trs(x, y, z, yaw + i), { color: pick });
-    }
-  } else {
-    const pick = PALETTE.leaves[Math.floor(rnd() * PALETTE.leaves.length)]!;
-    const cy = h - r * 0.95;
-    batch.add('lowpoly', mat, new THREE.IcosahedronGeometry(r, 0), trs(x, cy, z, yaw, 1, 0.95, 1), { color: pick });
-    batch.add('lowpoly', mat, new THREE.IcosahedronGeometry(r * 0.62, 0), trs(x + r * 0.35, cy - r * 0.35, z - r * 0.2, yaw + 1), { color: pick });
-  }
-}
-
-/** Far backdrop mound: jittered low-poly dome, lighter towards the top (visual only, out of reach). */
+/** Far backdrop mound: a smooth bell-profile dome in meadow greens, lighter on the crest (visual only, out of reach). */
 function hill(p: PropDef): THREE.BufferGeometry {
   const [w, h, d] = p.size;
-  const g = new THREE.SphereGeometry(1, 26, 8, 0, Math.PI * 2, 0, Math.PI / 2).toNonIndexed();
+  const g = new THREE.SphereGeometry(1, 48, 12, 0, Math.PI * 2, 0, Math.PI / 2);
   const pos = g.attributes.position;
   const rnd = mulberry32(hashId(p.id));
-  const jitter = new Map<string, number>();
+  const phase = rnd() * 10;
   for (let i = 0; i < pos.count; i++) {
-    const key = `${pos.getX(i).toFixed(3)}|${pos.getY(i).toFixed(3)}|${pos.getZ(i).toFixed(3)}`;
-    let j = jitter.get(key);
-    if (j === undefined) {
-      j = pos.getY(i) > 0.01 ? 0.95 + rnd() * 0.1 : 1;
-      jitter.set(key, j);
-    }
+    const x = pos.getX(i);
+    const z = pos.getZ(i);
+    const y = Math.max(0, pos.getY(i));
+    const a = Math.atan2(z, x);
+    const j = 1 + (Math.sin(a * 3 + phase) * 0.06 + Math.sin(a * 7 + phase * 2) * 0.03) * y;
     // bell profile (y^1.6 of a hemisphere): long gentle foothills instead of a dome
-    pos.setXYZ(i, pos.getX(i) * j, Math.pow(Math.max(0, pos.getY(i)), 1.6) * j * j, pos.getZ(i) * j);
+    pos.setXYZ(i, x * j, Math.pow(y, 1.6) * j, z * j);
   }
   g.scale(w / 2, h, d / 2);
   g.rotateY(p.yaw ?? 0);
   g.translate(p.position[0], p.position[1] - h * 0.04, p.position[2]);
+  g.computeVertexNormals();
   const lo = new THREE.Color(PALETTE.hill);
   const hi = new THREE.Color(PALETTE.hillHigh);
   const c = new THREE.Color();
   const col = new Float32Array(pos.count * 3);
-  for (let i = 0; i < pos.count; i += 3) {
-    const y = (pos.getY(i) + pos.getY(i + 1) + pos.getY(i + 2)) / 3;
-    c.copy(lo).lerp(hi, THREE.MathUtils.clamp(y / h, 0, 1) * 0.8 + rnd() * 0.12);
-    for (let k = 0; k < 3; k++) col.set([c.r, c.g, c.b], (i + k) * 3);
+  const uv = new Float32Array(pos.count * 2);
+  for (let i = 0; i < pos.count; i++) {
+    const y = pos.getY(i) - p.position[1];
+    c.copy(lo).lerp(hi, THREE.MathUtils.clamp(y / h, 0, 1) * 0.8);
+    col.set([c.r, c.g, c.b], i * 3);
+    uv[i * 2] = pos.getX(i) / 3;
+    uv[i * 2 + 1] = pos.getZ(i) / 3;
   }
   g.setAttribute('color', new THREE.BufferAttribute(col, 3));
-  g.deleteAttribute('uv');
-  g.computeVertexNormals();
+  g.setAttribute('uv', new THREE.BufferAttribute(uv, 2));
   return g;
 }
 
