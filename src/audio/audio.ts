@@ -127,7 +127,7 @@ export class GameAudio {
   private mixSettings: MixSettings = { master: 0.7, music: 0.6, musicOn: true, sfx: 1, ambience: 0.7 };
   private link = 0;
   private motorsMuted = false;
-  private lastUpdate = 0;
+  private lastUpdate = -Infinity;
   private status: RaceStatus = 'menu';
   private totalRings = 0;
   private crashAt = -Infinity;
@@ -366,7 +366,8 @@ export class GameAudio {
       noise: this.noise!,
       bank: this.bank,
       pool: this.ambientPool!,
-      model: this.tier.hrtf && !this.tier.lite ? 'HRTF' : 'equalpower',
+      // beds and emitters are broad sources: equal-power panning reads the same and costs a fraction of HRTF
+      model: 'equalpower',
       probe: this.probe,
       random: this.random,
     });
@@ -429,14 +430,13 @@ export class GameAudio {
     this.motor = new MotorSound(root, this.buses.sfx, this.reverbIn, this.noise.pink, this.tier.hrtf, this.random);
     this.motor.setLink(this.link);
     this.motor.setMuted(this.motorsMuted);
-    const world = new VoicePool(root, this.buses.sfx, this.tier.lite ? 6 : 10, model, 3, { node: this.reverbIn, amount: 0.5 });
-    const ambModel: PanningModelType = this.tier.hrtf && !this.tier.lite ? 'HRTF' : 'equalpower';
-    this.ambientPool = new VoicePool(root, this.ambienceState, this.tier.lite ? 4 : 8, ambModel, 6, { node: this.reverbIn, amount: 0.4 });
+    const world = new VoicePool(root, this.buses.sfx, this.tier.lite ? 4 : 6, model, 3, { node: this.reverbIn, amount: 0.5 });
+    this.ambientPool = new VoicePool(root, this.ambienceState, this.tier.lite ? 3 : 5, 'equalpower', 6, { node: this.reverbIn, amount: 0.4 });
     this.sfx = new SfxPlayer(this.bank, {
       world,
-      sfx: new VoicePool(root, this.buses.sfx, 6, null),
-      ui: new VoicePool(root, this.buses.ui, 4, null),
-      voice: new VoicePool(root, this.buses.voice, 4, null),
+      sfx: new VoicePool(root, this.buses.sfx, 4, null),
+      ui: new VoicePool(root, this.buses.ui, 3, null),
+      voice: new VoicePool(root, this.buses.voice, 3, null),
     });
     this.music = new MusicPlayer(ctx, this.stats, root, this.musicDuck, this.offline, this.tier.lite);
     this.music.setEnabled(this.mixSettings.musicOn && this.mixSettings.music > 0);

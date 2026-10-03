@@ -1745,6 +1745,7 @@ export class Menus {
             <tr><th scope="row">Version</th><td data-f="version">${APP_VERSION}</td></tr>
             <tr><th scope="row">Developer</th><td>COWORK Game Studio</td></tr>
             <tr><th scope="row">Support</th><td>${SUPPORT_EMAIL}</td></tr>
+            <tr><th scope="row">Music &amp; sound</th><td>Original score and effects, synthesised on your device</td></tr>
           </tbody>
         </table>
         <h3 class="ds-h3">Open-source software</h3>

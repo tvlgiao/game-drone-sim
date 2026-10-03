@@ -255,6 +255,17 @@ describe('engine: buses and routing', () => {
     expect(a.debug().music.state).toBe('paused');
   });
 
+  it('the listener follows the rendered eye (camera or headset): position, forward (−Z) and up', async () => {
+    const { a, ctx } = await engine();
+    // eye at (4, 5, 6) looking down +X (forward column −Z = (1, 0, 0)), up +Y
+    const eye = { matrixWorld: { elements: [0, 0, 1, 0, 0, 1, 0, 0, -1, 0, 0, 0, 4, 5, 6, 1] } };
+    a.frame(drone([0.5, 0.5, 0.5, 0.5]), race('freefly'), 'los', eye);
+    const l = ctx.listener;
+    expect([l.positionX.value, l.positionY.value, l.positionZ.value]).toEqual([4, 5, 6]);
+    expect([l.forwardX.value, l.forwardY.value, l.forwardZ.value]).toEqual([1, -0, -0]);
+    expect([l.upX.value, l.upY.value, l.upZ.value]).toEqual([0, 1, 0]);
+  });
+
   it('countdown(n) beeps once per number; GO for 0; race events use the same path', async () => {
     const { a, ctx } = await engine();
     const before = a.debug().created;

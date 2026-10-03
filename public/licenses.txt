@@ -3,6 +3,9 @@ Drone Sim — third-party software notices
 Drone Sim (c) COWORK Game Studio includes the open-source components below.
 Each is used under the licence reproduced here.
 
+Music and sound effects: original works (c) COWORK Game Studio, synthesised
+in the app at run time. No third-party recordings or samples are included.
+
 ========================================================================
 three.js 0.186.1 — MIT licence
 https://threejs.org

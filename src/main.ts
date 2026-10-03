@@ -1127,7 +1127,8 @@ function boot(caps: EditionCaps): void {
       motorsMuted = mute;
       audio.setMotorsMuted(mute);
     }
-    audio.frame(drone, snap, view.renderedCamera, view.camera);
+    // the listener is the rendered eye: in a headset, the head pose (spatial audio turns with the head)
+    audio.frame(drone, snap, view.renderedCamera, view.presenting ? view.renderer.xr.getCamera() : view.camera);
   }
   // setAnimationLoop = requestAnimationFrame on a flat screen, the XR session's frame loop in a headset.
   view.renderer.setAnimationLoop(frame);

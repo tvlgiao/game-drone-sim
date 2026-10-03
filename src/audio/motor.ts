@@ -148,7 +148,7 @@ export class MotorSound {
     // external path: air absorption → panner (distance + direction)
     this.extGain = scope.gain(0);
     this.air = scope.filter('lowpass', 18000, 0.6);
-    this.panner = scope.panner(hrtf ? 'HRTF' : 'equalpower', 3, 1, 3000);
+    this.panner = scope.panner(hrtf ? 'HRTF' : 'equalpower', 8, 1, 3000);
     this.mute.connect(this.extGain).connect(this.air).connect(this.panner).connect(out);
     this.extSend = scope.gain(0.28);
     this.panner.connect(this.extSend).connect(reverb);

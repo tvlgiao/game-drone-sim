@@ -139,17 +139,10 @@ export class Ambience {
         b.start();
         break;
       }
-      case 'window': {
-        // the city outside: low rumble through the glass
-        const src = s.loop(this.d.noise.brown);
-        const lp = s.filter('lowpass', 480, 0.6);
-        const src2 = s.loop(this.d.noise.pink);
-        const bp = s.filter('bandpass', 900, 0.5);
-        const g2 = s.gain(0.12);
-        src.connect(lp).connect(g);
-        src2.connect(bp).connect(g2).connect(g);
+      case 'window':
+        // the city outside, through the glass: one shared source feeds every window's panner
+        this.outside().connect(g);
         break;
-      }
       case 'tractor': {
         const buf = this.d.bank.get('tractor');
         if (!buf) return;
@@ -159,6 +152,19 @@ export class Ambience {
         break;
       }
     }
+  }
+
+  private outsideBus: GainNode | null = null;
+
+  /** Low city rumble heard through the windows (shared by all of them). */
+  private outside(): GainNode {
+    if (this.outsideBus) return this.outsideBus;
+    const s = this.d.scope;
+    const bus = s.gain(1);
+    s.loop(this.d.noise.brown).connect(s.filter('lowpass', 480, 0.6)).connect(bus);
+    s.loop(this.d.noise.pink).connect(s.filter('bandpass', 900, 0.5)).connect(s.gain(0.12)).connect(bus);
+    this.outsideBus = bus;
+    return bus;
   }
 
   update(f: AmbienceFrame): void {
