@@ -60,8 +60,9 @@ async function fly(page: Page, id: string, mode: 'freefly' | 'race', seed?: numb
   await page.evaluate(([id, mode, seed]) => (window as unknown as { __drone: Hook }).__drone.action({ type: 'level', id, mode, seed }), [id, mode, seed] as const);
   await expect
     .poll(() => page.evaluate((seed) => {
-      const d = (window as unknown as { __drone: Hook }).__drone;
-      return [d.level, d.levelReady, seed === undefined || d.world?.seed === seed];
+      const d = (window as unknown as { __drone: Hook & { loading: { visible: boolean } } }).__drone;
+      // ready = the loading screen has handed over (its textures uploaded, its shaders compiled)
+      return [d.level, d.levelReady && !d.loading.visible, seed === undefined || d.world?.seed === seed];
     }, seed), { timeout: 45_000 })
     .toEqual([id, true, true]);
 }

@@ -134,7 +134,8 @@ test('every outdoor level lives for ten seconds: traffic, birds, countryside / r
       expect(life.cars as number).toBeGreaterThan(40);
       expect((life.city as Record<string, number>).beacons).toBeGreaterThan(0);
       // the traffic tick stays far under a millisecond
-      expect(life.trafficMs as number).toBeLessThan(1);
+      // (≤: WebKit's clock is coarsened to 1 ms)
+      expect(life.trafficMs as number).toBeLessThanOrEqual(1);
       expect(t0).not.toBeNull();
     } else {
       const c = life.countryside as Record<string, number>;
