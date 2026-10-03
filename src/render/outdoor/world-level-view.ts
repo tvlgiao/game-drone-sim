@@ -169,6 +169,8 @@ export class WorldLevelView implements LevelView {
       detail: lowTier ? 0.35 : 0.55,
       // grass relief that reads at drone height without crumpling the meadow
       normalScale: 0.45,
+      // grass seen against a low sun: no specular glitter off the blades' normal map
+      roughness: 1.35,
     });
     this.roadMat = roadMaterial(this.detail);
     this.waterMat = waterMaterial(sky, this.ripple, this.profile.waterDetail);

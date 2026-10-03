@@ -311,4 +311,22 @@ terrain shader, water shader and drone-following shadow box are gone or demoted.
 | rings | the shared `RingsView` with the look's `ringGain` (day 2.2–2.3, golden 1.9, dawn 1.8, dusk 1.5) |
 | view distance | Settings → View distance × the adaptive step: `scaledProfile(profile, k)` — short 0.5, medium 0.75, long 1.3 (fog and the batched backdrop only; the streamed radius keeps the tier's budget) |
 
-Budgets: §11.1 (filled in from the measurement run).
+### 11.1 renderer.info per frame (2026-10-03, Apple-silicon Mac, ANGLE/Metal)
+
+Draws / triangles, the most of four poses per level: LOS on the take-off, FPV, chase, and a high vista
+(120–160 m up). Desktop at 1920×1080; iPhone = WebKit iPhone 15 Pro landscape at medium; Quest = IWER in
+an immersive session at the low tier, **per frame, both eyes**. Includes the drone, rings, VFX and HUD card.
+
+| level | ultra | high (≤ 150 / 0.6 M) | iPhone medium (≤ 110 / 250 k) | Quest IWER (≤ 80 / 120 k) |
+| --- | --- | --- | --- | --- |
+| City | 84 / 645 k | 84 / 516 k | 54 / 171 k | **30 / 105 k** |
+| Alpine Valley | 98 / 572 k | 98 / 537 k | 62 / 236 k | **34 / 91 k** |
+| Infinite | 94 / 512 k | 93 / 445 k | 53 / 187 k | **32 / 92 k** |
+| Night Loft (Quest target: unchanged) | — | — | — | 68 / 109 k (feat/visual 72 / 110 k) |
+| Training (Quest target: unchanged) | — | — | — | 38 / 143 k (feat/visual 40 / 143 k) |
+
+Triangles on ultra / high are mostly the two shadow cascades drawing the casters again (trees, buildings,
+cars, lights): the City's main view is ≈ 190 k. What it took to fit: City street furniture within 450 m on
+high (was the whole city: 645 k → 516 k), roof units and tanks off on the Quest tier (133 k → 105 k). X1's
+earlier Quest numbers (old drone, old rings) no longer apply. Measured with the scratchpad `shots.mjs`
+(teleport + `__drone.stats()` after the streamer settles); the Quest card is up in every frame.

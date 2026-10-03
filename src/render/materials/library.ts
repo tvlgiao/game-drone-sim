@@ -125,6 +125,8 @@ export interface TerrainOptions {
   detail?: number;
   /** base normal map strength (1 = as authored) */
   normalScale?: number;
+  /** multiplies the base roughness map (1 = as authored) */
+  roughness?: number;
 }
 
 export interface TextureSet {
@@ -479,7 +481,7 @@ export class MaterialLibrary implements MaterialSource {
         worldUv: o.worldUv,
       },
     };
-    const opts: MaterialOptions = { uvMeters: o.uvMeters ?? 1, vertexColors: o.vertexColors ?? true, envMapIntensity: o.envMapIntensity ?? 0.4, normalScale: o.normalScale, patch };
+    const opts: MaterialOptions = { uvMeters: o.uvMeters ?? 1, vertexColors: o.vertexColors ?? true, envMapIntensity: o.envMapIntensity ?? 0.4, normalScale: o.normalScale, roughness: o.roughness, patch };
     const m = this.build(owner, key, o.base ?? 'grass', opts) as THREE.MeshStandardMaterial;
     m.name = 'lib:terrain';
     const entry = this.entries.get(key)!;
