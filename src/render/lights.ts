@@ -171,9 +171,9 @@ export class Lights {
     sorted.forEach((pr, i) => {
       pr.light.visible = i < budget;
       // Compensate for dropped lights on low tiers so the room is not darker.
-      pr.light.intensity = pr.base * (p.pointLights < 6 ? 1.4 : 1);
+      pr.light.intensity = pr.base * (p.pointLights < 6 ? 1.2 : 1);
     });
-    this.hemi.intensity = p.tier === 'low' ? 0.7 : 0.55;
+    this.hemi.intensity = p.tier === 'low' ? 0.6 : 0.55;
   }
 
   /** Request re-render of static shadow maps on next frame. */
@@ -183,7 +183,7 @@ export class Lights {
   }
 
   update(time: number): void {
-    const boost = this.profile && this.profile.pointLights < 6 ? 1.4 : 1;
+    const boost = this.profile && this.profile.pointLights < 6 ? 1.2 : 1;
     for (const p of this.practicals) {
       if (!p.light.visible || p.flicker === 0) continue;
       const n = Math.sin(time * 7.3 + p.phase) * 0.5 + Math.sin(time * 17.1 + p.phase * 2.3) * 0.3 + Math.sin(time * 2.1 + p.phase) * 0.2;

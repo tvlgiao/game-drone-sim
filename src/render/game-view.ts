@@ -18,6 +18,10 @@ import { ParticlePool } from './vfx/particles';
 import { Shockwaves } from './vfx/shockwave';
 import { XrPanel } from './xr-panel';
 import { HeadingArrow } from './heading-arrow';
+import { captureEnvironment } from './ibl';
+import { levelLook, type LevelLook, type ToneMapper } from './looks';
+import { MaterialLibrary } from './materials/library';
+import { findSun, SunCascades } from './shadows';
 
 export interface ViewFrame {
   dt: number;
@@ -38,6 +42,11 @@ export interface ViewFrame {
 }
 
 const FX_SCALE: Record<QualityTier, number> = { ultra: 1, high: 0.85, medium: 0.55, low: 0.3 };
+const TONE_MAPPING: Record<ToneMapper, THREE.ToneMapping> = {
+  agx: THREE.AgXToneMapping,
+  aces: THREE.ACESFilmicToneMapping,
+  neutral: THREE.NeutralToneMapping,
+};
 
 const _v = new THREE.Vector3();
 const _n = new THREE.Vector3();
@@ -71,6 +80,8 @@ export class GameView {
   private level: LevelDef;
   private levelView: LevelView;
   private readonly mats: Materials;
+  /** shared PBR presets + procedural / CC0 texture sets for scenery and drone code (see docs/10-render-pipeline.md) */
+  readonly library: MaterialLibrary;
   private rings: RingsView;
   private readonly drone: DroneModel;
   private readonly rig: CameraRig;
@@ -82,6 +93,13 @@ export class GameView {
   private readonly losMarker: LosMarker;
   private post: PostFX | null = null;
   private profile: QualityProfile;
+  private look: Readonly<LevelLook>;
+  /** look-test override of the level's tone mapper (render preview) */
+  private toneOverride: ToneMapper | null = null;
+  private readonly cascades = new SunCascades();
+  /** PMREM capture of the current level (null until a tier with environment maps asks for it) */
+  private envCapture: THREE.WebGLRenderTarget | null = null;
+  private readonly sunDir = new THREE.Vector3(0, 1, 0);
   private renderScale = 1;
   private width = 1;
   private height = 1;
@@ -124,14 +142,15 @@ export class GameView {
     });
     const r = this.renderer;
     r.outputColorSpace = THREE.SRGBColorSpace;
+    // r18x PCF: hardware-filtered Vogel-disk taps, soft edges scaled by each light's shadow.radius
     r.shadowMap.type = THREE.PCFShadowMap;
     r.shadowMap.autoUpdate = true; // per-light autoUpdate=false keeps static maps static
     r.info.autoReset = false;
-    r.toneMappingExposure = 1.05;
     r.xr.enabled = opts.xr === true;
 
     const scene = this.scene;
     this.mats = new Materials(r.capabilities.getMaxAnisotropy(), mobile ? MOBILE_MAX_TEXTURE : 2048);
+    this.library = new MaterialLibrary(this.profile, { anisotropy: r.capabilities.getMaxAnisotropy() });
 
     this.drone = new DroneModel(this.mats);
     scene.add(this.drone.root);
@@ -157,6 +176,8 @@ export class GameView {
     scene.add(this.xrDolly);
 
     this.level = level.def;
+    this.look = levelLook(level.def);
+    void this.library.preload(level.def.id);
     this.levelView = this.buildLevelView(level.def);
     this.rings = new RingsView(level.def.rings);
     this.attachLevel(level);
@@ -171,10 +192,16 @@ export class GameView {
    * materials, FX pools, post FX) stay.
    */
   loadLevel(level: LevelRuntime): void {
+    this.cascades.detach();
+    this.envCapture?.dispose();
+    this.envCapture = null;
+    this.scene.environment = null;
     this.levelView.dispose();
     this.rings.group.removeFromParent();
     this.rings.dispose();
     this.level = level.def;
+    this.look = levelLook(level.def);
+    void this.library.preload(level.def.id);
     this.levelView = this.buildLevelView(level.def);
     this.rings = new RingsView(level.def.rings);
     this.attachLevel(level);
@@ -277,8 +304,10 @@ export class GameView {
     if (xr) {
       r.render(this.scene, this.xrCam);
     } else if (this.post) {
-      const ca = this.rig.fpvWeight * THREE.MathUtils.clamp((f.speed - 5) / 14, 0, 1);
-      this.post.setAberration(ca);
+      const fast = this.rig.fpvWeight * THREE.MathUtils.clamp((f.speed - 5) / 14, 0, 1);
+      this.post.setAberration(f.still ? 0 : fast);
+      this.post.setMotionBlur(f.still ? 0 : 0.5 * fast * fast);
+      this.post.setStill(f.still ? f.drone.position : null);
       this.bloomPulse = Math.max(0, this.bloomPulse - dt * 2.5);
       this.post.setBloomBoost(1 + this.bloomPulse * 0.8);
       this.post.render(dt);
@@ -542,20 +571,82 @@ export class GameView {
   private applyQuality(): void {
     const p = this.profile;
     const r = this.renderer;
+    const look = this.toneOverride ? { ...this.look, toneMapping: this.toneOverride } : this.look;
     r.shadowMap.enabled = p.shadows;
+    this.library.setProfile(p);
     this.levelView.setQuality(p);
+    this.cascades.apply(this.levelView.group, p);
     this.levelView.refreshShadows();
-    this.scene.environment = p.envMap ? this.levelView.environment : null;
+    const sun = findSun(this.levelView.group);
+    if (sun) this.sunDir.setFromMatrixPosition(sun.matrixWorld).sub(_v.setFromMatrixPosition(sun.target.matrixWorld)).normalize();
+    this.scene.environment = p.envMap ? this.environmentFor(p) : null;
+    this.scaleHemiLights(this.scene.environment !== null && this.envCapture !== null ? look.hemiWithIbl : 1);
     if (p.post) {
       if (!this.post) this.post = new PostFX(r, this.scene, this.rig.camera);
-      this.post.setBloomThreshold(this.levelView.bloomThreshold);
-      this.post.configure(p);
+      this.post.setBloomThreshold(Math.max(this.levelView.bloomThreshold, look.bloom.threshold));
+      this.post.setSunDirection(this.sunDir);
+      this.post.configure(p, look);
+      this.post.setSize(this.width, this.height);
       r.toneMapping = THREE.NoToneMapping;
+      r.toneMappingExposure = 1;
     } else {
       this.post?.dispose();
       this.post = null;
-      r.toneMapping = THREE.ACESFilmicToneMapping;
+      r.toneMapping = TONE_MAPPING[look.toneMapping];
+      r.toneMappingExposure = look.exposure;
     }
+  }
+
+  /**
+   * Captured environment of the current level, made on first use: the room or meadow as lit, seen
+   * from the middle of the course. Falls back to the level view's stand-in if the capture fails.
+   */
+  private environmentFor(p: QualityProfile): THREE.Texture {
+    if (!this.envCapture) {
+      const def = this.level;
+      const pos = def.kind === 'indoor' ? new THREE.Vector3(0, Math.min(2.6, def.room.size[1] * 0.45), 0) : new THREE.Vector3(0, 4, 0);
+      this.levelView.group.updateMatrixWorld(true);
+      try {
+        this.envCapture = captureEnvironment(this.renderer, this.scene, [this.levelView.group], {
+          position: pos,
+          size: p.envSize,
+          near: def.kind === 'indoor' ? 0.05 : 0.5,
+          far: def.kind === 'indoor' ? 60 : 1200,
+        });
+      } catch {
+        return this.levelView.environment;
+      }
+      // the capture rendered the static shadow maps from its own views; redraw them for the game camera
+      this.levelView.refreshShadows();
+    }
+    return this.envCapture.texture;
+  }
+
+  /**
+   * Scales the level's hemisphere lights against their own last setting (level views may reset them
+   * on a quality change; a value this method wrote is recognised and not compounded).
+   */
+  private scaleHemiLights(k: number): void {
+    this.levelView.group.traverse((o) => {
+      const h = o as THREE.HemisphereLight;
+      if (!h.isHemisphereLight) return;
+      const ud = h.userData as { iblBase?: number; iblSet?: number };
+      const base = ud.iblSet !== undefined && h.intensity === ud.iblSet ? ud.iblBase! : h.intensity;
+      ud.iblBase = base;
+      h.intensity = base * k;
+      ud.iblSet = h.intensity;
+    });
+  }
+
+  /** Look-test hook: force a tone mapper (null = the level's), rebuilding the post stack. */
+  setToneMapping(mode: ToneMapper | null): void {
+    this.toneOverride = mode;
+    this.applyQuality();
+  }
+
+  /** The level look in use (tone mapper reflects a look-test override). */
+  get currentLook(): Readonly<LevelLook> {
+    return this.toneOverride ? { ...this.look, toneMapping: this.toneOverride } : this.look;
   }
 
   setRenderScale(scale: number): void {
@@ -600,6 +691,9 @@ export class GameView {
   dispose(): void {
     this.post?.dispose();
     this.post = null;
+    this.cascades.detach();
+    this.envCapture?.dispose();
+    this.envCapture = null;
     this.losMarker.dispose();
     this.xrPanel.dispose();
     this.arrow.dispose();
@@ -614,6 +708,7 @@ export class GameView {
     this.contact.dispose();
     this.fill.dispose();
     this.mats.dispose();
+    this.library.dispose();
     this.scene.clear();
     this.renderer.dispose();
   }
