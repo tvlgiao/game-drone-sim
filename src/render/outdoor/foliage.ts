@@ -102,6 +102,9 @@ export function barkTexture(size: number): THREE.DataTexture {
   return dataTexture(data, size, size, { srgb: true });
 }
 
+/** blob radius × (1 + bump) plus the cards' fringe, in blob radii */
+const CARD_REACH = 1.42;
+
 const LEAF = [0x3f7a35, 0x4c8a3a, 0x5a9440, 0x3b6e34, 0x6a9a3e] as const;
 const NEEDLE = [0x2c5a3a, 0x284f35, 0x355f3c] as const;
 
@@ -262,11 +265,11 @@ export class VegBuilder {
     for (let i = 0; i < count; i++) {
       const th = rnd() * Math.PI * 2;
       const ph = Math.acos(rnd() * 1.6 - 0.6);
-      const d = r * (0.75 + rnd() * 0.25);
+      const d = r * (0.45 + rnd() * 0.25);
       const px = cx + Math.sin(ph) * Math.cos(th) * d;
       const py = cy + Math.cos(ph) * d * 0.86;
       const pz = cz + Math.sin(ph) * Math.sin(th) * d;
-      const s = r * (0.95 + rnd() * 0.5);
+      const s = r * (0.95 + rnd() * 0.45);
       const g = new THREE.PlaneGeometry(s, s);
       this.place(g, px, py, pz, (rnd() - 0.5) * 1.2, rnd() * Math.PI, (rnd() - 0.5) * 1.2);
       // cards shade like the leaf mass they sit on: normals point out of the blob
@@ -283,6 +286,7 @@ export class VegBuilder {
     const ry = (h - crownLo) / 2;
     const trunkH = crownLo + ry * 0.5;
     const lean = new THREE.Vector2((rnd() - 0.5) * 0.35, (rnd() - 0.5) * 0.35);
+    const leanLen = lean.length();
     this.trunk(x, y0, z, 0.22, 0.1, trunkH, lean, h, swayTop);
     const base = new THREE.Color(LEAF[Math.floor(rnd() * LEAF.length)]!);
     const crownC = new THREE.Vector3(x + lean.x, y0 + crownLo + ry, z + lean.y);
@@ -293,17 +297,18 @@ export class VegBuilder {
       const t = (i + 0.5) / n;
       const elev = (t * 2 - 1) * 0.9;
       const br = r * (0.36 + rnd() * 0.14);
-      const reach = Math.sqrt(Math.max(0, 1 - elev * elev)) * Math.max(0, r - br) * (0.7 + rnd() * 0.3);
+      // blob (+16 % bump) and its cards reach CARD_REACH × br from its centre: keep that inside the canopy collider
+      const reach = Math.sqrt(Math.max(0, 1 - elev * elev)) * Math.max(0, r - br * CARD_REACH - leanLen) * (0.7 + rnd() * 0.3);
       const cx = crownC.x + Math.cos(a) * reach;
       const cz = crownC.z + Math.sin(a) * reach;
-      const cy = THREE.MathUtils.clamp(crownC.y + elev * (ry - br * 0.6), y0 + crownLo + br * 0.5, y0 + h - br * 0.86);
+      const cy = THREE.MathUtils.clamp(crownC.y + elev * (ry - br * 0.6), y0 + crownLo + br * 0.5, y0 + h - br * CARD_REACH);
       const tint = base.clone().offsetHSL((rnd() - 0.5) * 0.03, (rnd() - 0.5) * 0.1, (rnd() - 0.5) * 0.06);
       this.blob(cx, cy, cz, br, tint, crownC, Math.max(r, ry), y0, h, swayTop);
       this.cardsOn(cx, cy, cz, br, tint, y0, h, swayTop, rnd, 6);
       if (i % 3 === 0) this.branch(fork, new THREE.Vector3(cx, cy - br * 0.2, cz), 0.06, y0, h, swayTop);
     }
-    const tb = r * 0.5;
-    this.blob(crownC.x, Math.min(y0 + h - tb * 0.86, crownC.y + ry * 0.45), crownC.z, tb, base.clone().offsetHSL(0, 0, 0.04), crownC, Math.max(r, ry), y0, h, swayTop);
+    const tb = Math.min(r * 0.5, (r - leanLen) / 1.18);
+    this.blob(crownC.x, Math.min(y0 + h - tb * 1.18, crownC.y + ry * 0.45), crownC.z, tb, base.clone().offsetHSL(0, 0, 0.04), crownC, Math.max(r, ry), y0, h, swayTop);
   }
 
   private conifer(x: number, y0: number, z: number, r: number, h: number, yaw: number, rnd: () => number): void {
@@ -314,9 +319,10 @@ export class VegBuilder {
     const start = h * 0.18;
     for (let k = 0; k < tiers; k++) {
       const t = k / (tiers - 1);
-      const tr = r * (1 - t * 0.82) * (0.92 + rnd() * 0.1);
+      // ragged hem bumps the radius by up to 10 %: stay inside the canopy collider
+      const tr = (r / 1.1) * (1 - t * 0.82) * (0.92 + rnd() * 0.08);
       const th = (h - start) * (0.34 - t * 0.12);
-      const cy = start + t * (h - start - th * 0.9);
+      const cy = start + t * (h - start - th);
       const g = new THREE.ConeGeometry(tr, th, 11, 2, true);
       const pos = g.attributes.position;
       for (let i = 0; i < pos.count; i++) {

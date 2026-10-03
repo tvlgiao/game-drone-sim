@@ -210,7 +210,7 @@ export function buildCity(windows: readonly WindowInfo[], room: readonly [number
   const moonTheta = Math.atan2(toMoon.x, toMoon.z);
   const moonU = (((moonTheta / (Math.PI * 2)) % 1) + 1) % 1;
 
-  const skyTex = skyTexture(texSize(2048, maxTexture), texSize(512, maxTexture / 2), moonU);
+  const skyTex = skyTexture(texSize(2048, maxTexture * 2), texSize(512, maxTexture / 2), moonU);
   const skyMat = new THREE.MeshBasicMaterial({ map: skyTex, side: THREE.BackSide, fog: false, depthWrite: false });
   const skyGeo = new THREE.CylinderGeometry(SKY_R, SKY_R, SKY_Y1 - SKY_Y0, 48, 1, true);
   skyGeo.translate(0, (SKY_Y0 + SKY_Y1) / 2, 0);
@@ -221,7 +221,7 @@ export function buildCity(windows: readonly WindowInfo[], room: readonly [number
   disposables.push(skyTex, skyMat, skyGeo);
 
   const walls = new Set(windows.map((w) => w.wall));
-  const facadeTex = facadeTexture(texSize(1024, maxTexture));
+  const facadeTex = facadeTexture(texSize(1024, Math.max(512, maxTexture)));
   const facadeMat = new THREE.MeshBasicMaterial({ map: facadeTex, vertexColors: true, color: new THREE.Color(1.5, 1.5, 1.5) });
   disposables.push(facadeTex, facadeMat);
   const city = new StaticBatcher();

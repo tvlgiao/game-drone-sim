@@ -255,7 +255,7 @@ function table(f: PropFrame, m: LoftMaterials, w: number, h: number, d: number):
   const tx = finish('plasticDark');
   f.add('props', m.props, new RoundedBoxGeometry(0.2, 0.05, 0.13, 2, 0.015), 0.32, h + 0.025, -0.06, 0, -0.4, 0, tx);
   for (const sx of [-0.05, 0.05]) f.add('props', m.props, new THREE.CylinderGeometry(0.006, 0.006, 0.04, 6), 0.32 + sx, h + 0.07, -0.06, 0, 0, 0, finish('steelBlack'));
-  f.add('props', m.props, new THREE.CylinderGeometry(0.004, 0.006, 0.16, 6), 0.4, h + 0.12, -0.12, 0.5, 0, 0.2, finish('rubber'));
+  f.add('props', m.props, new THREE.CylinderGeometry(0.004, 0.006, 0.16, 6), 0.36, h + 0.058, -0.13, 0, -0.4, Math.PI / 2 - 0.05, finish('rubber'));
   // a spare 4S pack
   f.add('props', m.props, new THREE.BoxGeometry(0.07, 0.035, 0.035), -0.05, h + 0.0175, 0.18, 0, 0.6, 0, { color: 0xe8b81c, rm: [0.4, 0] });
 }
@@ -350,7 +350,8 @@ function plant(f: PropFrame, m: LoftMaterials, w: number, h: number, rnd: () => 
       const ly = potH + t * len;
       const la = a + k * 2.4 + rnd() * 0.4;
       const r = Math.min(w / 2 - 0.2, lean * t + 0.02);
-      const s = 0.75 + (1 - t) * 0.5 + rnd() * 0.2;
+      // a 0.24 m blade tilted out (and curled) reaches ~1.1× its length sideways: keep it inside the footprint
+      const s = Math.min(0.75 + (1 - t) * 0.5 + rnd() * 0.2, (w / 2 - r - 0.08) / (0.24 * 1.1));
       f.add('leaf', m.leaf, leafGeometry(0.24, 0.1), Math.cos(la) * r, ly, Math.sin(la) * r, 0.65 + rnd() * 0.5, -la + Math.PI / 2, (rnd() - 0.5) * 0.4, {}, s, s, s);
     }
   }
@@ -389,22 +390,26 @@ function shelf(f: PropFrame, m: LoftMaterials, w: number, h: number, d: number, 
         }
         x += 0.05;
       } else if (pick < 0.68) {
-        const bw = 0.22 + rnd() * 0.16;
+        const bw = Math.min(0.22 + rnd() * 0.16, w / 2 - 0.05 - x);
+        if (bw < 0.12) break;
         const bh = Math.min(clear, 0.15 + rnd() * 0.2);
         const bd = Math.min(d - 0.08, 0.25 + rnd() * 0.1);
         f.add('props', m.props, new THREE.BoxGeometry(bw, bh, bd), x + bw / 2, y0 + bh / 2, 0, 0, (rnd() - 0.5) * 0.15, 0, rnd() < 0.6 ? finish('cardboard') : finish('plasticDark'));
         x += bw + 0.04;
       } else if (pick < 0.8) {
-        const r = 0.04 + rnd() * 0.035;
+        const r = Math.min(0.04 + rnd() * 0.035, (w / 2 - 0.05 - x) / 2);
+        if (r < 0.03) break;
         const jh = Math.min(clear, 0.1 + rnd() * 0.14);
         f.add('props', m.props, new THREE.CylinderGeometry(r, r * 0.9, jh, 16), x + r, y0 + jh / 2, 0.04, 0, 0, 0, finish('ceramic'));
         x += r * 2 + 0.05;
       } else if (pick < 0.9) {
+        if (x + 0.13 > w / 2 - 0.05) break;
         // spare quad props, battery packs
         f.add('props', m.props, new THREE.BoxGeometry(0.075, 0.035, 0.035), x + 0.04, y0 + 0.0175, 0.02, 0, rnd(), 0, { color: 0xe8b81c, rm: [0.4, 0] });
         f.add('props', m.props, new THREE.BoxGeometry(0.075, 0.035, 0.035), x + 0.05, y0 + 0.0525, 0.03, 0, rnd(), 0, { color: 0xd8182f, rm: [0.4, 0] });
         x += 0.13;
       } else {
+        if (x + 0.16 > w / 2 - 0.05) break;
         f.add('props', m.props, new THREE.CylinderGeometry(0.06, 0.05, 0.1, 12), x + 0.06, y0 + 0.05, 0, 0, 0, 0, finish('terracotta'));
         for (let k = 0; k < 5; k++) {
           const a = k * 1.3;

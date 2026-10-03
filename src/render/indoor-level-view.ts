@@ -5,6 +5,7 @@
  */
 import * as THREE from 'three';
 import type { FormFactor } from '../core/device';
+import { isQuestBrowser } from '../core/xr';
 import { MOBILE_MAX_TEXTURE, qualityProfile, type QualityProfile } from '../core/quality';
 import type { IndoorLevel } from '../types';
 import { StaticBatcher } from './batcher';
@@ -13,6 +14,7 @@ import type { LevelFrame, LevelView } from './level-view';
 import { Lights, MOON_DIR } from './lights';
 import { buildCity, type CityBackdrop } from './loft/city';
 import { Halos } from './loft/halos';
+import { MoonPools } from './loft/moon-pools';
 import type { Materials } from './materials';
 import { buildProps, type LiveProps } from './props';
 import { buildRoom } from './room';
@@ -30,6 +32,8 @@ const NO_CAST = new Set(['floor', 'rug', 'glass', 'glow', 'bulbShell', 'neon', '
 /** meshes that are unlit / additive: no shadow lookups either */
 const NO_RECEIVE = new Set(['glass', 'glow', 'bulbShell', 'neon', 'spill']);
 const RENDER_ORDER: Record<string, number> = { decals: 1, spill: 4, neon: 4, bulbShell: 4, glass: 6 };
+/** Lights' moon intensity with shadows (its constructor value) */
+const MOON_INTENSITY = 2.6;
 
 export class IndoorLevelView implements LevelView {
   readonly group = new THREE.Group();
@@ -44,6 +48,7 @@ export class IndoorLevelView implements LevelView {
   private readonly staticMeshes: THREE.Mesh[];
   private readonly city: CityBackdrop;
   private readonly halos: Halos;
+  private readonly pools: MoonPools;
   private readonly atmos: Atmosphere;
   private readonly probe: THREE.WebGLRenderTarget;
 
@@ -51,7 +56,9 @@ export class IndoorLevelView implements LevelView {
   constructor(level: IndoorLevel, renderer: THREE.WebGLRenderer, _shared: Materials, form: FormFactor) {
     this.group.name = 'world';
     this.fog = new THREE.FogExp2(level.env.fog.color, 2.15 / level.env.fog.viewDistance);
-    const maxTexture = form === 'desktop' ? 2048 : MOBILE_MAX_TEXTURE;
+    // phones, tablets and the Quest (mobile GPU + CPU: generation time and memory) get half-size maps
+    const quest = typeof navigator !== 'undefined' && isQuestBrowser(navigator.userAgent);
+    const maxTexture = form === 'desktop' && !quest ? 2048 : MOBILE_MAX_TEXTURE / 2;
     this.mats = new LoftMaterials({ anisotropy: renderer.capabilities.getMaxAnisotropy(), maxTexture, room: level.room.size, puddles: PUDDLES });
     const batch = new StaticBatcher();
     const windows = buildRoom(level.room, this.mats, batch);
@@ -73,7 +80,8 @@ export class IndoorLevelView implements LevelView {
     this.mats.setProbe(this.environment);
 
     this.halos = new Halos(this.live.lamps);
-    this.group.add(this.halos.mesh);
+    this.pools = new MoonPools(windows, MOON_DIR);
+    this.group.add(this.halos.mesh, this.pools.mesh);
 
     const warm = level.props
       .filter((p) => p.kind === 'bulb-hanging' || p.kind === 'lamp-floor')
@@ -97,6 +105,10 @@ export class IndoorLevelView implements LevelView {
     this.lights.setQuality(p);
     this.atmos.setQuality(p.particles, p.shafts);
     this.halos.setBloom(p.bloom);
+    // without shadow maps the moon would light the whole floor through the walls: keep a little of it as
+    // fill and draw the window pools instead
+    this.pools.mesh.visible = !p.shadows;
+    this.lights.moon.intensity = p.shadows ? MOON_INTENSITY : MOON_INTENSITY * 0.22;
   }
 
   refreshShadows(): void {
@@ -109,6 +121,7 @@ export class IndoorLevelView implements LevelView {
     for (const d of this.live.disposables) d.dispose();
     this.city.dispose();
     this.halos.dispose();
+    this.pools.dispose();
     this.atmos.dispose();
     this.lights.dispose();
     this.probe.dispose();

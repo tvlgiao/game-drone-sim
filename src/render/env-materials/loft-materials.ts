@@ -157,7 +157,7 @@ export class LoftMaterials {
     this.neon = reg(new THREE.MeshBasicMaterial({ map: neon, vertexColors: true, transparent: true, blending: THREE.AdditiveBlending, depthWrite: false, fog: false }));
     this.radial = tex(radialTexture(128));
     this.spill = reg(new THREE.MeshBasicMaterial({ map: this.radial, vertexColors: true, transparent: true, blending: THREE.AdditiveBlending, depthWrite: false }));
-    const decals = tex(decalAtlas(texSize(2048, o.maxTexture)));
+    const decals = tex(decalAtlas(texSize(2048, Math.max(1024, o.maxTexture))));
     this.decals = reg(new THREE.MeshStandardMaterial({ map: decals, transparent: true, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -4, polygonOffsetUnits: -4, roughness: 0.78, metalness: 0, envMapIntensity: 0.35 }));
     this.cookie = tex(cookieMap(small));
   }
