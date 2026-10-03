@@ -56,6 +56,25 @@ describe('birds', () => {
     const events: number[] = [];
     b.update(1 / 60, d[0]!, d[1]!, d[2]!);
     b.drainScatters((k) => events.push(k));
+    // the flock bursts apart: each bird flees straight away from the drone
+    const spread = (): number => {
+      const c0 = new Float64Array(3);
+      b.centre(0, c0);
+      let m = 0;
+      for (let i = 0; i < b.perFlock; i++) m += Math.hypot(b.x[i]! - c0[0]!, b.y[i]! - c0[1]!, b.z[i]! - c0[2]!);
+      return m / b.perFlock;
+    };
+    const s0 = spread();
+    // within a quarter second every bird of the flock heads away from the drone
+    for (let i = 0; i < 15; i++) b.update(1 / 60, d[0]!, d[1]!, d[2]!);
+    let away = 0;
+    for (let i = 0; i < b.perFlock; i++) {
+      const ox = b.x[i]! - d[0]!, oy = b.y[i]! - d[1]!, oz = b.z[i]! - d[2]!;
+      if (ox * b.vx[i]! + oy * b.vy[i]! + oz * b.vz[i]! > 0) away++;
+    }
+    expect(away).toBeGreaterThan(b.perFlock * 0.8);
+    for (let i = 0; i < 15; i++) b.update(1 / 60, d[0]!, d[1]!, d[2]!);
+    expect(spread()).toBeGreaterThan(s0 * 1.3);
     expect(events).toEqual([0]);
     expect(b.state[0]).toBe(BIRD_STATE.scattered);
     // the other flock, 400 m away, keeps circling
@@ -119,6 +138,7 @@ describe('river flow', () => {
     let checked = 0;
     let downhill = 0;
     let along = 0;
+    let parallel = 0;
     for (let k = 0; k < n; k++) {
       const fx = flow[k * 2]!;
       const fz = flow[k * 2 + 1]!;
@@ -137,10 +157,17 @@ describe('river flow', () => {
       const dAlong = Math.abs(world.base.sample(x + (fx / sp) * 4, z + (fz / sp) * 4, s).riverD - d0);
       const dAcross = Math.abs(world.base.sample(x - (fz / sp) * 4, z + (fx / sp) * 4, s).riverD - d0);
       if (dAlong <= dAcross + 0.5) along++;
+      // and nothing of it runs across the channel (towards a bank)
+      const gx = world.base.sample(x + 1, z, s).riverD - world.base.sample(x - 1, z, s).riverD;
+      const gz = world.base.sample(x, z + 1, s).riverD - world.base.sample(x, z - 1, s).riverD;
+      const gl = Math.hypot(gx, gz);
+      if (gl > 1e-6 && Math.abs((fx * gx + fz * gz) / (sp * gl)) < 0.35) parallel++;
     }
     expect(checked).toBeGreaterThan(80);
     expect(downhill / checked).toBeGreaterThan(0.9);
     expect(along / checked).toBeGreaterThan(0.75);
+    // the raw surface slope points mostly across, towards the banks (0 % within 70° of the channel); along it: > 45 %
+    expect(parallel / checked).toBeGreaterThan(0.45);
   });
 
   it('flat water (a lake, the City river) does not flow', () => {

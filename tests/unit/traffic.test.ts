@@ -217,6 +217,34 @@ describe('city traffic simulation', () => {
     expect(t.signals.state(lane.node, lane.approach, crossedAt - DT)).toBe(SIGNAL.green);
   });
 
+  it('two cars reaching the box in the same step from crossing approaches: only one gets in', () => {
+    const t = createCityTraffic(city, { maxCars: 2, radius: 5000 });
+    const sim = t.sim;
+    const node = t.roads.nodes.findIndex((n) => n.approaches.includes(0) && n.approaches.includes(1));
+    const lx = t.roads.edges.find((e) => e.kind === EDGE_LANE && e.node === node && e.approach === 0)!;
+    const lz = t.roads.edges.find((e) => e.kind === EDGE_LANE && e.node === node && e.approach === 1)!;
+    // a moment the x axis has green (the z car committed on the yellow before)
+    let t0 = 0;
+    while (t.signals.state(node, 0, t0) !== SIGNAL.green || t.signals.state(node, 0, t0 - 0.2) === SIGNAL.green) t0 += 0.05;
+    sim.time = t0 + 0.05;
+    sim.target = 0;
+    const spawn = (sim as unknown as { spawnAt(e: number, s: number, type: number): number }).spawnAt.bind(sim);
+    for (const order of [
+      [lx, lz],
+      [lz, lx],
+    ]) {
+      sim.clear();
+      const cars = order.map((l) => spawn(l.id, l.length - 0.05, 0));
+      for (const c of cars) {
+        sim.v[c] = 8;
+        if (sim.edge[c] === lz.id) sim.flags[c] |= CAR_FLAG.committed;
+      }
+      sim.update(DT, lx.px[1]!, 500, lx.pz[1]!, 500);
+      const inBox = cars.filter((c) => sim.alive[c] && t.roads.edges[sim.edge[c]!]!.kind === EDGE_CONNECTOR);
+      expect(inBox.length).toBe(1);
+    }
+  });
+
   it('brakes for the drone hovering low in its lane, not for one flying over', () => {
     const t = createCityTraffic(city, { maxCars: 1, radius: 2000 });
     const sim = t.sim;
@@ -265,28 +293,26 @@ describe('city traffic simulation', () => {
     sim.update(DT, fx, 30, fz, 30);
     check(fx, fz);
     expect(sim.count).toBeGreaterThan(30);
-    // from then on new cars appear between 0.6 R and R, never under the drone
+    // from then on, while the drone flies on at 15 m/s, new cars appear between 0.6 R and R, never under it
     const alive = new Uint8Array(sim.alive);
     let fresh = 0;
-    run(
-      t,
-      900,
-      () => {
-        for (let c = 0; c < sim.capacity; c++) {
-          if (sim.alive[c] && !alive[c]) {
-            fresh++;
-            const d = Math.hypot(sim.x[c]! - fx, sim.z[c]! - fz);
-            expect(d).toBeGreaterThanOrEqual(0.6 * 250 - 6);
-            expect(d).toBeLessThanOrEqual(250 + 6);
-          }
-          alive[c] = sim.alive[c]!;
+    let px = fx;
+    for (let f = 0; f < 1800; f++) {
+      px = fx - (f / 60) * 15;
+      sim.update(DT, px, 30, fz, 30);
+      for (let c = 0; c < sim.capacity; c++) {
+        if (sim.alive[c] && !alive[c]) {
+          fresh++;
+          const d = Math.hypot(sim.x[c]! - px, sim.z[c]! - fz);
+          expect(d).toBeGreaterThanOrEqual(0.6 * 250 - 6);
+          expect(d).toBeLessThanOrEqual(250 + 6);
         }
-      },
-      [fx, 30, fz],
-    );
-    expect(fresh).toBeGreaterThan(0);
+        alive[c] = sim.alive[c]!;
+      }
+    }
+    expect(fresh).toBeGreaterThan(10);
     // and it fills up again
-    run(t, 600, () => check(fx, fz), [fx, 30, fz]);
+    run(t, 600, () => check(px, fz), [px, 30, fz]);
     expect(sim.count).toBeGreaterThan(100);
   });
 

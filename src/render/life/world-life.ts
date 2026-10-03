@@ -14,7 +14,7 @@ import { lifeBudget, type LifeBudget } from './budget';
 import { TrafficView } from './traffic-view';
 import { BirdsView, BIRD_KIND, type BirdGroup } from './birds-view';
 import { BirdFlocks } from '../../world/life/birds';
-import { blockCentre, CITY_BLOCKS, CITY_RIVER, streetLine } from '../../world/city-gen';
+import { blockCentre, CITY_BLOCKS, CITY_RIVER } from '../../world/city-gen';
 import { countrysideAround } from '../../world/life/countryside';
 import { buildRuralNetwork } from '../../world/traffic/rural-roads';
 import { TrafficSim } from '../../world/traffic/traffic-sim';
@@ -62,8 +62,13 @@ export class WorldLife {
       // pigeons over the park and the streets around the take-off, gulls over the river
       let park: [number, number] = [blockCentre(10), blockCentre(4)];
       for (let j = 0; j < CITY_BLOCKS; j++) for (let i = 0; i < CITY_BLOCKS; i++) if (c.city.blockClass(i, j) === 'park') park = [blockCentre(i), blockCentre(j)];
-      const homes: [number, number][] = [park, [streetLine(2), streetLine(5)], [streetLine(4), streetLine(3)]];
-      groups.push({ sim: new BirdFlocks({ seed, flocks: 3, birds: 16, speed: 11, radius: [18, 34], height: [22, 48], keep: Infinity, place: [90, 220], ground, homes }, s[0], s[2]), kind: BIRD_KIND.pigeon, scale: 0.85 });
+      // pigeons circle over the park and the two low-rise blocks nearest the take-off, above their roofs (≤ 20 m)
+      const low: [number, number, number][] = [];
+      for (let j = 0; j < CITY_BLOCKS; j++)
+        for (let i = 0; i < CITY_BLOCKS; i++) if (c.city.blockClass(i, j) === 'low') low.push([blockCentre(i), blockCentre(j), (blockCentre(i) - s[0]) ** 2 + (blockCentre(j) - s[2]) ** 2]);
+      low.sort((a, b) => a[2] - b[2]);
+      const homes: [number, number][] = [park, ...low.slice(0, 2).map((b) => [b[0], b[1]] as [number, number])];
+      groups.push({ sim: new BirdFlocks({ seed, flocks: 3, birds: 16, speed: 11, radius: [14, 24], height: [30, 44], keep: Infinity, place: [90, 220], ground, homes }, s[0], s[2]), kind: BIRD_KIND.pigeon, scale: 0.85 });
       groups.push({ sim: new BirdFlocks({ seed: seed + 1, flocks: 1, birds: 10, speed: 8.5, radius: [30, 55], height: [12, 30], keep: Infinity, place: [120, 260], ground, homes: [[CITY_RIVER.x, s[2] + 120]] }, s[0], s[2]), kind: BIRD_KIND.gull, scale: 1.25 });
     } else {
       const alpine = rt.def.id === 'alpine';
