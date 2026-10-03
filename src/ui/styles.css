@@ -2530,13 +2530,15 @@ body.is-quest .ds-foot {
 /* ---------- modal dialogs (first run, tutorial complete, quit / reset confirmations) ---------- */
 .ds-ui .ds-tut-screen,
 .ds-ui .ds-screen--confirm-quit,
-.ds-ui .ds-screen--confirm-reset {
+.ds-ui .ds-screen--confirm-reset,
+.ds-ui .ds-screen--confirm-world-delete {
   background: rgba(5, 8, 14, 0.7);
 }
 
 .ds-ui .ds-tut-screen > .ds-dialog,
 .ds-ui .ds-screen--confirm-quit > .ds-dialog,
-.ds-ui .ds-screen--confirm-reset > .ds-dialog {
+.ds-ui .ds-screen--confirm-reset > .ds-dialog,
+.ds-ui .ds-screen--confirm-world-delete > .ds-dialog {
   background: linear-gradient(160deg, rgba(14, 22, 38, 0.97), rgba(7, 11, 21, 0.98));
 }
 
