@@ -10,6 +10,8 @@ import type { CityFurniture } from './city-furniture';
 import type { World } from '../world/world';
 import type { TerrainField as WorldTerrainField } from '../world/terrain-field';
 import type { ChunkStreamer } from './chunk-streamer';
+import { LifeHub } from '../world/life/hub';
+import type { CityTraffic } from '../world/traffic/city-traffic';
 
 /**
  * Generated scenery behind a level: a streamed terrain world (Alpine, Infinite) or the City. The renderer
@@ -17,7 +19,7 @@ import type { ChunkStreamer } from './chunk-streamer';
  */
 export type WorldContent =
   | { readonly kind: 'terrain'; readonly world: World; readonly stream: ChunkStreamer; readonly seed: number; readonly code: string }
-  | { readonly kind: 'city'; readonly city: City; readonly outskirts: Outskirts; readonly furniture: CityFurniture; readonly seed: number };
+  | { readonly kind: 'city'; readonly city: City; readonly outskirts: Outskirts; readonly furniture: CityFurniture; readonly seed: number; readonly traffic?: CityTraffic };
 
 /** Grid owner of a level's authored colliders (streamed chunks use their chunk keys). */
 export const LEVEL_OWNER = 'level';
@@ -38,6 +40,11 @@ export interface LevelRuntime {
   readonly ready: Promise<void>;
   /** generated levels: the world the view renders (absent for authored levels) */
   readonly content?: WorldContent;
+  /**
+   * Ambient life of the level (docs/12): moving colliders physics tests (cars, the tractor), the spatial-audio
+   * emitters and events. Every level has one; the level view fills it.
+   */
+  readonly life?: LifeHub;
   /** 0..1 while `ready` is pending (loading overlay) */
   progress?(): number;
   /** stops background work (chunk workers) once the level is no longer used */
@@ -58,6 +65,7 @@ export function createRuntime(def: LevelDef, terrain: TerrainField | null = null
     grid,
     surfaces: createSurfaces(def.props, terrain, grid),
     ready: Promise.resolve(),
+    life: new LifeHub(),
   };
 }
 

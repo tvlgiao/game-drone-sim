@@ -11,6 +11,7 @@ import { DEFAULT_FRICTION, DEFAULT_RESTITUTION, createSphereHit, shapeBoundingRa
 import { IndoorBoundary, NEAR_GROUND_AGL, OutdoorBoundary, type Boundary } from './boundary';
 import { boxTopAt, type ColliderGrid, type GridCollider } from './collider-grid';
 import { FLAT_GROUND } from './terrain';
+import type { MoverCollider, MoverSource } from '../world/life/movers';
 
 /** Ceiling-fan kinematics (design §5). */
 export const FAN_REV_PER_S = 1.4;
@@ -105,6 +106,9 @@ export class PhysicsWorld {
   private readonly colliders: WorldCollider[] = [];
   private grid: ColliderGrid | null = null;
   private readonly found: GridCollider[] = [];
+  /** outdoor kinematic colliders that move every frame (traffic): queried around the drone each step */
+  private movers: MoverSource | null = null;
+  private readonly moverFound: MoverCollider[] = [];
   private foundCount = 0;
   /** box [min, max] the last grid query covered */
   private readonly foundMin = new Vector3();
@@ -182,6 +186,7 @@ export class PhysicsWorld {
     this.groundBoxes.length = 0;
     this.fanAngle = 0;
     this.grid = null;
+    this.movers = null;
     this.foundCount = 0;
     this.foundMin.set(Infinity, Infinity, Infinity);
     this.foundMax.set(-Infinity, -Infinity, -Infinity);
@@ -195,6 +200,7 @@ export class PhysicsWorld {
       } else {
         this.boundary = new OutdoorBoundary(level.terrain ?? FLAT_GROUND, level.terrain ? 'terrain' : 'ground');
         this.grid = level.grid;
+        this.movers = level.life?.movers ?? null;
         if (!this.grid) colliders = level.colliders;
       }
       spawn = d.spawn;
@@ -473,8 +479,44 @@ export class PhysicsWorld {
         if (sphereVsShape(c, r, col.shape, hit)) this.addContact(col.id, col.restitution, col.friction, col.moving ? col : null);
       }
     }
+    if (this.movers) this.collideMovers();
     if (this.contactCount === 0) return;
     this.resolve(dt);
+  }
+
+  /** Cars and other kinematic movers near the drone: contacts carry the mover's velocity. */
+  private collideMovers(): void {
+    const s = this.state;
+    const p = s.position;
+    const m = this.reach + GRID_MARGIN;
+    const n = this.movers!.queryMovers(p.x - m, p.y - m, p.z - m, p.x + m, p.y + m, p.z + m, this.moverFound);
+    if (n === 0) return;
+    const hit = this.hit;
+    for (let i = 0; i < this.sphereLocal.length; i++) {
+      const c = this.sphereWorld[i];
+      const r = this.sphereRadius[i];
+      for (let j = 0; j < n; j++) {
+        const col = this.moverFound[j]!;
+        const sc = col.shape.center;
+        const dx = c.x - sc[0];
+        const dy = c.y - sc[1];
+        const dz = c.z - sc[2];
+        const reach = col.bound + r;
+        if (dx * dx + dy * dy + dz * dz > reach * reach) continue;
+        if (!sphereVsShape(c, r, col.shape, hit)) continue;
+        const k = this.contactCount;
+        this.addContact(col.id, col.restitution, col.friction, null);
+        if (this.contactCount > k) {
+          // re-evaluate the approach against the mover's motion
+          const e = this.extras[k];
+          const v = col.velocity;
+          e.obstacleVelocity.set(v[0], v[1], v[2]);
+          const vn = this.pointVelocity(e.r, e.obstacleVelocity, this.vp).dot(this.contactPool[k].normal);
+          e.approach = vn;
+          this.contactPool[k].impactSpeed = -vn;
+        }
+      }
+    }
   }
 
   private addContact(id: string, restitution: number, friction: number, moving: WorldCollider | null): void {
