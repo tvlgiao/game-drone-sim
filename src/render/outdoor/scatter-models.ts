@@ -75,6 +75,23 @@ function displace(g: Geo, amount: number): Geo {
   return g;
 }
 
+/**
+ * Bends the flat facet normals of a crown towards a smooth field (`smooth(x, y, z, out)` writes the unit normal
+ * of the crown's rounded shape): the lumps keep their silhouette but shade like foliage masses, not cut gems.
+ */
+function softenNormals(g: Geo, share: number, smooth: (x: number, y: number, z: number, out: THREE.Vector3) => void): Geo {
+  const p = g.getAttribute('position');
+  const n = g.getAttribute('normal');
+  const v = new THREE.Vector3();
+  const f = new THREE.Vector3();
+  for (let i = 0; i < p.count; i++) {
+    smooth(p.getX(i), p.getY(i), p.getZ(i), v);
+    f.set(n.getX(i), n.getY(i), n.getZ(i)).lerp(v, share).normalize();
+    n.setXYZ(i, f.x, f.y, f.z);
+  }
+  return g;
+}
+
 const TRUNK = 0x5a4130;
 const CONIFER = 0x2d4c2c;
 const BROADLEAF = 0x46702f;
@@ -110,6 +127,8 @@ export function coniferLod0(): Geo {
       p.setXYZ(i, x * k, p.getY(i) - 0.25 * Math.abs(jitter(Math.round(z * 10), 3, Math.round(x * 10))), z * k);
     }
     g.computeVertexNormals();
+    // a cone's own normal (out and a little up), so the tiers shade round
+    softenNormals(g, 0.65, (x, _y, z, out) => out.set(x, Math.hypot(x, z) * ((R * rk) / h), z).normalize());
     parts.push(
       colorize(g, (_x, y, _z, _nx, ny) => {
         // darker under each tier, lighter tips towards the top of the tree
@@ -126,6 +145,8 @@ function blob(rx: number, ry: number, rz: number, x: number, y: number, z: numbe
   const g = displace(new THREE.IcosahedronGeometry(1, detail), amount);
   g.scale(rx, ry, rz);
   g.translate(x, y, z);
+  // ellipsoid normal of the lump
+  softenNormals(g, 0.7, (px, py, pz, out) => out.set((px - x) / (rx * rx), (py - y) / (ry * ry), (pz - z) / (rz * rz)).normalize());
   return colorize(g, (_x, yy, _z, nx, ny, nz) => {
     const facing = 0.5 + 0.5 * (nx * 0.4 + ny * 0.8 + nz * 0.2);
     return shadeHex(hex, (0.58 + 0.46 * ((yy - y0) / h)) * (0.8 + 0.32 * facing));

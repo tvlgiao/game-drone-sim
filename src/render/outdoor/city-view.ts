@@ -131,7 +131,8 @@ if ( n.y > 0.5 ) {
   float litP = isStore > 0.5 ? 0.12 + 0.75 * uDusk : uDusk * uDusk * 0.55 + 0.01;
   float lit = step( fh3( vec3( floorI + 17.0 * isStore, colI + 3.7, seedK * 1.37 + faceI ) ), litP );
   vec3 warm = mix( vec3( 1.0, 0.7, 0.4 ), vec3( 0.85, 0.9, 1.0 ), step( 0.75, rnd ) );
-  vec3 litCol = warm * ( 0.7 + 0.6 * rnd ) * ( isStore > 0.5 ? 1.3 : 0.9 );
+  // a lit room glows, it does not outshine the sky: dimmer than the sunlit wall, a spread of warm tones
+  vec3 litCol = warm * ( 0.32 + 0.42 * rnd ) * ( isStore > 0.5 ? 1.1 : 0.75 );
   // weathering: vertical streaks, a darker base
   float streak = texture2D( uDetail, vec2( u * 0.05, yAbs * 0.004 ) ).g;
   wallCol *= ( 0.86 + 0.24 * streak ) * ( 0.8 + 0.2 * smoothstep( 0.0, 6.0, yAbs ) ) * ( 0.9 + 0.2 * grain );
@@ -154,7 +155,7 @@ if ( n.y > 0.5 ) {
   fRough = mix( 0.88, style == 0.0 ? 0.05 : 0.14, g );
   fMetal = mix( 0.0, style == 0.0 ? 0.3 : 0.05, g );
   // the sky probe has no buildings in it: windows reflect it dimmed, as if half the view were other facades
-  fRefl = mix( 1.0, style == 0.0 ? 0.7 : 0.35, g );
+  fRefl = mix( 1.0, style == 0.0 ? 0.55 : 0.16, g );
   emit = litCol * mix( lit * win * ( 1.0 - frame ), litP * cover, far ) * uLit;
 }
 diffuseColor.rgb = col;

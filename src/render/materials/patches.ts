@@ -382,7 +382,7 @@ const AFTER_COLOR = /* glsl */ `
   {
     // bare earth: a darker vertex colour redder than it is green (ploughed fields, tracks, garden beds; not the
     // bright crops), and the wet banks
-    float earth = smoothstep( 0.95, 0.85, vColor.g / max( vColor.r, 1e-3 ) ) * ( 1.0 - smoothstep( 0.26, 0.36, dot( vColor.rgb, vec3( 0.2126, 0.7152, 0.0722 ) ) ) );
+    float earth = smoothstep( 0.95, 0.85, vColor.g / max( vColor.r, 1e-3 ) ) * ( 1.0 - smoothstep( 0.18, 0.27, dot( vColor.rgb, vec3( 0.2126, 0.7152, 0.0722 ) ) ) );
     float soilW = max( earth, wet * 0.85 ) * ( 1.0 - envSnow );
     if ( soilW > 0.002 ) {
       vec3 sr = texture2D( uSoilMap, vEnvWorld.xz * uSoilScale ).rgb / max( texture2D( uSoilMap, vec2( 0.5 ), 16.0 ).rgb, vec3( 0.03 ) );
@@ -405,7 +405,8 @@ const AFTER_COLOR = /* glsl */ `
     envRockH = dot( rock / rmean, vec3( 0.333 ) ) * 0.5;
     #ifdef ENV_ROCK_TINT
     {
-      vec3 rr = rock / rmean;
+      // the scan's contrast pushed a little (a mountain face reads from a kilometre away), tinted to the level
+      vec3 rr = pow( max( rock / rmean, vec3( 0.0 ) ), vec3( 1.45 ) );
       vec3 tint = uRockTint;
       #ifdef USE_COLOR
       tint = mix( tint, vColor.rgb, 0.12 );

@@ -156,7 +156,7 @@ export class WorldLevelView implements LevelView {
       uvMeters: 1,
       rockAttribute: 'aRock',
       wetAttribute: 'aWet',
-      slopeRock: 0.16,
+      slopeRock: 0.1,
       rockMeters: ROCK_METERS,
       rockMacroMeters: ROCK_MACRO_METERS,
       rockTint: ROCK_TINT,
@@ -166,7 +166,9 @@ export class WorldLevelView implements LevelView {
       envMapIntensity: 0.8,
       worldUv: true,
       // the procedural stand-in (low tier) is a coarser grain than the scan: less of it
-      detail: lowTier ? 0.35 : 0.7,
+      detail: lowTier ? 0.35 : 0.55,
+      // grass relief that reads at drone height without crumpling the meadow
+      normalScale: 0.45,
     });
     this.roadMat = roadMaterial(this.detail);
     this.waterMat = waterMaterial(sky, this.ripple, this.profile.waterDetail);
