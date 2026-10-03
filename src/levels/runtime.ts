@@ -2,6 +2,27 @@
 import { levelColliders } from '../game/level-data';
 import { createSurfaces, type SurfaceProvider } from '../game/surfaces';
 import type { Collider, LevelDef, TerrainField } from '../types';
+import { ColliderGrid } from '../physics/collider-grid';
+import { FLAT_GROUND, type HeightField } from '../physics/terrain';
+import type { City } from '../world/city-gen';
+import type { Outskirts } from './city-outskirts';
+import type { CityFurniture } from './city-furniture';
+import type { World } from '../world/world';
+import type { TerrainField as WorldTerrainField } from '../world/terrain-field';
+import type { ChunkStreamer } from './chunk-streamer';
+import { LifeHub } from '../world/life/hub';
+import type { CityTraffic } from '../world/traffic/city-traffic';
+
+/**
+ * Generated scenery behind a level: a streamed terrain world (Alpine, Infinite) or the City. The renderer
+ * builds its meshes from this; physics reads `terrain` and the grid.
+ */
+export type WorldContent =
+  | { readonly kind: 'terrain'; readonly world: World; readonly stream: ChunkStreamer; readonly seed: number; readonly code: string }
+  | { readonly kind: 'city'; readonly city: City; readonly outskirts: Outskirts; readonly furniture: CityFurniture; readonly seed: number; readonly traffic?: CityTraffic };
+
+/** Grid owner of a level's authored colliders (streamed chunks use their chunk keys). */
+export const LEVEL_OWNER = 'level';
 
 export interface LevelRuntime {
   readonly def: LevelDef;
@@ -9,19 +30,48 @@ export interface LevelRuntime {
   readonly terrain: TerrainField | null;
   /** static + kinematic colliders (props, statics, ring rims); room planes / ground live in PhysicsWorld */
   readonly colliders: readonly Collider[];
+  /**
+   * Outdoor levels: every collider physics and the camera test, `colliders` under LEVEL_OWNER plus the
+   * chunks the world streams in. Indoor: null (physics keeps its flat list).
+   */
+  readonly grid: ColliderGrid | null;
   readonly surfaces: SurfaceProvider;
   /** resolves once the world around the spawn can be flown (authored levels: already resolved) */
   readonly ready: Promise<void>;
+  /** generated levels: the world the view renders (absent for authored levels) */
+  readonly content?: WorldContent;
+  /**
+   * Ambient life of the level (docs/12): moving colliders physics tests (cars, the tractor), the spatial-audio
+   * emitters and events. Every level has one; the level view fills it.
+   */
+  readonly life?: LifeHub;
+  /** 0..1 while `ready` is pending (loading overlay) */
+  progress?(): number;
+  /** stops background work (chunk workers) once the level is no longer used */
+  dispose?(): void;
 }
 
 export function createRuntime(def: LevelDef, terrain: TerrainField | null = null): LevelRuntime {
+  const colliders = levelColliders({ props: def.props, rings: def.rings, statics: def.kind === 'outdoor' ? def.statics : [] });
+  let grid: ColliderGrid | null = null;
+  if (def.kind === 'outdoor') {
+    grid = new ColliderGrid();
+    grid.insertOwned(LEVEL_OWNER, colliders);
+  }
   return {
     def,
     terrain,
-    colliders: levelColliders({ props: def.props, rings: def.rings, statics: def.kind === 'outdoor' ? def.statics : [] }),
-    surfaces: createSurfaces(def.props, terrain),
+    colliders,
+    grid,
+    surfaces: createSurfaces(def.props, terrain, grid),
     ready: Promise.resolve(),
+    life: new LifeHub(),
   };
+}
+
+/** The level's ground as a height field (flat y = 0 when it has no terrain). */
+export function heightField(rt: Pick<LevelRuntime, 'terrain'>): HeightField {
+  return rt.terrain ?? FLAT_GROUND;
 }
 
 /** Ground height under (x, z) for a level. */
@@ -32,4 +82,13 @@ export function groundAt(rt: Pick<LevelRuntime, 'terrain'>, x: number, z: number
 /** True when `x` is a LevelRuntime rather than raw room data (legacy constructors accept both). */
 export function isRuntime(x: object): x is LevelRuntime {
   return 'def' in x && 'surfaces' in x;
+}
+
+/**
+ * The world engine's field behind a generated level (Alpine, Infinite: the world's; City: its street / river
+ * field), for water, biome and minimap queries; null for authored levels.
+ */
+export function worldField(rt: Pick<LevelRuntime, 'terrain'>): WorldTerrainField | null {
+  const t = rt.terrain as Partial<WorldTerrainField> | null;
+  return t && typeof t.biomeAt === 'function' && typeof t.waterLevelAt === 'function' ? (t as WorldTerrainField) : null;
 }

@@ -1,7 +1,7 @@
 /** The only render entry used by main.ts: owns renderer, scene, cameras, post FX and VFX. */
 import * as THREE from 'three';
 import { LosMarker } from './los-marker';
-import { MOBILE_MAX_TEXTURE, qualityProfile, type QualityProfile } from '../core/quality';
+import { MOBILE_MAX_TEXTURE, QUALITY_PROFILES, qualityProfile, type QualityProfile } from '../core/quality';
 import type { FormFactor } from '../core/device';
 import type { CameraMode, DroneState, GameEvent, LevelDef, QualityTier } from '../types';
 import type { LevelRuntime } from '../levels/runtime';
@@ -12,12 +12,21 @@ import type { LevelView } from './level-view';
 import { Materials } from './materials';
 import { OutdoorLevelView } from './outdoor/outdoor-level-view';
 import { PostFX } from './post';
-import { RingsView } from './rings-view';
+import { NEXT_COLOR, RingsView } from './rings-view';
 import { ContactShadow } from './vfx/contact-shadow';
-import { ParticlePool } from './vfx/particles';
-import { Shockwaves } from './vfx/shockwave';
+import { VfxDirector, waterSurface, type WaterProbe } from './vfx/director';
 import { XrPanel } from './xr-panel';
 import { HeadingArrow } from './heading-arrow';
+import { captureEnvironment, captureLightProbe, showSceneryOnly } from './ibl';
+import { levelLook, type LevelLook, type ToneMapper, type WorldTime } from './looks';
+import { levelTime } from '../levels/skies';
+import { MaterialLibrary, type MaterialScope } from './materials/library';
+import { findSun, SunCascades } from './shadows';
+import { nextFrame, Slicer, yieldToMain } from '../core/yield';
+import { XrLoadingPanel } from './xr-loading';
+
+/** steps of GameView.prepare() */
+export type PrepareStep = 'textures' | 'shaders' | 'lighting' | 'warm';
 
 export interface ViewFrame {
   dt: number;
@@ -37,24 +46,28 @@ export interface ViewFrame {
   still?: boolean;
 }
 
-const FX_SCALE: Record<QualityTier, number> = { ultra: 1, high: 0.85, medium: 0.55, low: 0.3 };
+const TONE_MAPPING: Record<ToneMapper, THREE.ToneMapping> = {
+  agx: THREE.AgXToneMapping,
+  aces: THREE.ACESFilmicToneMapping,
+  neutral: THREE.NeutralToneMapping,
+};
 
 const _v = new THREE.Vector3();
-const _n = new THREE.Vector3();
-const _t1 = new THREE.Vector3();
-const _t2 = new THREE.Vector3();
-const _c = new THREE.Color();
-const _c2 = new THREE.Color();
 const _size = new THREE.Vector2();
-const WHITE = new THREE.Color(1, 1, 1);
-const SPARK = new THREE.Color(1, 0.55, 0.16);
 const _eye = new THREE.Vector3();
 const _focus = new THREE.Vector3();
 const _yq = new THREE.Quaternion();
 const _ye = new THREE.Euler(0, 0, 0, 'YXZ');
 const Y_AXIS = new THREE.Vector3(0, 1, 0);
+/** Lighting the SH probe is captured under: a high tier's light rig, without shadow maps (none are rendered for it). */
+const REFERENCE_LIGHTING: QualityProfile = { ...QUALITY_PROFILES.high, shadows: false };
 /** Quest 2 budget (72 Hz, two eyes on a mobile GPU): no post FX, no shadow maps, small particle pools. */
 const XR_TIER: QualityTier = 'low';
+/** Settings → Time of day */
+export type TimeSetting = 'auto' | 'dawn' | 'noon' | 'golden' | 'dusk';
+/** seconds at the minimum render scale before generated levels shorten their view distance (07 §7) */
+const VIEW_SCALE_AFTER = 3;
+const VIEW_SCALE_STEP = 0.75;
 /** head height used until the headset reports a pose (local-floor space) */
 const XR_DEFAULT_HEAD = new THREE.Vector3(0, 1.6, 0);
 
@@ -63,7 +76,40 @@ export interface GameViewOptions {
   xr?: boolean;
   /** MSAA on the default framebuffer; the XR layer inherits it (headsets need it, post FX does not) */
   antialias?: boolean;
+  /** the first level waits for `prepare()` (capture, post warm-up): the boot readies it in steps */
+  deferred?: boolean;
 }
+
+type WorldViews = typeof import('./outdoor/world-level-view');
+let worldViews: WorldViews | null = null;
+let worldViewsLoad: Promise<void> | null = null;
+
+/**
+ * Loads the generated worlds' renderer (terrain, city, scatter, water, trees: a chunk of its own, not in the main
+ * bundle). A level with world content needs it before `loadLevel`; a failed load (offline) can be retried.
+ */
+export function loadWorldViews(): Promise<void> {
+  // A failed dynamic import stays failed for its URL (the browser's module map keeps the error), so a retry after a
+  // network failure asks for the same chunk under a new query: a fresh fetch.
+  const retry = failedChunk ? `${failedChunk}?retry=${++chunkRetries}` : null;
+  worldViewsLoad ??= (retry ? (import(/* @vite-ignore */ retry) as Promise<WorldViews>) : import('./outdoor/world-level-view')).then(
+    (m) => {
+      worldViews = m;
+      failedChunk = null;
+    },
+    (err: unknown) => {
+      worldViewsLoad = null;
+      // Chromium / Firefox name the chunk in the message; elsewhere the plain import is tried again
+      const url = /(https?:\/\/[^\s?]+\.js)/.exec(err instanceof Error ? err.message : String(err))?.[1];
+      if (url) failedChunk = url;
+      throw err;
+    },
+  );
+  return worldViewsLoad;
+}
+
+let failedChunk: string | null = null;
+let chunkRetries = 0;
 
 export class GameView {
   readonly renderer: THREE.WebGLRenderer;
@@ -71,27 +117,64 @@ export class GameView {
   private level: LevelDef;
   private levelView: LevelView;
   private readonly mats: Materials;
+  /** shared PBR presets + procedural / CC0 texture sets for scenery and drone code (see docs/10-render-pipeline.md) */
+  readonly library: MaterialLibrary;
   private rings: RingsView;
   private readonly drone: DroneModel;
   private readonly rig: CameraRig;
-  private readonly fx: ParticlePool;
-  private readonly soft: ParticlePool;
-  private readonly waves: Shockwaves;
+  private readonly vfx: VfxDirector;
   private readonly contact: ContactShadow;
   private readonly fill: THREE.PointLight;
   private readonly losMarker: LosMarker;
   private post: PostFX | null = null;
   private profile: QualityProfile;
+  private look: Readonly<LevelLook>;
+  /** look-test override of the level's tone mapper (render preview) */
+  private toneOverride: ToneMapper | null = null;
+  private readonly cascades = new SunCascades();
+  /** PMREM capture of the current level (null until a tier with environment maps, or the level, asks for it) */
+  private envCapture: THREE.WebGLRenderTarget | null = null;
+  /** SH irradiance of the same view: the ambient on tiers without environment maps (null until asked for) */
+  /**
+   * The SH ambient of tiers without envMap. One object for the view's lifetime, in the scene (visible) whenever the
+   * tier uses it, so the programs compiled before its capture (prepare) already count one light probe: three keys
+   * programs on the number of probes, and adding it afterwards would recompile everything on the first frame.
+   */
+  private readonly shProbe = new THREE.LightProbe();
+  /** shProbe holds the current level's capture */
+  private shReady = false;
+  private readonly sunDir = new THREE.Vector3(0, 1, 0);
   private renderScale = 1;
   private width = 1;
   private height = 1;
   private pendingRespawn = false;
-  private washAcc = 0;
+  private xrLoad: XrLoadingPanel | null = null;
+  /** bumped by every loadLevel: a prepare() belongs to one level */
+  private levelGen = 0;
+  /** the prepare() running now (they run one after another) */
+  private prepareRun: Promise<void> = Promise.resolve();
+  /** loadLevel(…, { deferred }) ran and prepare() has not finished yet */
+  private deferred = false;
+  /** water surface of the level under the drone (installed by the level view or setWaterProbe) */
+  private waterProbe: WaterProbe | null = null;
+  /** pilot's Time of day / View distance for generated outdoor levels */
+  private timeSetting: TimeSetting = 'auto';
+  private viewDistance = 1;
   private bloomPulse = 0;
+  /** render-preview hook: a fixed camera pose instead of the rig's (null = the rig) */
+  posed: { position: THREE.Vector3; target: THREE.Vector3 } | null = null;
+  /** player's analog FPV feed strength (0 = off); applied × the FPV camera weight on tiers with post */
+  private analogStrength = 0;
+  private shownFade = 0;
   private ringFlash = 0;
   private readonly ledColor = new THREE.Color();
+  /** seconds the render scale has sat at its 0.5 floor */
+  private lowScaleFor = 0;
+  private viewScaled = false;
 
   private readonly form: FormFactor;
+  /** owner of the art `prepareArt` generated until the level view takes its own share */
+  private artScope: MaterialScope | null = null;
 
   /** XR: the headset camera rides in this dolly; the game moves the dolly, the player moves their head. */
   private readonly xrDolly = new THREE.Group();
@@ -124,16 +207,17 @@ export class GameView {
     });
     const r = this.renderer;
     r.outputColorSpace = THREE.SRGBColorSpace;
+    // r18x PCF: hardware-filtered Vogel-disk taps, soft edges scaled by each light's shadow.radius
     r.shadowMap.type = THREE.PCFShadowMap;
     r.shadowMap.autoUpdate = true; // per-light autoUpdate=false keeps static maps static
     r.info.autoReset = false;
-    r.toneMappingExposure = 1.05;
     r.xr.enabled = opts.xr === true;
 
     const scene = this.scene;
     this.mats = new Materials(r.capabilities.getMaxAnisotropy(), mobile ? MOBILE_MAX_TEXTURE : 2048);
+    this.library = new MaterialLibrary(this.profile, { anisotropy: r.capabilities.getMaxAnisotropy() });
 
-    this.drone = new DroneModel(this.mats);
+    this.drone = new DroneModel(this.mats, r.capabilities.getMaxAnisotropy());
     scene.add(this.drone.root);
 
     this.rig = new CameraRig(level.def.pilot, null);
@@ -142,10 +226,8 @@ export class GameView {
     this.fill = new THREE.PointLight(0xcfe0ff, 0.5, 3.5, 2);
     scene.add(this.fill);
 
-    this.fx = new ParticlePool(mobile ? 2048 : 4096, true);
-    this.soft = new ParticlePool(mobile ? 1024 : 2048, false);
-    this.waves = new Shockwaves(8);
-    scene.add(this.fx.points, this.soft.points, this.waves.group);
+    this.vfx = new VfxDirector(form, tier);
+    scene.add(this.vfx.group);
 
     this.contact = new ContactShadow(level.surfaces, this.mats.radial);
     scene.add(this.contact.group);
@@ -157,11 +239,16 @@ export class GameView {
     scene.add(this.xrDolly);
 
     this.level = level.def;
-    this.levelView = this.buildLevelView(level.def);
+    this.look = levelLook(level.def, this.worldTime(level.def));
+    void this.library.preload(level.def.id);
+    this.levelView = this.buildLevelView(level);
+    // the view holds its own share of what the prewarm generated
+    this.artScope?.dispose();
+    this.artScope = null;
     this.rings = new RingsView(level.def.rings);
     this.attachLevel(level);
 
-    this.applyQuality();
+    this.applyQuality(opts.deferred === true);
     this.resize(canvas.clientWidth || window.innerWidth, canvas.clientHeight || window.innerHeight);
   }
 
@@ -170,33 +257,95 @@ export class GameView {
    * shadow maps), the new ones built, and the camera rig re-targeted. Shared resources (drone,
    * materials, FX pools, post FX) stay.
    */
-  loadLevel(level: LevelRuntime): void {
+  loadLevel(level: LevelRuntime, opts: { deferred?: boolean } = {}): void {
+    this.levelGen++;
+    this.cascades.detach();
+    this.setWaterProbe(null);
+    this.dropCapture();
     this.levelView.dispose();
     this.rings.group.removeFromParent();
     this.rings.dispose();
     this.level = level.def;
-    this.levelView = this.buildLevelView(level.def);
+    this.look = levelLook(level.def, this.worldTime(level.def));
+    void this.library.preload(level.def.id);
+    this.levelView = this.buildLevelView(level);
+    // the view holds its own share of what the prewarm generated
+    this.artScope?.dispose();
+    this.artScope = null;
     this.rings = new RingsView(level.def.rings);
     this.attachLevel(level);
-    this.applyQuality();
+    this.applyQuality(opts.deferred === true);
   }
 
-  private buildLevelView(def: LevelDef): LevelView {
-    return def.kind === 'indoor'
-      ? new IndoorLevelView(def, this.renderer, this.mats, this.form)
-      : new OutdoorLevelView(def, this.renderer, this.renderer.capabilities.getMaxAnisotropy());
+  /**
+   * Generates the next level's own art (the loft's atlases, rug, backdrop maps) one piece per task while the
+   * loading screen is up; `loadLevel` then finds it cached. Levels without such art return at once.
+   */
+  async prepareArt(def: LevelDef, onProgress?: (f: number) => void): Promise<void> {
+    this.artScope?.dispose();
+    this.artScope = null;
+    if (def.kind !== 'indoor') {
+      onProgress?.(1);
+      return;
+    }
+    const scope = this.library.scope(`${def.id}:prewarm`);
+    this.artScope = scope;
+    let n = 0;
+    await IndoorLevelView.prewarm(def, this.renderer, scope, this.form, async () => {
+      onProgress?.(Math.min(0.95, ++n / 16));
+      await yieldToMain();
+    });
+    onProgress?.(1);
+  }
+
+  /** e2e fault injection: the next level view fails to build (a load that breaks after the old scenery is gone) */
+  faultNextBuild = false;
+
+  private buildLevelView(level: LevelRuntime): LevelView {
+    if (this.faultNextBuild) {
+      this.faultNextBuild = false;
+      throw new Error('injected level-view fault');
+    }
+    const def = level.def;
+    if (def.kind === 'indoor') return new IndoorLevelView(def, this.renderer, this.library, this.form);
+    if (level.content) {
+      // the generated worlds' renderer is its own chunk: loadWorldViews() before a world level is built
+      if (!worldViews) throw new Error('World renderer not loaded');
+      return new worldViews.WorldLevelView(level, this.renderer, this.library, this.form, { time: this.worldTime(def), viewDistance: this.viewDistance });
+    }
+    return new OutdoorLevelView(def, this.renderer, this.library, level);
+  }
+
+  /** Sky preset a generated level is drawn at under the pilot's Time of day (undefined: not a generated level). */
+  private worldTime(def: LevelDef): WorldTime | undefined {
+    return def.kind === 'outdoor' && def.env.time ? levelTime(def.env, this.timeSetting) : undefined;
+  }
+
+  /** The scenery's far plane (generated levels see further than the rig's default). */
+  private applyCameraFar(): void {
+    const far = this.levelView.cameraFar;
+    if (far === undefined || far === this.rig.camera.far) return;
+    this.rig.camera.far = far;
+    this.rig.camera.updateProjectionMatrix();
+    this.xrCam.far = far;
+    this.xrCam.updateProjectionMatrix();
   }
 
   private attachLevel(level: LevelRuntime): void {
+    if (this.levelView.waterProbe) this.setWaterProbe(this.levelView.waterProbe);
     const v = this.levelView;
     this.scene.add(v.group, this.rings.group);
     this.scene.background = v.background;
     this.scene.fog = v.fog;
     this.scene.environmentIntensity = v.environmentIntensity;
     this.contact.surfaces = level.surfaces;
-    this.rig.setLevel(level.def);
+    this.vfx.setDustColor(level.def.kind === 'indoor' ? 0xbab2a6 : 0xc8c8b0);
+    this.rig.setLevel(level);
     this.xrCam.far = this.rig.camera.far;
     this.xrCam.updateProjectionMatrix();
+    this.applyCameraFar();
+    this.lowScaleFor = 0;
+    this.viewScaled = false;
     this.ringFlash = 0;
     this.recenter = true;
     this.xrMode = null;
@@ -204,6 +353,268 @@ export class GameView {
 
   get camera(): THREE.PerspectiveCamera {
     return this.rig.camera;
+  }
+
+  /**
+   * Readies a level built with `loadLevel(…, { deferred: true })`, in steps that each give the main thread back (a
+   * loading screen keeps animating, a headset keeps getting frames):
+   *
+   * 1. `textures` — uploads every texture of the scene to the GPU, a few per slice;
+   * 2. `shaders` — compiles the scene's programs against a blank environment of the final size, and the post
+   *    passes, in parallel where the browser has KHR_parallel_shader_compile (`compileAsync`);
+   * 3. `lighting` — the environment capture (PMREM, or the SH probe on tiers without envMap), now on ready programs;
+   * 4. `warm` — the post warm-up and one frame drawn behind the overlay, so the first visible frame does not hitch.
+   *
+   * `onStep(step, fraction)` reports progress; `cancelled()` aborts between steps. Without a deferred load (or
+   * when cancelled) it only returns.
+   */
+  async prepare(onStep: (step: PrepareStep, f: number) => void = () => {}, cancelled: () => boolean = () => false): Promise<void> {
+    // one at a time, each for the level it was asked for: a prepare whose level was replaced meanwhile (the boot's,
+    // when a deep link loads another level) stops at its next step and leaves the new level deferred for its own
+    const gen = this.levelGen;
+    const run = this.prepareRun.then(() => this.prepareLevel(gen, onStep, () => cancelled() || gen !== this.levelGen));
+    this.prepareRun = run.catch(() => undefined);
+    return run;
+  }
+
+  private async prepareLevel(gen: number, onStep: (step: PrepareStep, f: number) => void, cancelled: () => boolean): Promise<void> {
+    if (!this.deferred || gen !== this.levelGen) return;
+    const r = this.renderer;
+    const p = this.profile;
+    const look = this.currentLook;
+    const cam = r.xr.isPresenting ? this.xrCam : this.rig.camera;
+    this.scene.updateMatrixWorld(true);
+    // 1. textures
+    const textures = new Set<THREE.Texture>();
+    this.scene.traverse((o) => {
+      const mat = (o as THREE.Mesh).material as THREE.Material | THREE.Material[] | undefined;
+      if (!mat) return;
+      for (const m of Array.isArray(mat) ? mat : [mat]) {
+        for (const v of Object.values(m)) if ((v as THREE.Texture | null)?.isTexture) textures.add(v as THREE.Texture);
+        const u = (m as THREE.ShaderMaterial).uniforms ?? (m.userData.envUniforms as Record<string, THREE.IUniform> | undefined);
+        if (u) for (const x of Object.values(u)) if ((x?.value as THREE.Texture | null)?.isTexture) textures.add(x.value as THREE.Texture);
+      }
+    });
+    const list = [...textures];
+    const slicer = new Slicer();
+    for (let i = 0; i < list.length; i++) {
+      if (cancelled()) return;
+      try {
+        r.initTexture(list[i]!);
+      } catch {
+        // a texture whose image is not there yet uploads on first use
+      }
+      onStep('textures', (i + 1) / list.length);
+      if (slicer.due()) await slicer.yield();
+    }
+    onStep('textures', 1);
+    await yieldToMain();
+    if (cancelled()) return;
+    // 2. shaders: the capture and the frame use programs with an environment map of the capture's size
+    const probe = this.levelView.probe;
+    const envSize = Math.max(p.envSize, probe.minSize);
+    let stand: THREE.WebGLRenderTarget | null = null;
+    const pmrem = new THREE.PMREMGenerator(r);
+    try {
+      if (p.envMap || probe.always) {
+        stand = pmrem.fromScene(new THREE.Scene(), 0, 0.1, 1, { size: envSize });
+        if (p.envMap) this.scene.environment = stand.texture;
+        if (probe.always) this.levelView.setEnvironment(stand.texture);
+      }
+      // programs differ by target: a frame drawn into the composer (post) and the environment capture both draw
+      // into render targets (linear output); without post the frame goes straight to the screen
+      const rt = new THREE.WebGLRenderTarget(4, 4);
+      const prev = r.getRenderTarget();
+      // tiers without envMap light with the SH probe: in the scene (still black) while their programs compile
+      this.shProbe.visible = !p.envMap;
+      if (!p.envMap && !this.shProbe.parent) this.scene.add(this.shProbe);
+      // the next-ring light is on in a race and off in free flight (and in the menus before either): the frame's
+      // programs for both light counts, so neither mode's first frame recompiles the scene
+      const ringLight = this.levelView.ringLight;
+      const frameVariants = async (from: number, span: number): Promise<void> => {
+        await this.compileSliced(cam, (f) => onStep('shaders', from + (span / 2) * f));
+        ringLight.visible = !ringLight.visible;
+        try {
+          await this.compileSliced(cam, (f) => onStep('shaders', from + span / 2 + (span / 2) * f));
+        } finally {
+          ringLight.visible = !ringLight.visible;
+        }
+      };
+      try {
+        r.setRenderTarget(rt);
+        // with post the frame draws into the composer's target
+        if (this.post) await frameVariants(0, 0.5);
+        // the capture sees the scenery alone (the drone's and the rig's lights hidden: other light counts, other
+        // programs), at this tier for the environment map and, on a tier without envMap, under the high tier's
+        // light rig for the SH probe
+        const restore = showSceneryOnly(this.scene, [this.levelView.group]);
+        try {
+          if (p.envMap || probe.always) await this.compileSliced(cam, (f) => onStep('shaders', 0.5 + 0.1 * f));
+          if (!p.envMap) {
+            this.levelView.setQuality(REFERENCE_LIGHTING);
+            try {
+              await this.compileSliced(cam, (f) => onStep('shaders', 0.6 + 0.1 * f));
+            } finally {
+              this.levelView.setQuality(p);
+            }
+          }
+        } finally {
+          restore();
+        }
+      } finally {
+        r.setRenderTarget(prev);
+        rt.dispose();
+      }
+      // without post the frame goes straight to the screen (sRGB output, tone mapping in the shader)
+      if (!this.post) await frameVariants(0.7, 0.2);
+      if (this.post) await this.post.precompile();
+      await this.linkPrograms((f) => onStep('shaders', 0.9 + 0.1 * f));
+    } catch {
+      // context loss or an exotic material: whatever is left compiles on first use
+    } finally {
+      pmrem.dispose();
+    }
+    onStep('shaders', 1);
+    await nextFrame();
+    if (cancelled()) {
+      stand?.dispose();
+      return;
+    }
+    // 3. lighting: the scene once into a scrap target first (shadow maps and their depth programs), then the capture
+    try {
+      const scrap = new THREE.WebGLRenderTarget(4, 4);
+      const prev = r.getRenderTarget();
+      r.setRenderTarget(scrap);
+      r.render(this.scene, cam);
+      r.setRenderTarget(prev);
+      scrap.dispose();
+    } catch {
+      // the capture renders them instead
+    }
+    onStep('lighting', 0.4);
+    await nextFrame();
+    if (cancelled()) {
+      stand?.dispose();
+      return;
+    }
+    this.applyEnvironment(p, look);
+    stand?.dispose();
+    onStep('lighting', 1);
+    await nextFrame();
+    if (cancelled()) return;
+    // 4. warm: the composer's passes and one frame of the level, behind the loading screen
+    this.post?.warm();
+    if (gen === this.levelGen) this.deferred = false;
+    onStep('warm', 1);
+  }
+
+  /**
+   * compileAsync over the scene in slices: the synchronous part (program set-up and the compile calls) runs a few
+   * objects at a time with the main thread given back in between; the driver compiles in parallel meanwhile and
+   * this resolves once every program is ready (or after a cap). Lights come from the whole scene.
+   */
+  private async compileSliced(cam: THREE.Camera, onProgress: (f: number) => void, maxMs = 8000): Promise<void> {
+    const r = this.renderer;
+    const units: THREE.Object3D[] = [];
+    const collect = (o: THREE.Object3D, depth: number): void => {
+      if (!o.visible) return;
+      // big groups split into their children; meshes and small groups compile as one unit
+      if (depth < 3 && o.children.length > 0 && !(o as THREE.Mesh).isMesh) {
+        for (const c of o.children) collect(c, depth + 1);
+        return;
+      }
+      units.push(o);
+    };
+    collect(this.scene, 0);
+    const pending: Promise<unknown>[] = [];
+    const slicer = new Slicer();
+    let target = r.getRenderTarget();
+    for (let i = 0; i < units.length; i++) {
+      pending.push(r.compileAsync(units[i]!, cam, this.scene));
+      onProgress((0.6 * (i + 1)) / units.length);
+      if (slicer.due()) {
+        await slicer.yield();
+        // keep compiling against the same target (another frame may have changed it while yielding)
+        if (r.getRenderTarget() !== target) r.setRenderTarget(target);
+      }
+    }
+    target = null;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    try {
+      await Promise.race([Promise.all(pending), new Promise<void>((res) => (timer = setTimeout(res, maxMs)))]);
+    } finally {
+      clearTimeout(timer);
+    }
+    onProgress(1);
+  }
+
+  /**
+   * The boot level's programs, compiled in slices behind the menu (the boot builds its level without a loading
+   * screen): the first flight frame after the menu then draws without compiling. Frames into the composer use
+   * the render-target variants, so those are compiled when post is on.
+   */
+  async warmPrograms(): Promise<void> {
+    const r = this.renderer;
+    if (r.xr.isPresenting) return;
+    this.scene.updateMatrixWorld(true);
+    const rt = this.post ? new THREE.WebGLRenderTarget(4, 4) : null;
+    const prev = r.getRenderTarget();
+    try {
+      if (rt) r.setRenderTarget(rt);
+      await this.compileSliced(this.rig.camera, () => undefined);
+    } catch {
+      // context loss or an exotic material: the frames compile instead
+    } finally {
+      r.setRenderTarget(prev);
+      rt?.dispose();
+    }
+    try {
+      await this.post?.precompile();
+      await this.linkPrograms(() => undefined);
+    } catch {
+      // as above
+    }
+  }
+
+  /**
+   * Finishes every program's first use (link status, info logs, uniform tables) a few at a time. Where the driver
+   * has no parallel compile (KHR_parallel_shader_compile) compileAsync resolves at once and the whole compile would
+   * otherwise land on the first frame that draws with the program: one long frozen frame.
+   */
+  private async linkPrograms(onProgress: (f: number) => void): Promise<void> {
+    const programs = (this.renderer.info.programs ?? []) as unknown as { getUniforms(): unknown }[];
+    const slicer = new Slicer();
+    for (let i = 0; i < programs.length; i++) {
+      programs[i]!.getUniforms();
+      onProgress((i + 1) / programs.length);
+      if (slicer.due()) await slicer.yield();
+    }
+  }
+
+  /**
+   * XR level switch: a frame of the loading environment instead of the level (dark surroundings, a progress ring and
+   * the level name in front of the pilot's head), so the headset keeps getting frames while the level loads.
+   */
+  renderXrLoading(name: string, progress: number): void {
+    const l = (this.xrLoad ??= new XrLoadingPanel());
+    l.update(name, progress, this.xrDolly, this.xrCam);
+    this.renderer.render(l.scene, this.xrCam);
+    this.frames++;
+  }
+
+  /** a deferred load still waits for prepare() */
+  get preparing(): boolean {
+    return this.deferred;
+  }
+
+  /** the level's material library (load stages prepare its texture sets) */
+  get materials(): MaterialLibrary {
+    return this.library;
+  }
+
+  /** LOS pilot's eye (outdoors it moves when the pilot is re-planted): the HUD's pilot marker. */
+  get pilotEye(): THREE.Vector3 {
+    return this.rig.pilotEye;
   }
 
   get tier(): QualityTier {
@@ -219,16 +630,29 @@ export class GameView {
 
     if (this.pendingRespawn) {
       this.pendingRespawn = false;
-      this.spawnShimmer(f.drone.position);
+      this.drone.flash(5);
+      this.vfx.respawn(f.drone.position, this.contact.surfaceY);
       this.rig.snap();
     }
 
     const xr = r.xr.isPresenting;
+    this.adaptViewDistance(f.still ? 0 : dt);
     // outdoor LOS: the pilot watches the next ring, the course overview between laps
     this.rig.setFocus(f.nextRing >= 0 && f.nextRing < this.rings.count ? this.rings.ringPosition(f.nextRing, _focus) : null);
     this.rig.shake = !xr;
+    this.rig.allowRelocate = !xr;
     this.rig.update({ dt, time: t, drone: f.drone, mode: f.cameraMode, cameraTiltDeg: f.cameraTiltDeg, fovDeg: f.fovDeg, speed: f.speed, instant: f.still });
+    // pilot relocation fades the view out and back in (CSS filter: no extra pass, idle when 0)
+    const fade = this.rig.fade;
+    if (fade !== this.shownFade) {
+      this.shownFade = fade;
+      r.domElement.style.filter = fade > 0 ? `brightness(${(1 - fade).toFixed(3)})` : '';
+    }
     let cam: THREE.PerspectiveCamera = this.rig.camera;
+    if (this.posed) {
+      cam.position.copy(this.posed.position);
+      cam.lookAt(this.posed.target);
+    }
     if (xr) {
       this.placeDolly(f.cameraMode);
       cam = this.xrCam;
@@ -243,42 +667,43 @@ export class GameView {
     this.drone.root.visible = !(xr && this.rig.fpvWeight >= 0.5);
     this.drone.update(f.drone, dt, t, f.cameraTiltDeg, _eye);
     this.losMarker.update(f.drone.position, _eye, this.rig.losWeight, t);
-    this.arrow.update(f.drone.position, f.drone.orientation, _eye, f.headingArrow === true && this.rig.fpvWeight < 0.5);
+    this.arrow.update(f.drone.position, f.drone.orientation, _eye, f.headingArrow === true && this.rig.fpvWeight < 0.5, t);
 
-    this.rings.update(t, dt, f.nextRing);
+    this.rings.update(t, dt, f.nextRing, _eye);
     this.updateRingLight(t, dt, f.nextRing);
 
     // fill light near the camera so the quad reads clearly in chase/LOS
     this.fill.position.copy(_eye);
     this.fill.intensity = 0.5 * (1 - this.rig.fpvWeight);
 
-    // LED ground glow: the green + red nav LEDs mixed on the floor read as a warm white
-    if (f.drone.armed) this.ledColor.setRGB(0.75, 0.7, 0.45);
-    else this.ledColor.setRGB(1, 0.3, 0.07);
-    this.contact.update(f.drone.position, this.ledColor, f.drone.armed ? 1 : 0.35);
-
-    // prop-wash
     let motors = 0;
     for (let i = 0; i < 4; i++) motors += f.drone.motors[i];
     motors *= 0.25;
-    const h = this.contact.height;
-    const near = Math.max(0, 1 - h / 0.8);
-    if (f.drone.armed && motors > 0.18 && near > 0) this.emitPropWash(f.drone.position, motors, near, dt);
+    // LED ground glow: the green + red nav LEDs mixed on the floor read as a warm white
+    if (f.drone.armed) this.ledColor.setRGB(0.75, 0.7, 0.45);
+    else this.ledColor.setRGB(1, 0.3, 0.07);
+    _ye.setFromQuaternion(f.drone.orientation, 'YXZ');
+    this.contact.update(f.drone.position, this.ledColor, f.drone.armed ? 1 : 0.35, _ye.y, f.drone.armed ? motors : 0);
+    // over a river or lake the wash, spray and its height read off the water surface, not the bed under it
+    const water = this.waterProbe ? waterSurface(this.waterProbe, f.drone.position.x, f.drone.position.z, this.contact.surfaceY) : null;
+    const surfaceY = water ?? this.contact.surfaceY;
+    const h = water === null ? this.contact.height : Math.max(0, f.drone.position.y - water);
     const wash = f.drone.armed ? motors * Math.max(0, 1 - h / 2) : 0;
 
     // pixels per unit of tan(angle): drawing-buffer height / 2 × projection y-scale (per eye in XR)
     r.getDrawingBufferSize(_size);
     const px = (_size.y / 2) * cam.projectionMatrix.elements[5]!;
     this.levelView.update({ time: t, dt, px, drone: f.drone.position, camera: _eye, wash, fanAngle: f.fanAngle });
-    this.fx.update(t, px);
-    this.soft.update(t, px);
-    this.waves.update(dt);
+    this.vfx.update({ dt, time: t, px, drone: f.drone, camera: cam, fpvWeight: this.rig.fpvWeight, surfaceY, height: h, xr });
 
     if (xr) {
       r.render(this.scene, this.xrCam);
     } else if (this.post) {
-      const ca = this.rig.fpvWeight * THREE.MathUtils.clamp((f.speed - 5) / 14, 0, 1);
-      this.post.setAberration(ca);
+      const fast = this.rig.fpvWeight * THREE.MathUtils.clamp((f.speed - 5) / 14, 0, 1);
+      this.post.setAberration(f.still ? 0 : fast);
+      this.post.setMotionBlur(f.still ? 0 : 0.5 * fast * fast);
+      this.post.setStill(f.still ? f.drone.position : null);
+      this.post.setAnalog(f.still ? 0 : this.analogStrength * this.rig.fpvWeight);
       this.bloomPulse = Math.max(0, this.bloomPulse - dt * 2.5);
       this.post.setBloomBoost(1 + this.bloomPulse * 0.8);
       this.post.render(dt);
@@ -359,7 +784,7 @@ export class GameView {
     this.ringFlash = Math.max(0, this.ringFlash - dt * 2);
     if (next >= 0 && next < this.rings.count) {
       this.rings.ringPosition(next, L.position);
-      L.color.setRGB(0.15, 0.9, 1);
+      L.color.copy(NEXT_COLOR);
       L.intensity = 2.2 + Math.sin(t * 6) * 0.6 + this.ringFlash * 6;
       L.visible = true;
     } else {
@@ -369,16 +794,20 @@ export class GameView {
   }
 
   handleEvent(e: GameEvent): void {
-    const k = FX_SCALE[this.profile.tier];
     switch (e.type) {
       case 'ring-passed':
-        this.ringBurst(e.index, e.position, k);
+        this.ringBurst(e.index, e.position);
         break;
       case 'crash':
-        this.crashFx(e.position, e.speed, k);
+        this.rig.addTrauma(0.9);
+        this.bloomPulse = 0.6;
+        this.vfx.crash(e.position, e.speed, this.contact.surfaceY);
         break;
       case 'collision':
-        if (e.contact.impactSpeed > 1.5) this.impactSparks(e.contact.point, e.contact.normal, e.contact.impactSpeed, k);
+        if (e.contact.impactSpeed > 1.5) {
+          this.rig.addTrauma(Math.min(0.35, e.contact.impactSpeed * 0.06));
+          this.vfx.impact(e.contact.point, e.contact.normal, e.contact.impactSpeed, this.contact.surfaceY);
+        }
         break;
       case 'respawn':
         this.pendingRespawn = true;
@@ -391,145 +820,102 @@ export class GameView {
     }
   }
 
-  private ringBurst(index: number, pos: THREE.Vector3, k: number): void {
+  private ringBurst(index: number, pos: THREE.Vector3): void {
     const def = this.level.rings[index];
     if (!def) return;
     this.rings.passed(index);
     this.drone.flash(4);
     this.ringFlash = 1;
     this.bloomPulse = 1;
-    const col = this.rings.ringColor(index);
-    _n.set(def.direction[0], def.direction[1], def.direction[2]);
-    basis(_n, _t1, _t2);
-    const cx = def.position[0];
-    const cy = def.position[1];
-    const cz = def.position[2];
-    const R = def.radius + def.tube;
-    const n = Math.round(220 * k);
-    for (let i = 0; i < n; i++) {
-      const a = Math.random() * Math.PI * 2;
-      const ca = Math.cos(a);
-      const sa = Math.sin(a);
-      const rr = R * (0.92 + Math.random() * 0.14);
-      const sp = 1.2 + Math.random() * 3.2;
-      const fw = 0.3 + Math.random() * 2.2;
-      _c.copy(Math.random() < 0.3 ? WHITE : col);
-      this.fx.emit(
-        cx + (_t1.x * ca + _t2.x * sa) * rr, cy + (_t1.y * ca + _t2.y * sa) * rr, cz + (_t1.z * ca + _t2.z * sa) * rr,
-        (_t1.x * ca + _t2.x * sa) * sp + _n.x * fw, (_t1.y * ca + _t2.y * sa) * sp + _n.y * fw, (_t1.z * ca + _t2.z * sa) * sp + _n.z * fw,
-        _c.r, _c.g, _c.b, 0.6 + Math.random() * 0.7, 0.03 + Math.random() * 0.025, 0.12, 2.2, 0,
-      );
-    }
-    // streak of sparkles through the gate following the drone
-    const m = Math.round(60 * k);
-    for (let i = 0; i < m; i++) {
-      const a = Math.random() * Math.PI * 2;
-      const rr = Math.random() * R * 0.6;
-      const sp = 2 + Math.random() * 4;
-      this.fx.emit(
-        pos.x + (_t1.x * Math.cos(a) + _t2.x * Math.sin(a)) * rr, pos.y + (_t1.y * Math.cos(a) + _t2.y * Math.sin(a)) * rr, pos.z + (_t1.z * Math.cos(a) + _t2.z * Math.sin(a)) * rr,
-        _n.x * sp, _n.y * sp, _n.z * sp,
-        col.r, col.g, col.b, 0.4 + Math.random() * 0.4, 0.02, 0, 3, 0,
-      );
-    }
-    _v.set(cx, cy, cz);
-    this.waves.spawn(_v, _n, col, R, R * 2.8, 0.75);
-    _c2.copy(col).lerp(WHITE, 0.6);
-    this.waves.spawn(_v, _n, _c2, R * 0.95, R * 1.7, 0.4);
+    this.vfx.ringPass(def, this.rings.ringColor(index), pos);
   }
 
-  private crashFx(pos: THREE.Vector3, speed: number, k: number): void {
-    this.rig.addTrauma(0.9);
-    this.bloomPulse = 0.6;
-    const n = Math.round((110 + Math.min(80, speed * 12)) * k);
-    for (let i = 0; i < n; i++) {
-      randomDir(_v, 0.35);
-      const sp = 1.5 + Math.random() * (3 + speed * 0.6);
-      _c.copy(SPARK).lerp(WHITE, Math.random() * 0.6);
-      const life = 0.45 + Math.random() * 0.9;
-      const size = 0.03 + Math.random() * 0.03;
-      // three time-offset copies on the same trajectory read as a motion streak
-      for (let j = 0; j < 3; j++) this.fx.emit(pos.x, pos.y, pos.z, _v.x * sp, _v.y * sp, _v.z * sp, _c.r, _c.g * (1 - j * 0.15), _c.b * (1 - j * 0.3), life, size * (1 - j * 0.28), 1, 1.2, 0, j * 0.012);
-    }
-    // impact flash
-    for (let i = 0; i < 3; i++) this.fx.emit(pos.x, pos.y, pos.z, 0, 0, 0, 1, 0.6, 0.25, 0.12 + i * 0.06, 0.35 + i * 0.25, 0, 1, 0);
-    const d = Math.round(40 * k) + 6;
-    for (let i = 0; i < d; i++) {
-      randomDir(_v, 0.5);
-      const sp = 0.8 + Math.random() * 3;
-      const pick = Math.random();
-      if (pick < 0.55) _c.setRGB(0.03, 0.03, 0.035);
-      else if (pick < 0.8) _c.setRGB(0.9, 0.3, 0.08);
-      else _c.setRGB(0.1, 0.6, 0.8);
-      this.soft.emit(pos.x, pos.y, pos.z, _v.x * sp, _v.y * sp, _v.z * sp, _c.r, _c.g, _c.b, 1.8 + Math.random() * 1.2, 0.006 + Math.random() * 0.01, 1, 0.5, 1);
-    }
-    const y = this.contact.surfaceY;
-    if (pos.y - y < 0.6) {
-      for (let i = 0; i < Math.round(28 * k); i++) {
-        const a = Math.random() * Math.PI * 2;
-        const sp = 0.6 + Math.random() * 1.8;
-        this.soft.emit(pos.x, y + 0.08, pos.z, Math.cos(a) * sp, 0.25 + Math.random() * 0.3, Math.sin(a) * sp, 0.5, 0.48, 0.45, 1 + Math.random() * 0.8, 0.08 + Math.random() * 0.06, 0, 2.2, 2);
-      }
-      _v.set(pos.x, y + 0.02, pos.z);
-      _n.set(0, 1, 0);
-      this.waves.spawn(_v, _n, SPARK, 0.1, 1.6, 0.6);
-    } else {
-      _n.set(0, 1, 0);
-      this.waves.spawn(pos, _n, SPARK, 0.05, 0.9, 0.45);
-    }
+  /**
+   * Analog FPV feed look, 0..1 (0 = off). Shown in FPV only, faded in with the camera blend; tiers without
+   * post (low, VR) never draw it.
+   */
+  setAnalogVideo(strength: number): void {
+    this.analogStrength = THREE.MathUtils.clamp(strength, 0, 1);
   }
 
-  private impactSparks(point: THREE.Vector3, normal: THREE.Vector3, speed: number, k: number): void {
-    this.rig.addTrauma(Math.min(0.35, speed * 0.06));
-    const n = Math.max(4, Math.round(Math.min(40, speed * 7) * k));
-    for (let i = 0; i < n; i++) {
-      randomDir(_v, 0);
-      if (_v.dot(normal) < 0) _v.addScaledVector(normal, -2 * _v.dot(normal));
-      _v.addScaledVector(normal, 0.6).normalize();
-      const sp = 0.8 + Math.random() * (1 + speed * 0.5);
-      _c.copy(SPARK).lerp(WHITE, Math.random() * 0.5);
-      const life = 0.3 + Math.random() * 0.45;
-      for (let j = 0; j < 3; j++) this.fx.emit(point.x, point.y, point.z, _v.x * sp, _v.y * sp, _v.z * sp, _c.r, _c.g, _c.b, life, (0.022 + Math.random() * 0.01) * (1 - j * 0.28), 1, 1.5, 0, j * 0.01);
-    }
+  /** Analog feed level of the last frame (0 when off, outside FPV or without post), for tests. */
+  get analogLevel(): number {
+    return this.post?.analogLevel ?? 0;
   }
 
-  private spawnShimmer(pos: THREE.Vector3): void {
-    const k = FX_SCALE[this.profile.tier];
-    this.drone.flash(5);
-    const n = Math.round(150 * k);
-    for (let i = 0; i < n; i++) {
-      const a = Math.random() * Math.PI * 2;
-      const r = 0.12 + Math.random() * 0.12;
-      const y = (Math.random() - 0.5) * 0.3;
-      const swirl = 1.2 + Math.random();
-      _c.setRGB(0.3, 0.9, 1).lerp(WHITE, Math.random() * 0.5);
-      this.fx.emit(
-        pos.x + Math.cos(a) * r, pos.y + y, pos.z + Math.sin(a) * r,
-        -Math.sin(a) * swirl - Math.cos(a) * 0.3, 0.6 + Math.random() * 0.8, Math.cos(a) * swirl - Math.sin(a) * 0.3,
-        _c.r, _c.g, _c.b, 0.7 + Math.random() * 0.6, 0.008 + Math.random() * 0.008, -0.03, 1.5, 0, Math.random() * 0.25,
-      );
-    }
-    _n.set(0, 1, 0);
-    _c.setRGB(0.3, 0.9, 1);
-    _v.copy(pos);
-    _v.y = this.contact.surfaceY + 0.02;
-    this.waves.spawn(_v, _n, _c, 0.05, 0.9, 0.6);
-    this.waves.spawn(pos, _n, WHITE, 0.02, 0.5, 0.35);
+  /**
+   * Water under the course (outdoor levels with lakes / rivers): prop wash over water throws spray instead
+   * of dust. Null removes it; a level switch keeps whatever the new level installs.
+   */
+  setWaterProbe(probe: WaterProbe | null): void {
+    this.waterProbe = probe;
+    this.vfx.setWaterProbe(probe);
   }
 
-  private emitPropWash(pos: THREE.Vector3, motors: number, near: number, dt: number): void {
-    const k = FX_SCALE[this.profile.tier];
-    this.washAcc += dt * 240 * motors * Math.pow(near, 1.5) * k;
-    const y = this.contact.surfaceY + 0.02;
-    while (this.washAcc >= 1) {
-      this.washAcc -= 1;
-      const a = Math.random() * Math.PI * 2;
-      const r = 0.04 + Math.random() * 0.1;
-      const sp = (1 + Math.random() * 2) * (0.5 + motors);
-      const g = 0.42 + Math.random() * 0.08;
-      const size = 0.035 + Math.random() * 0.045;
-      this.soft.emit(pos.x + Math.cos(a) * r, y + size * 0.5, pos.z + Math.sin(a) * r, Math.cos(a) * sp, 0.06 + Math.random() * 0.2, Math.sin(a) * sp, g, g * 0.96, g * 0.9, 0.6 + Math.random() * 0.5, size, 0, 2.6, 2);
+  /**
+   * Time of day for generated outdoor levels ('auto' = the level's own): sky, sun, fog, water and lit windows
+   * in the level view, then the look and a fresh environment capture. No-op elsewhere.
+   */
+  setTimeOfDay(setting: TimeSetting): void {
+    this.timeSetting = setting;
+    const v = this.levelView;
+    if (!v.setTime || this.level.kind !== 'outdoor') return;
+    const time = levelTime(this.level.env, setting);
+    if (time === v.time) return;
+    v.setTime(time);
+    this.look = levelLook(this.level, time);
+    this.scene.background = v.background;
+    this.dropCapture();
+    this.cascades.detach();
+    this.applyQuality();
+  }
+
+  /** The pilot's View distance (0.5 short … 1.3 long; 1 = the tier's own) for generated outdoor levels. */
+  setViewDistance(k: number): void {
+    this.viewDistance = k;
+    if (!this.levelView.setViewDistance) return;
+    this.levelView.setViewDistance(k);
+    this.applyCameraFar();
+  }
+
+  /** Render scale pinned at 0.5 for VIEW_SCALE_AFTER s: generated levels shorten fog and streaming radius once. */
+  private adaptViewDistance(dt: number): void {
+    if (this.viewScaled || !this.levelView.setViewScale) return;
+    this.lowScaleFor = this.renderScale <= 0.5 + 1e-3 ? this.lowScaleFor + dt : 0;
+    if (this.lowScaleFor < VIEW_SCALE_AFTER) return;
+    this.viewScaled = true;
+    this.levelView.setViewScale(VIEW_SCALE_STEP);
+    this.applyCameraFar();
+  }
+
+  /** the level's scenery is still streaming in */
+  get levelBusy(): boolean {
+    return this.levelView.busy === true;
+  }
+
+  /** Visible drawables per top-level scene child (perf audits: what the draw calls are). */
+  census(): Record<string, { draws: number; tris: number }> {
+    const out: Record<string, { draws: number; tris: number }> = {};
+    for (const top of this.scene.children) {
+      top.traverseVisible((o) => {
+        const m = o as THREE.Mesh;
+        if (!m.isMesh && !(o as THREE.Points).isPoints && !(o as THREE.Line).isLine && !(o as THREE.Sprite).isSprite) return;
+        const key = `${top.name || top.type}/${o.name || o.type}`;
+        const e = out[key] ?? (out[key] = { draws: 0, tris: 0 });
+        e.draws++;
+        const g = m.geometry as THREE.BufferGeometry | undefined;
+        if (!g || !m.isMesh) return;
+        const n = g.index ? Math.min(g.index.count, g.drawRange.count) : (g.getAttribute('position')?.count ?? 0);
+        const inst = (g as THREE.InstancedBufferGeometry).isInstancedBufferGeometry ? (g as THREE.InstancedBufferGeometry).instanceCount : 1;
+        e.tris += Math.round((n / 3) * inst);
+      });
     }
+    return out;
+  }
+
+  /** streaming / instancing numbers of generated levels (debug hook) */
+  levelStats(): Record<string, unknown> | null {
+    return this.levelView.stats?.() ?? null;
   }
 
   setQuality(tier: QualityTier): void {
@@ -539,23 +925,154 @@ export class GameView {
     this.resize(this.width, this.height);
   }
 
-  private applyQuality(): void {
+  /**
+   * `deferred` (a level just built behind the loading screen): the environment capture and the post warm-up wait
+   * for `prepare()`, which compiles the shaders first so neither of them blocks on compilation.
+   */
+  private applyQuality(deferred = false): void {
+    this.deferred = deferred;
     const p = this.profile;
     const r = this.renderer;
+    const look = this.toneOverride ? { ...this.look, toneMapping: this.toneOverride } : this.look;
     r.shadowMap.enabled = p.shadows;
+    this.library.setProfile(p);
+    this.drone.setQuality(p.tier);
+    this.vfx.setQuality(p.tier);
+    this.rings.setQuality(p.tier, look.ringGain);
     this.levelView.setQuality(p);
+    this.cascades.apply(this.levelView.group, p, this.levelView.shadowFar);
     this.levelView.refreshShadows();
-    this.scene.environment = p.envMap ? this.levelView.environment : null;
+    this.applyCameraFar();
+    const sun = findSun(this.levelView.group);
+    if (sun) this.sunDir.setFromMatrixPosition(sun.matrixWorld).sub(_v.setFromMatrixPosition(sun.target.matrixWorld)).normalize();
+    if (deferred) this.scene.environment = null;
+    else this.applyEnvironment(p, look);
     if (p.post) {
       if (!this.post) this.post = new PostFX(r, this.scene, this.rig.camera);
-      this.post.setBloomThreshold(this.levelView.bloomThreshold);
-      this.post.configure(p);
+      this.post.setBloomThreshold(Math.max(this.levelView.bloomThreshold, look.bloom.threshold));
+      this.post.setSunDirection(this.sunDir);
+      this.post.configure(p, look, !deferred);
+      this.post.setSize(this.width, this.height);
       r.toneMapping = THREE.NoToneMapping;
+      r.toneMappingExposure = 1;
     } else {
       this.post?.dispose();
       this.post = null;
-      r.toneMapping = THREE.ACESFilmicToneMapping;
+      r.toneMapping = TONE_MAPPING[look.toneMapping];
+      r.toneMappingExposure = look.exposure;
     }
+  }
+
+  /**
+   * One image-based-lighting path for every level (ibl.ts): the level is captured from its own probe point.
+   * Tiers with envMap light everything with the PMREM; tiers without get the SH irradiance of the same
+   * view as a LightProbe, so their ambient keeps the level's mood instead of a flat hemisphere colour. A
+   * level whose materials box-project the capture (the loft's floor and windows) gets it on every tier.
+   * Either way the level's hemisphere light drops to the look's `hemiWithIbl`: the capture already holds
+   * the sky / room ambient, counting it twice would flatten the light.
+   */
+  private applyEnvironment(p: QualityProfile, look: Readonly<LevelLook>): void {
+    const probe = this.levelView.probe;
+    const env = p.envMap || probe.always ? this.environmentFor(p) : null;
+    if (env && this.envCapture) this.levelView.setEnvironment(env);
+    this.scene.environment = p.envMap ? env : null;
+    const sh = p.envMap ? null : this.lightProbeFor();
+    this.shProbe.visible = sh !== null;
+    const ibl = (this.scene.environment !== null && this.envCapture !== null) || sh !== null;
+    this.scaleHemiLights(ibl ? look.hemiWithIbl : 1);
+  }
+
+  /**
+   * Captured environment of the current level, made on first use: the room or meadow as lit, seen from
+   * the level's probe point. Falls back to the level view's stand-in if the capture fails.
+   */
+  private environmentFor(p: QualityProfile): THREE.Texture {
+    if (!this.envCapture) {
+      const probe = this.levelView.probe;
+      this.levelView.group.updateMatrixWorld(true);
+      try {
+        this.envCapture = captureEnvironment(this.renderer, this.scene, [this.levelView.group], {
+          position: probe.position,
+          size: Math.max(p.envSize, probe.minSize),
+          near: probe.near,
+          far: probe.far,
+          // the level's env-mapped materials compile once, against a blank map of the final size
+          standIn: (stand) => this.levelView.setEnvironment(stand),
+          sceneStandIn: p.envMap,
+        });
+      } catch {
+        return this.levelView.environment;
+      }
+      // the capture rendered the static shadow maps from its own views; redraw them for the game camera
+      this.levelView.refreshShadows();
+    }
+    return this.envCapture.texture;
+  }
+
+  /**
+   * SH light probe of the level from its probe point (null if the GPU cannot read it back). It is taken
+   * with the level lit as on a high tier (every spot and practical on, shadow maps aside), so the ambient
+   * of a tier that drops lights still carries the full rig's colour: the low / VR loft keeps the warm
+   * washers' bounce instead of reading cold.
+   */
+  private lightProbeFor(): THREE.LightProbe | null {
+    if (!this.shReady) {
+      const probe = this.levelView.probe;
+      this.levelView.setQuality(REFERENCE_LIGHTING);
+      this.levelView.group.updateMatrixWorld(true);
+      let captured: THREE.LightProbe;
+      try {
+        captured = captureLightProbe(this.renderer, this.scene, [this.levelView.group], probe.position, probe.near, probe.far, null);
+      } catch {
+        return null;
+      } finally {
+        this.levelView.setQuality(this.profile);
+      }
+      // into the probe the programs were compiled with (same object, same count)
+      this.shProbe.sh.copy(captured.sh);
+      captured.dispose();
+      this.shProbe.intensity = this.levelView.environmentIntensity;
+      if (!this.shProbe.parent) this.scene.add(this.shProbe);
+      this.shReady = true;
+      this.levelView.refreshShadows();
+    }
+    return this.shProbe;
+  }
+
+  private dropCapture(): void {
+    this.envCapture?.dispose();
+    this.envCapture = null;
+    // the probe object stays (and stays in the scene): only its capture is dropped
+    this.shProbe.sh.zero();
+    this.shReady = false;
+    this.scene.environment = null;
+  }
+
+  /**
+   * Scales the level's hemisphere lights against their own last setting (level views may reset them
+   * on a quality change; a value this method wrote is recognised and not compounded).
+   */
+  private scaleHemiLights(k: number): void {
+    this.levelView.group.traverse((o) => {
+      const h = o as THREE.HemisphereLight;
+      if (!h.isHemisphereLight) return;
+      const ud = h.userData as { iblBase?: number; iblSet?: number };
+      const base = ud.iblSet !== undefined && h.intensity === ud.iblSet ? ud.iblBase! : h.intensity;
+      ud.iblBase = base;
+      h.intensity = base * k;
+      ud.iblSet = h.intensity;
+    });
+  }
+
+  /** Look-test hook: force a tone mapper (null = the level's), rebuilding the post stack. */
+  setToneMapping(mode: ToneMapper | null): void {
+    this.toneOverride = mode;
+    this.applyQuality();
+  }
+
+  /** The level look in use (tone mapper reflects a look-test override). */
+  get currentLook(): Readonly<LevelLook> {
+    return this.toneOverride ? { ...this.look, toneMapping: this.toneOverride } : this.look;
   }
 
   setRenderScale(scale: number): void {
@@ -598,8 +1115,11 @@ export class GameView {
   }
 
   dispose(): void {
+    this.xrLoad?.dispose();
     this.post?.dispose();
     this.post = null;
+    this.cascades.detach();
+    this.dropCapture();
     this.losMarker.dispose();
     this.xrPanel.dispose();
     this.arrow.dispose();
@@ -608,12 +1128,11 @@ export class GameView {
     this.levelView.dispose();
     this.rings.dispose();
     this.drone.dispose();
-    this.fx.dispose();
-    this.soft.dispose();
-    this.waves.dispose();
+    this.vfx.dispose();
     this.contact.dispose();
     this.fill.dispose();
     this.mats.dispose();
+    this.library.dispose();
     this.scene.clear();
     this.renderer.dispose();
   }
@@ -630,22 +1149,4 @@ function xrPlatform(): THREE.Mesh {
   const edge = new THREE.LineSegments(new THREE.EdgesGeometry(g), new THREE.LineBasicMaterial({ color: 0x7fe3ff, fog: false, toneMapped: false }));
   m.add(edge);
   return m;
-}
-
-/** Orthonormal basis perpendicular to unit n. */
-function basis(n: THREE.Vector3, t1: THREE.Vector3, t2: THREE.Vector3): void {
-  if (Math.abs(n.y) < 0.9) t1.set(0, 1, 0);
-  else t1.set(1, 0, 0);
-  t1.crossVectors(n, t1).normalize();
-  t2.crossVectors(n, t1).normalize();
-}
-
-/** Random unit vector with an upward bias (0 = uniform sphere). */
-function randomDir(out: THREE.Vector3, upBias: number): THREE.Vector3 {
-  const z = Math.random() * 2 - 1;
-  const a = Math.random() * Math.PI * 2;
-  const s = Math.sqrt(1 - z * z);
-  out.set(s * Math.cos(a), z, s * Math.sin(a));
-  out.y += upBias;
-  return out.normalize();
 }

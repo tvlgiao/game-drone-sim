@@ -1,8 +1,11 @@
 /** In-flight HUD + menu screens as a DOM overlay. update() is cheap enough to call every frame. */
 import './styles.css';
-import { DEFAULT_SETTINGS, defaultStorage, type Settings } from '../core/settings';
+import './hud-outdoor.css';
+import { DEFAULT_SETTINGS, defaultStorage, minimapOn, type Settings } from '../core/settings';
 import type { CameraMode, DroneState, FlightMode, GameEvent, InputFrame, InputSource, LevelId, NavEvents, QualityTier, RaceSnapshot, RaceStatus } from '../types';
-import { formatDelta, formatTime } from './format';
+import { formatDelta, formatDistance, formatTime, heightValue, speedUnit, speedValue } from './format';
+import { bearingDeg, groundDistance, headingFromQuat, headingText, tapeMarker, tapeOffsetPct, tapeTicks } from './compass';
+import { Minimap, type MinimapSampler } from './minimap';
 import { ICON_GAMEPAD, ICON_KEYBOARD, ICON_NONE, ICON_TOUCH } from './icons';
 import type { LevelCard } from './level-select';
 import { Menus, type FinishData, type ScreenName, type UiAction } from './menus';
@@ -12,9 +15,21 @@ import { KEY_STICKS, type InputExtras } from '../input/input-manager';
 import { isCanvas, pointerLockSupported, releasePointerLock, requestPointerLock } from '../input/mouse';
 import { ACTION_LABEL, actionGlyphs, channelHints, glyphHtml, glyphsHtml, hintScheme, keyCluster, keyGlyph, padGlyph, type HintAction, type HintScheme } from './input-glyphs';
 import { CH_NAME } from './mode-labels';
+import { attitudeOf, type Attitude } from './acro-aid';
 import { GP } from '../input/gamepad';
 
 export type { UiAction, ScreenName, FinishData } from './menus';
+export type { MinimapSampler, MapCell } from './minimap';
+
+/** Outdoor levels: what the compass tape, the minimap and the AGL readout need each frame. */
+export interface OutdoorHud {
+  /** height of the drone above the ground under it (m) */
+  agl: number;
+  /** pilot spot (LOS camera), ground coordinates; null hides the pilot marker */
+  pilot: { x: number; z: number } | null;
+  /** next ring centre while racing; null in free fly */
+  ring: { x: number; z: number } | null;
+}
 
 export interface HudFrame {
   race: RaceSnapshot;
@@ -28,10 +43,15 @@ export interface HudFrame {
   speed: number;
   tier: QualityTier;
   settings: Settings;
+  /** outdoor levels only; omitted / null indoors hides the compass and the minimap */
+  outdoor?: OutdoorHud | null;
 }
 
 /** Numeric text refresh interval (ms) — ~20 Hz is plenty for humans and avoids DOM churn at 120 fps. */
 const TEXT_INTERVAL = 50;
+/** artificial horizon: pitch shown up to ±ATT_PITCH_MAX deg, ATT_PITCH_PCT % of the ball per degree */
+const ATT_PITCH_MAX = 60;
+const ATT_PITCH_PCT = 0.5;
 const STICK_TRAVEL = 0.36; // fraction of the stick-well diameter the dot can travel from centre
 /** mouse stick dot travel in % of the dot (dot = 1/6 of the circle, edge at 0.42 of the diameter) */
 const MOUSE_TRAVEL = 0.42 * 600;
@@ -95,7 +115,27 @@ type Ref =
   | 'cmap'
   | 'mstick'
   | 'mdot'
-  | 'mlbl';
+  | 'mlbl'
+  | 'speedUnit'
+  | 'altUnit'
+  | 'compass'
+  | 'cStrip'
+  | 'cHdg'
+  | 'cRing'
+  | 'cPilot'
+  | 'cPilotD'
+  | 'cRingRow'
+  | 'cRingD'
+  | 'cAgl'
+  | 'map'
+  | 'mapTerrain'
+  | 'mapOver'
+  | 'att'
+  | 'attBall';
+
+const TICKS_HTML = tapeTicks()
+  .map((t) => `<i class="ds-compass__tick${t.major ? ' is-major' : ''}" style="left:${t.pct.toFixed(3)}%">${t.label ? `<b>${t.label}</b>` : ''}</i>`)
+  .join('');
 
 const HUD_HTML = `
 <div class="ds-hud" aria-hidden="false">
@@ -106,6 +146,19 @@ const HUD_HTML = `
     <div class="ds-sub" data-r="bestRow"><span class="ds-label">Best</span><span class="ds-num" data-r="best">--:--.--</span></div>
   </div>
   <div class="ds-hud__tc">
+    <div class="ds-compass ds-panel" data-r="compass" hidden>
+      <div class="ds-compass__tape" aria-hidden="true">
+        <div class="ds-compass__strip" data-r="cStrip">${TICKS_HTML}</div>
+        <i class="ds-compass__mk is-pilot" data-r="cPilot"></i>
+        <i class="ds-compass__mk is-ring" data-r="cRing"></i>
+      </div>
+      <span class="ds-compass__hdg ds-num" data-r="cHdg" aria-label="Heading">000</span>
+      <div class="ds-compass__row">
+        <span class="ds-compass__item is-pilot"><span class="ds-label">Pilot</span><b class="ds-num" data-r="cPilotD">—</b></span>
+        <span class="ds-compass__item is-ring" data-r="cRingRow"><span class="ds-label">Ring</span><b class="ds-num" data-r="cRingD">—</b></span>
+        <span class="ds-compass__item"><span class="ds-label">AGL</span><b class="ds-num" data-r="cAgl">—</b></span>
+      </div>
+    </div>
     <div class="ds-gates ds-panel" data-r="gates">
       <span class="ds-label">Gate</span>
       <span class="ds-gates__num"><b data-r="ringCur">0</b><i>/</i><span data-r="ringTot">0</span></span>
@@ -120,6 +173,7 @@ const HUD_HTML = `
     <span class="ds-chip ds-chip--fps" data-r="fps">— fps</span>
     <button type="button" class="ds-chip ds-chip--quit" data-r="quit" aria-label="Quit flight">✕ Quit</button>
     <div class="ds-binds" data-r="binds"></div>
+    <div class="ds-minimap" data-r="map" hidden aria-hidden="true"><canvas data-r="mapTerrain"></canvas><canvas data-r="mapOver"></canvas><b class="ds-minimap__n">N</b></div>
   </div>
   <section class="ds-cmap ds-panel" data-r="cmap" aria-label="Controls" hidden></section>
   <div class="ds-center">
@@ -134,10 +188,11 @@ const HUD_HTML = `
       <span class="ds-num ds-thr__val" data-r="thrVal">0</span>
     </div>
     <div class="ds-tele">
-      <div class="ds-tele__speed"><span class="ds-num ds-big" data-r="speed">0</span><span class="ds-unit">km/h</span></div>
-      <div class="ds-tele__row"><span class="ds-label">Alt</span><span class="ds-num" data-r="alt">0.0</span><span class="ds-unit">m</span></div>
+      <div class="ds-tele__speed"><span class="ds-num ds-big" data-r="speed">0</span><span class="ds-unit" data-r="speedUnit">km/h</span></div>
+      <div class="ds-tele__row"><span class="ds-label">Alt</span><span class="ds-num" data-r="alt">0.0</span><span class="ds-unit" data-r="altUnit">m</span></div>
       <div class="ds-tele__row" data-r="batt"><span class="ds-label">Bat</span><span class="ds-num" data-r="battCell">16.8</span><span class="ds-unit">V</span></div>
     </div>
+    <div class="ds-att" data-r="att" role="img" aria-label="Attitude" hidden><div class="ds-att__ball" data-r="attBall"></div><i class="ds-att__wings"></i></div>
   </div>
   <div class="ds-hud__br ds-panel">
     <div class="ds-mstick" data-r="mstick" hidden><div class="ds-mstick__well"><i class="ds-mstick__ring"></i><i class="ds-mstick__dot" data-r="mdot"></i></div><span class="ds-mstick__lbl" data-r="mlbl"></span></div>
@@ -170,6 +225,7 @@ export class Hud {
   private flashAt = -Infinity;
   private source: InputSource | null = null;
   private settingsRef: Settings | null = null;
+  private readonly attitude: Attitude = { rollDeg: 0, pitchDeg: 0, inverted: false };
   private stickL = [9, 9];
   private stickR = [9, 9];
   private throttle = 9;
@@ -190,6 +246,12 @@ export class Hud {
   /** the tutorial runs: on a keyboard Esc skips it instead of pausing */
   private tutorial = false;
   private readonly storage: Storage | null;
+  private readonly minimap: Minimap;
+  /** last defined heading (the nose straight up / down has none) */
+  private heading = 0;
+  private outdoorOn = false;
+  private mapOn = false;
+  private mapCss = 0;
 
   private readonly onPointerDown = (e: PointerEvent): void => {
     if (!this.flightView || e.pointerType !== 'mouse' || e.button !== 0) return;
@@ -216,7 +278,8 @@ export class Hud {
       refs[el.dataset.r as Ref] = el;
     });
     this.refs = refs;
-    this.menus = new Menus(root, onAction, { ...DEFAULT_SETTINGS });
+    this.menus = new Menus(root, onAction, { ...DEFAULT_SETTINGS }, { storage, toast: (m) => this.toast(m) });
+    this.minimap = new Minimap(refs.mapTerrain as HTMLCanvasElement, refs.mapOver as HTMLCanvasElement);
     refs.quit.addEventListener('click', () => onAction({ type: 'request-quit' }));
     refs.binds.addEventListener('click', (e) => {
       if ((e.target as Element | null)?.closest?.('[data-legend]')) this.toggleLegend();
@@ -238,6 +301,8 @@ export class Hud {
       this.settingsRef = f.settings;
       this.menus.setSettings(f.settings);
       this.root.classList.toggle('ds-hide-fps', !f.settings.showFps);
+      this.text(r.speedUnit, speedUnit(f.settings.units));
+      this.text(r.altUnit, f.settings.units);
       this.text(r.lblL, stickShort(f.settings, 'l'));
       this.text(r.lblR, stickShort(f.settings, 'r'));
       const thr = throttleControl(f.settings);
@@ -263,8 +328,8 @@ export class Hud {
       this.text(r.timeLabel, free ? 'Flight' : 'Time');
       this.text(r.time, formatTime(free ? this.flightTime : race.time));
       this.text(r.best, formatTime(race.bestTime));
-      this.text(r.speed, String(Math.round(f.speed * 3.6)));
-      this.text(r.alt, Math.max(0, f.altitude).toFixed(1));
+      this.text(r.speed, speedValue(f.speed, f.settings.units));
+      this.text(r.alt, heightValue(Math.max(0, f.altitude), f.settings.units));
       const v = f.drone.batteryVoltage;
       this.text(r.battCell, v.toFixed(1));
       const cell = v / CELLS;
@@ -274,6 +339,7 @@ export class Hud {
     }
 
     this.text(r.modeText, f.mode === 'acro' ? 'ACRO' : 'ANGLE');
+    this.updateAttitude(f);
     this.cls(r.mode, f.mode === 'acro' ? 'is-acro' : '');
     this.text(r.cam, CAMERA_LABEL[f.camera]);
     const armed = f.drone.armed;
@@ -294,16 +360,25 @@ export class Hud {
     this.flightView = flying && this.menus.current === 'none';
     if (!this.flightView) releasePointerLock(this.root.ownerDocument);
     else if (f.input.legend) this.toggleLegend();
+    this.updateOutdoor(f, now, textDue);
     this.updateBindings(f);
     this.updateHint(f);
     this.updateSticks(f.input);
     this.updateMouseStick(f.input);
   }
 
-  showScreen(s: 'main' | 'levels' | 'pause' | 'finish' | 'none' | 'settings' | 'controls' | 'controller' | 'rates' | 'confirm-quit' | 'confirm-reset' | 'about' | 'bye', data?: FinishData & { best?: number | null }): void {
+  showScreen(s: 'main' | 'levels' | 'worlds' | 'pause' | 'finish' | 'none' | 'settings' | 'controls' | 'controller' | 'rates' | 'confirm-quit' | 'confirm-reset' | 'about' | 'bye', data?: FinishData & { best?: number | null }): void {
     if (s === 'main' && data && 'best' in data) this.menus.setMenuBest(data.best ?? null);
     if (s === 'bye') this.clearToasts();
     this.menus.show(s as ScreenName, data);
+  }
+
+  /**
+   * Terrain source of the outdoor minimap for the level loaded now; null indoors (and while no outdoor level is
+   * loaded). Every call drops the cached cells.
+   */
+  setMinimapSampler(s: MinimapSampler | null): void {
+    this.minimap.setSampler(s);
   }
 
   /** Level picker cards and the level loaded now (main-menu level line). */
@@ -391,7 +466,7 @@ export class Hud {
     }
   }
 
-  toast(msg: string): void {
+  toast(msg: string, ms = 2800): void {
     const box = this.refs.toasts;
     const t = document.createElement('div');
     t.className = 'ds-toast';
@@ -402,7 +477,7 @@ export class Hud {
     setTimeout(() => {
       t.classList.add('is-out');
       setTimeout(() => t.remove(), 400);
-    }, 2800);
+    }, ms);
   }
 
   setError(msg: string): void {
@@ -515,6 +590,59 @@ export class Hud {
     this.refs.hint.innerHTML = html;
     this.cls(this.refs.hint, html ? 'is-on' : '');
     this.placeToasts();
+  }
+
+  /** Compass tape (heading, ring / pilot bearings, distances, AGL) and the minimap, outdoors only. */
+  private updateOutdoor(f: HudFrame, now: number, textDue: boolean): void {
+    const r = this.refs;
+    const o = f.outdoor ?? null;
+    const on = o !== null;
+    if (on !== this.outdoorOn) {
+      this.outdoorOn = on;
+      r.compass.hidden = !on;
+      this.root.classList.toggle('ds-outdoor', on);
+    }
+    const map = on && this.minimap.hasSampler && minimapOn(f.settings, this.menus.xrDevice);
+    if (map !== this.mapOn) {
+      this.mapOn = map;
+      r.map.hidden = !map;
+      this.root.classList.toggle('ds-map-on', map);
+    }
+    if (!o) return;
+    const p = f.drone.position;
+    const hd = headingFromQuat(f.drone.orientation);
+    if (Number.isFinite(hd)) this.heading = hd;
+    const heading = this.heading;
+    this.style(r.cStrip, `translateX(${tapeOffsetPct(heading).toFixed(2)}%)`);
+    this.marker(r.cPilot, o.pilot ? bearingDeg(p.x, p.z, o.pilot.x, o.pilot.z) : null, heading);
+    this.marker(r.cRing, o.ring ? bearingDeg(p.x, p.z, o.ring.x, o.ring.z) : null, heading);
+    if (textDue) {
+      const u = f.settings.units;
+      this.text(r.cHdg, headingText(heading));
+      this.text(r.cPilotD, o.pilot ? formatDistance(groundDistance(p.x, p.z, o.pilot.x, o.pilot.z), u) : '—');
+      if (r.cRingRow.hidden !== !o.ring) r.cRingRow.hidden = !o.ring;
+      if (o.ring) this.text(r.cRingD, formatDistance(groundDistance(p.x, p.z, o.ring.x, o.ring.z), u));
+      this.text(r.cAgl, `${heightValue(Math.max(0, o.agl), u)} ${u}`);
+      if (map) {
+        const css = r.map.clientWidth;
+        if (css && css !== this.mapCss) {
+          this.mapCss = css;
+          this.minimap.resize(css, window.devicePixelRatio || 1);
+        }
+        this.minimap.update({ x: p.x, z: p.z, heading, ring: o.ring, pilot: o.pilot }, now);
+      }
+    }
+  }
+
+  private marker(el: HTMLElement, bearing: number | null, heading: number): void {
+    if (bearing === null) {
+      if (!el.hidden) el.hidden = true;
+      return;
+    }
+    if (el.hidden) el.hidden = false;
+    const m = tapeMarker(bearing, heading);
+    this.style(el, `translateX(-50%) translateX(${m.pct.toFixed(2)}cqw)`);
+    el.classList.toggle('is-pinned', m.pinned);
   }
 
   private throttleUpKey(s: Settings): string {
@@ -771,6 +899,21 @@ export class Hud {
       if (this.status !== 'crashed') this.text(this.refs.center, '');
       this.placeToasts();
     }, ms);
+  }
+
+  /**
+   * Acro only: the artificial horizon (Acro does not self-level, so this is how a pilot sees a quad that is
+   * rolled over or inverted). The ball turns against the roll and slides with the pitch; red while belly up.
+   */
+  private updateAttitude(f: HudFrame): void {
+    const r = this.refs;
+    const on = f.mode === 'acro';
+    if (r.att.hidden !== !on) r.att.hidden = !on;
+    if (!on) return;
+    const a = attitudeOf(f.drone.orientation, this.attitude);
+    const shift = Math.max(-ATT_PITCH_MAX, Math.min(ATT_PITCH_MAX, a.pitchDeg)) * ATT_PITCH_PCT;
+    this.style(r.attBall, `rotate(${(-a.rollDeg).toFixed(1)}deg) translateY(${shift.toFixed(1)}%)`);
+    r.att.classList.toggle('is-inv', a.inverted);
   }
 
   private text(el: HTMLElement, v: string): void {

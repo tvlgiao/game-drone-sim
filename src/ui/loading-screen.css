@@ -1,0 +1,232 @@
+/* Level loading screen: the level's art full-bleed under a dark gradient, a glass panel bottom-left with the
+   name, the progress bar, the stage and a pilot tip (same tokens and panel language as the menus). */
+.ds-load {
+  position: absolute;
+  inset: 0;
+  z-index: 45;
+  overflow: hidden;
+  pointer-events: auto;
+  background: #05080f;
+  color: var(--ds-text);
+  font-family: var(--ds-font);
+  opacity: 1;
+  transition: opacity 0.4s ease;
+}
+
+.ds-load.is-fading {
+  opacity: 0;
+  /* control is back with the pilot during the fade: touches reach the sticks below */
+  pointer-events: none;
+}
+
+.ds-load__art {
+  position: absolute;
+  inset: -3%;
+  width: 106%;
+  height: 106%;
+  object-fit: cover;
+  filter: blur(calc(3 * var(--ds-u))) saturate(1.1) brightness(0.8);
+  transform: scale(1.02);
+  animation: ds-load-drift 18s ease-in-out infinite alternate;
+}
+
+@keyframes ds-load-drift {
+  to {
+    transform: scale(1.08) translate(-1%, -0.6%);
+  }
+}
+
+.ds-load__shade {
+  position: absolute;
+  inset: 0;
+  background:
+    linear-gradient(90deg, rgba(4, 7, 14, 0.92) 0%, rgba(4, 7, 14, 0.62) 42%, rgba(4, 7, 14, 0.12) 75%),
+    linear-gradient(0deg, rgba(4, 7, 14, 0.9) 0%, rgba(4, 7, 14, 0) 45%);
+}
+
+.ds-load__panel {
+  position: absolute;
+  left: max(calc(48 * var(--ds-u)), env(safe-area-inset-left));
+  bottom: max(calc(44 * var(--ds-u)), env(safe-area-inset-bottom));
+  width: min(calc(560 * var(--ds-u)), calc(100% - 2 * max(calc(24 * var(--ds-u)), env(safe-area-inset-left))));
+  display: grid;
+  gap: calc(10 * var(--ds-u));
+  font-size: clamp(calc(12 * var(--ds-u)), 1.05vw, calc(15 * var(--ds-u)));
+}
+
+.ds-load__mode {
+  margin: 0;
+  color: var(--ds-cyan);
+}
+
+.ds-load__name {
+  margin: 0;
+  font-size: clamp(calc(30 * var(--ds-u)), 4.2vw, calc(64 * var(--ds-u)));
+  font-weight: 800;
+  line-height: 1.02;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  text-shadow: 0 calc(2 * var(--ds-u)) calc(24 * var(--ds-u)) rgba(0, 0, 0, 0.6);
+}
+
+.ds-load__code {
+  margin: 0;
+  font-family: var(--ds-mono);
+  letter-spacing: 0.12em;
+  color: var(--ds-text);
+  opacity: 0.85;
+}
+
+.ds-load__progress {
+  display: grid;
+  gap: calc(8 * var(--ds-u));
+  margin-top: calc(10 * var(--ds-u));
+}
+
+.ds-load__bar {
+  position: relative;
+  height: calc(6 * var(--ds-u));
+  min-height: 4px;
+  border-radius: 999px;
+  background: rgba(120, 220, 255, 0.14);
+  overflow: hidden;
+  box-shadow: inset 0 0 0 1px rgba(120, 220, 255, 0.12);
+}
+
+.ds-load__bar > i {
+  position: absolute;
+  inset: 0;
+  transform: scaleX(0);
+  transform-origin: left center;
+  border-radius: inherit;
+  background: linear-gradient(90deg, var(--ds-cyan), #7ff3ff 70%, var(--ds-magenta));
+  box-shadow: 0 0 calc(14 * var(--ds-u)) rgba(40, 231, 255, 0.55);
+  will-change: transform;
+}
+
+/* a light sweep on the filled part: motion even while a stage is long */
+.ds-load__bar > i::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.45), transparent);
+  transform: translateX(-100%);
+  animation: ds-load-sweep 1.6s linear infinite;
+}
+
+@keyframes ds-load-sweep {
+  to {
+    transform: translateX(100%);
+  }
+}
+
+.ds-load__row {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: calc(12 * var(--ds-u));
+}
+
+.ds-load__stage {
+  font-size: 0.8em;
+  font-weight: 700;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--ds-muted);
+}
+
+.ds-load__pct {
+  font-size: 0.9em;
+  color: var(--ds-text);
+}
+
+.ds-load__tip {
+  margin: calc(6 * var(--ds-u)) 0 0;
+  max-width: 46ch;
+  color: var(--ds-text);
+  opacity: 0.82;
+  line-height: 1.4;
+}
+
+.ds-load__tip.is-new {
+  animation: ds-load-tip 0.5s ease;
+}
+
+@keyframes ds-load-tip {
+  from {
+    opacity: 0;
+    transform: translateY(calc(6 * var(--ds-u)));
+  }
+}
+
+.ds-load__error {
+  padding: calc(12 * var(--ds-u)) calc(14 * var(--ds-u));
+  border: 1px solid rgba(255, 70, 97, 0.5);
+  border-radius: calc(10 * var(--ds-u));
+  background: rgba(40, 6, 14, 0.6);
+  color: var(--ds-danger-text);
+}
+
+.ds-load__error p {
+  margin: 0;
+}
+
+.ds-load__actions {
+  display: flex;
+  gap: calc(10 * var(--ds-u));
+  margin-top: calc(6 * var(--ds-u));
+}
+
+.ds-load__actions .ds-btn {
+  width: auto;
+  min-width: calc(120 * var(--ds-u));
+  min-height: max(44px, calc(44 * var(--ds-u)));
+  padding: 0 calc(18 * var(--ds-u));
+}
+
+.ds-load__go {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  pointer-events: none;
+  font-size: clamp(calc(40 * var(--ds-u)), 7vw, calc(110 * var(--ds-u)));
+  font-weight: 900;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--ds-green);
+  text-shadow: 0 0 calc(30 * var(--ds-u)) rgba(61, 255, 160, 0.55);
+}
+
+.ds-load__go:empty {
+  display: none;
+}
+
+/* short landscape phones: a tighter panel, no tip */
+@media (max-height: 460px) {
+  .ds-load__panel {
+    bottom: max(16px, env(safe-area-inset-bottom));
+    gap: 6px;
+  }
+
+  .ds-load__tip {
+    display: none;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ds-load,
+  .ds-load__tip.is-new {
+    transition: none;
+    animation: none;
+  }
+
+  .ds-load__art,
+  .ds-load__bar > i::after {
+    animation: none;
+  }
+}
+
+[dir='rtl'] .ds-load__bar > i {
+  transform-origin: right center;
+}

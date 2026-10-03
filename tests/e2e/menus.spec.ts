@@ -283,6 +283,8 @@ test.describe('desktop menus', () => {
     await page.getByRole('button', { name: 'Rates ›', exact: true }).click();
     const chart = page.locator('.ds-screen--rates [data-f="thrChart"]');
     await expect(chart.locator('.ds-chart__dot')).toHaveAttribute('transform', /^translate\(/); // placed by the live update (stick at 0)
+    // the screen rises in: boxes read mid-animation come from different frames
+    await page.waitForFunction(() => document.getAnimations().every((a) => a.playState !== 'running' || a.effect?.getComputedTiming().iterations === Infinity));
     const dot = (await chart.locator('.ds-chart__dot').boundingBox())!;
     const label = (await chart.locator('.ds-chart__ylabel', { hasText: /^0%$/ }).boundingBox())!;
     const zero = (await chart.locator('.ds-chart__xlabel', { hasText: /^0$/ }).boundingBox())!;

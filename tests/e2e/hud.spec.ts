@@ -234,3 +234,27 @@ test('free fly shows a running FLIGHT clock instead of a lone ∞', async ({ pag
   const t = await page.locator('[data-r="time"]').textContent();
   expect(t).toMatch(/^00:0[1-9]\.\d\d$/);
 });
+
+test('keyboard Acro: plain mode toast (the self-level tip is for touch), attitude ball only in Acro', async ({ page }) => {
+  await boot(page);
+  await page.evaluate(() => window.__drone.action({ type: 'freefly' }));
+  await page.waitForFunction(() => window.__drone.race.status === 'freefly');
+  const att = page.locator('.ds-att');
+  await expect(att).toBeHidden();
+  await page.locator('canvas').first().focus();
+  await page.keyboard.press('KeyM');
+  await page.waitForFunction(() => (window.__drone as unknown as { mode: string }).mode === 'acro');
+  await expect(page.locator('.ds-toast', { hasText: 'ACRO mode' })).toHaveCount(1);
+  await expect(page.locator('.ds-toast', { hasText: 'no self-level' })).toHaveCount(0);
+  await expect(att).toBeVisible();
+  // belly up: the ball turns red
+  await page.evaluate(() => {
+    const d = window.__drone as unknown as { hold: (on: boolean) => void; state: { orientation: { set: (x: number, y: number, z: number, w: number) => void } } };
+    d.hold(true);
+    d.state.orientation.set(0, 0, 1, 0);
+  });
+  await expect(att).toHaveClass(/is-inv/);
+  await page.keyboard.press('KeyM');
+  await page.waitForFunction(() => (window.__drone as unknown as { mode: string }).mode === 'angle');
+  await expect(att).toBeHidden();
+});

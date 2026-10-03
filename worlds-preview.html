@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <meta name="theme-color" content="#05070d" />
+    <title>Drone Sim — worlds UI preview</title>
+    <link rel="icon" href="data:," />
+    <style>
+      html, body { margin: 0; height: 100%; background: #05070d; overflow: hidden; }
+      #app { position: fixed; inset: 0; }
+      /* Fake daylight countryside so the outdoor HUD can be judged without WebGL. */
+      #scene {
+        position: absolute; inset: 0;
+        background:
+          radial-gradient(ellipse 50% 14% at 30% 62%, #5c8a4c 0 60%, transparent 62%),
+          radial-gradient(ellipse 45% 10% at 78% 60%, #6b9656 0 60%, transparent 62%),
+          linear-gradient(180deg, #6fa8de 0%, #cfe4f1 52%, #8fb06a 53%, #5b8442 100%);
+      }
+      body.is-dark #scene {
+        background:
+          radial-gradient(ellipse 30% 22% at 62% 46%, transparent 62%, rgba(40, 231, 255, 0.9) 64%, rgba(40, 231, 255, 0.25) 70%, transparent 74%),
+          linear-gradient(180deg, #0b1220 0%, #121a26 55%, #1d1a18 56%, #0c0b0a 100%);
+      }
+      #ui { position: absolute; inset: 0; pointer-events: none; }
+    </style>
+  </head>
+  <body>
+    <div id="app">
+      <div id="scene" aria-hidden="true"></div>
+      <div id="ui"></div>
+    </div>
+    <script type="module" src="/src/ui/worlds-preview.ts"></script>
+  </body>
+</html>

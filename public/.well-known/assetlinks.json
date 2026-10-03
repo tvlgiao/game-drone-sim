@@ -6,5 +6,13 @@
       "package_name": "com.cowork.dronesim",
       "sha256_cert_fingerprints": ["D3:4F:86:7E:4F:D6:1B:68:0D:4F:44:A8:5D:54:D5:49:B9:FC:A5:FB:EF:E1:60:BA:8C:1D:56:DA:24:B0:AA:12"]
     }
+  },
+  {
+    "relation": ["delegate_permission/common.handle_all_urls"],
+    "target": {
+      "namespace": "android_app",
+      "package_name": "com.cowork.dronesim",
+      "sha256_cert_fingerprints": ["6E:5A:75:96:0F:C8:31:5F:2F:24:58:EC:BC:EE:7B:1E:18:3C:56:17:44:66:14:BA:CF:7E:19:E0:45:A0:82:9A"]
+    }
   }
 ]

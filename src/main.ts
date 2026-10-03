@@ -6,18 +6,30 @@ import { Vector3 } from 'three';
 import { GameAudio } from './audio/audio';
 import { FixedLoop, FpsMeter } from './core/loop';
 import { detectDevice, exitFullscreen, needsRotate, requestFullscreen, toggleFullscreen } from './core/device';
-import { DynamicResolution, pickTier, probeGpu, targetFps } from './core/quality';
+import { DynamicResolution, pickTier, probeGpu, qualityProfile, targetFps } from './core/quality';
+import { prefetchLevelSurfaces } from './render/materials/library';
 import { loadSettings, saveSettings, type Settings } from './core/settings';
 import { hoverThrottle } from './physics/drone-params';
 import { RaceController, migrateBestTimes, readBestTime } from './game/race';
-import { LEVELS, buildLevel, levelEntry, loadLastLevel, nextLevel, saveLastLevel, type LevelRuntime } from './levels/registry';
+import { LEVELS, buildLevel, isWorldLevel, levelEntry, loadLastLevel, nextLevel, saveLastLevel, type LevelRuntime } from './levels/registry';
+import { levelEvents, type ActiveLevel } from './levels/level-events';
+import { lastPlayedWorld, loadWorlds, recordPlayed, saveWorlds } from './game/worlds';
+import { LoadingScreen } from './ui/loading-screen';
+import { levelStages } from './ui/load-progress';
+import { encodeSeed } from './world/seed-code';
+import { prewarmWorldWorkers } from './world/worker/chunk-builder';
+import { GEN_VERSION } from './world/world';
+import { afterPaint, whenIdle, yieldToMain } from './core/yield';
+import { browserVersionProbe, reloadForNewVersion } from './core/stale-chunk';
+import type { LevelMode } from './ui/level-select';
 import { InputManager, KEY_STICKS } from './input/input-manager';
 import { TutorialMachine, loadTutorialRecord, shouldOfferTutorial, type TutorialCtx, type TutorialEvent } from './game/tutorial';
 import { TutorialUi, type TutorialFinishAction } from './ui/tutorial-ui';
 import { tutorialView } from './ui/tutorial-prompts';
 import { keyGlyph } from './ui/input-glyphs';
 import { Simulation } from './physics/simulation';
-import { GameView } from './render/game-view';
+import { GameView, loadWorldViews } from './render/game-view';
+import { VIEW_DISTANCE_SCALE } from './render/outdoor/outdoor-profile';
 import { stickRadius } from './input/touch';
 import { Hud, type UiAction } from './ui/hud';
 import { throttleDownHint } from './ui/mode-labels';
@@ -28,8 +40,14 @@ import { Capacitor } from '@capacitor/core';
 import { detectEdition, editionCaps, type EditionCaps } from './core/edition';
 import { checkThisDevice, type OwnershipResult } from './core/ownership';
 import { XR_APP_EXIT_HINT, XR_EXIT_HINT, xrHudContent, xrTutorialCard, xrTutorialPrompt } from './ui/xr-hud';
+import { lastPlayedText, parseWorldParam, playWorld, resumeOrNewWorld, stripWorldParam } from './ui/worlds-model';
+import { terrainMinimapSampler } from './ui/minimap';
+import type { OutdoorHud } from './ui/hud';
+import { worldField } from './levels/runtime';
 import { TouchControls } from './ui/touch-controls';
-import type { ButtonEvents, CameraMode, ControlInput, DroneState, GameEvent, InputFrame, LevelId, QualityTier } from './types';
+import { AcroTip, ACRO_TIP_MS } from './ui/acro-aid';
+import { RATE_PRESETS, axisRatesFrom, touchAcroRates } from './control/rates';
+import type { AxisRates, ButtonEvents, CameraMode, ControlInput, DroneState, GameEvent, InputFrame, LevelId, QualityTier, RaceSnapshot } from './types';
 
 const PHYSICS_DT = 1 / 1000;
 const CAMERA_CYCLE: CameraMode[] = ['los', 'fpv', 'chase'];
@@ -41,6 +59,10 @@ const XR_PANEL_PERIOD = 0.1;
  * Browser) would otherwise recompute for a full-screen moving scene every frame.
  */
 const MENU_SETTLE_FRAMES = 2;
+/** after a load hand-off dynamic resolution ignores frame times this long (warm-up, streaming settle) (ms) */
+const DYN_RES_SETTLE_MS = 1500;
+/** a generated level that is still not ready after this long is flown anyway (terrain physics is analytic) */
+const LEVEL_READY_TIMEOUT_MS = 30_000;
 const FLYING = new Set(['countdown', 'racing', 'crashed', 'freefly']);
 
 function safeStorage(): Storage | null {
@@ -67,6 +89,7 @@ function boot(caps: EditionCaps): void {
   const canvas = document.getElementById('game') as HTMLCanvasElement;
   const uiRoot = document.getElementById('ui') as HTMLElement;
   const storage = safeStorage();
+  const acroTip = new AcroTip(storage);
   let settings: Settings = loadSettings(storage);
 
   const device = detectDevice(window);
@@ -75,16 +98,34 @@ function boot(caps: EditionCaps): void {
   const selftest = params.get('selftest') === '1';
   const hud = new Hud(uiRoot, (a) => onAction(a));
   bootHud = hud;
+  /** level loading screen (startLevel); Back returns to the level select */
+  const loader = new LoadingScreen(uiRoot);
   const gpu = probeGpu();
   const resolveTier = (s: Settings): QualityTier => (s.quality === 'auto' ? pickTier(gpu, device.form) : s.quality);
   let tier = resolveTier(settings);
   migrateBestTimes(storage);
-  let level: LevelRuntime = buildLevel(loadLastLevel(storage));
+  /** the Infinite world played last (saved worlds store), so a relaunch returns to it */
+  const lastWorld = (): { seed: number; gen: number } | null => lastPlayedWorld(loadWorlds(storage));
+  const firstLevel = loadLastLevel(storage);
+  const firstWorld = firstLevel === 'infinite' ? lastWorld() : null;
+  let level: LevelRuntime;
+  try {
+    level = buildLevel(firstLevel, firstWorld?.seed, firstWorld?.gen);
+  } catch (err) {
+    // a remembered world this build cannot generate (saved by a newer one): start on the beginner field
+    console.warn('Remembered level could not be built; starting on Training', err);
+    level = buildLevel('training');
+  }
 
   let view: GameView;
+  /** the boot level is still being readied (view.prepare) behind the splash: no frame draws it yet */
+  let bootPreparing = true;
   try {
     const xrCapable = caps.vr && 'xr' in navigator;
-    view = new GameView(canvas, level, tier, device.form, { xr: xrCapable, antialias: isQuestBrowser(navigator.userAgent) });
+    // deferred: the capture, the shader compile and the post warm-up run in steps below (bootPrepare), so the splash
+    // keeps moving instead of freezing on one long task
+    view = new GameView(canvas, level, tier, device.form, { xr: xrCapable, antialias: isQuestBrowser(navigator.userAgent), deferred: true });
+    bootProgress(0.6, 'Preparing level');
   } catch (err) {
     hud.setError(`WebGL2 is not available on this device/browser (${(err as Error).message}). Enable hardware acceleration or try a recent Chrome, Edge, Firefox or Safari.`);
     return;
@@ -94,6 +135,9 @@ function boot(caps: EditionCaps): void {
   const race = new RaceController(level, storage);
   const input = new InputManager(window, settings, device.touch);
   const audio = new GameAudio();
+  audio.configure({ tier, form: device.form, native: device.native });
+  audio.setLevel(level);
+  audio.attachUi(uiRoot);
   const loop = new FixedLoop(PHYSICS_DT, 250);
   const fpsMeter = new FpsMeter();
   const dynRes = new DynamicResolution(targetFps(device.form));
@@ -166,6 +210,8 @@ function boot(caps: EditionCaps): void {
   const zeroThrottle: ControlInput = { throttle: 0, yaw: 0, pitch: 0, roll: 0 };
   let cameraMode: CameraMode = 'los';
   let respawnPending = false;
+  /** debug hook: physics paused while flying (beauty shots / perf captures hold the drone where it was placed) */
+  let holdPose = false;
   let override: ControlInput | null = null;
   const injected: Partial<ButtonEvents> = {};
   let hasInjected = false;
@@ -173,28 +219,41 @@ function boot(caps: EditionCaps): void {
   /** the flying pad was unplugged during a crash: pause as soon as the respawn ends */
   let pauseAfterRespawn = false;
 
+  /** FC rates per input: the settings' rates, and the touch Acro variant (applySettings fills both) */
+  let padRates: AxisRates = axisRatesFrom(RATE_PRESETS.freestyle);
+  let thumbRates: AxisRates = padRates;
+
   function applySettings(s: Settings): void {
     settings = s;
     menuRenders = 0; // quality / FOV changes must show behind the settings screen
     sim.fc.mode = s.flightMode;
     const r = s.rates;
-    sim.fc.rates = { roll: { ...r.roll }, pitch: { ...r.pitch }, yaw: { ...r.yaw } };
+    padRates = { roll: { ...r.roll }, pitch: { ...r.pitch }, yaw: { ...r.yaw } };
+    // the pilot's own (custom) rates are flown as set on every input
+    thumbRates = s.ratePreset === 'custom' ? padRates : touchAcroRates(r);
+    sim.fc.rates = padRates;
     sim.fc.angleMaxTiltDeg = s.angleMaxTiltDeg;
     sim.fc.throttleExpo = s.throttleExpo;
     sim.fc.throttleLimit = s.throttleLimit;
     sim.fc.throttleMid = s.throttleMid ?? hoverThrottle(sim.world.params);
     input.updateSettings(s);
-    audio.setVolume(s.volume);
+    audio.applySettings(s);
     const next = resolveTier(s);
     if (next !== tier) {
       tier = next;
       view.setQuality(tier);
     }
     if (s.quality !== 'auto') view.setRenderScale(1);
+    view.setAnalogVideo(s.analogVideo ? s.analogStrength : 0);
+    // generated outdoor levels: sun, sky, look and fog follow the pilot's time of day and view distance
+    view.setTimeOfDay(s.timeOfDay);
+    view.setViewDistance(VIEW_DISTANCE_SCALE[s.viewDistance]);
+    audio.configure({ tier, form: device.form });
   }
   applySettings(settings);
   hud.setSettings(settings);
   publishLevels();
+  publishMinimap(level);
 
   const tutorial = new TutorialMachine({ storage });
   /** the tutorial owns the card / overlay: from Start until skip, quit or the completion card is answered */
@@ -249,50 +308,359 @@ function boot(caps: EditionCaps): void {
 
   /** Level cards for the picker: name, blurb and the stored best lap of each playable level. */
   function publishLevels(): void {
+    const last = lastPlayedWorld(loadWorlds(storage));
     hud.setLevels(
-      LEVELS.map((l) => ({ id: l.id, name: l.name, blurb: l.blurb, best: readBestTime(storage, l.id) })),
+      LEVELS.map((l) => ({
+        id: l.id,
+        name: l.name,
+        blurb: l.blurb,
+        kind: l.kind,
+        best: readBestTime(storage, l.id),
+        // Infinite: the world flown last stands in for the best lap
+        note: l.kind === 'seeded' && last ? `Last world ${last.code} · ${lastPlayedText(last.lastPlayed, Date.now())}` : undefined,
+      })),
       level.def.id,
     );
   }
 
+  /** Outdoor HUD minimap: the loaded level's ground (City blocks as buildings); none indoors. */
+  function publishMinimap(rt: LevelRuntime): void {
+    const field = rt.def.kind === 'outdoor' ? worldField(rt) : null;
+    const b = rt.def.bounds;
+    const bounds = b.kind === 'rect' && b.min && b.max && b.max[0] - b.min[0] < 20_000 ? { minX: b.min[0], maxX: b.max[0], minZ: b.min[1], maxZ: b.max[1] } : undefined;
+    hud.setMinimapSampler(field ? terrainMinimapSampler(field, bounds) : null);
+  }
+
   /** bumps on every switch request: a slower build that resolves after a newer request is dropped */
   let levelSeq = 0;
+  /** the loaded level's `ready` has resolved */
+  let levelReadyFlag = false;
+  /**
+   * a level is loading behind the loading screen: no flat-screen frames meanwhile (the old scenery is hidden, and a
+   * frame would compile the new level's shaders synchronously); a headset gets the XR loading panel instead
+   */
+  let loadingLevel: { name: string } | null = null;
+  /** the loading screen is fading into the scene: physics held, arming refused, until this time (ms) */
+  let handoffUntil = 0;
+  /** dynamic resolution holds still until this time: a load's frame times say nothing about the scene's cost */
+  let dynResHoldUntil = 0;
+  /** the load the loading screen's Back cancels (bumped by Back; a load checks it between stages) */
+  let loadCancel = 0;
+
+  function activeLevel(rt: LevelRuntime): ActiveLevel {
+    const c = rt.content;
+    return { id: rt.def.id, seed: c ? c.seed : null, code: c?.kind === 'terrain' && rt.def.id === 'infinite' ? c.code : null };
+  }
 
   /**
-   * Swap the level in view, physics, race and camera rig (the old level's GPU resources are freed),
-   * remember it, and park the drone on its spawn. Resolves false when superseded by a newer request.
+   * Waits for a level's `ready` (the chunks around the spawn) with the loading overlay up after a short delay,
+   * reporting progress on the level event bus. Resolves false when superseded; a stalled build gives up waiting
+   * after LEVEL_READY_TIMEOUT_MS (the analytic terrain is always there).
    */
-  async function startLevel(id: LevelId): Promise<boolean> {
+  async function waitReady(rt: LevelRuntime, live: () => boolean, onProgress: (f: number) => void = () => {}): Promise<boolean> {
+    let done = false;
+    const ready = rt.ready.then(() => {
+      done = true;
+    });
+    const t0 = performance.now();
+    while (!done) {
+      if (!live()) return false;
+      if (performance.now() - t0 > LEVEL_READY_TIMEOUT_MS) {
+        console.warn('Level not ready after', LEVEL_READY_TIMEOUT_MS, 'ms; flying anyway', rt.def.id);
+        break;
+      }
+      const progress = rt.progress?.() ?? 0;
+      onProgress(progress);
+      levelEvents.emit({ type: 'loading', id: rt.def.id, seed: rt.content?.seed ?? null, progress });
+      await Promise.race([ready, new Promise((r) => setTimeout(r, 100))]);
+    }
+    onProgress(1);
+    return live();
+  }
+
+  /** Infinite: the world just flown goes to the top of the saved worlds ("World K7Q2" until renamed). */
+  function rememberWorld(rt: LevelRuntime): void {
+    const c = rt.content;
+    if (rt.def.id !== 'infinite' || c?.kind !== 'terrain') return;
+    try {
+      saveWorlds(storage, recordPlayed(loadWorlds(storage), c.seed, c.world.spec.genVersion, Date.now()).store);
+    } catch (err) {
+      console.warn('Could not record the played world', err);
+    }
+  }
+
+  const MODE_LABEL: Record<LevelMode, string> = { race: 'Race', freefly: 'Free Fly' };
+
+  /**
+   * Loads a level behind the loading screen and swaps it in view, physics, race and camera rig (the old level's GPU
+   * resources and workers are freed), remembers it, and parks the drone on its spawn. The screen goes up at once (in
+   * the same task as the click), then the stages run, each giving the main thread back: generate / stream the
+   * ground → texture sets (worker, CC0 decode) → build the scenery → GPU upload → shader compile (parallel) →
+   * environment capture → a warm frame. `seed` picks the Infinite world (default: the last one played, else a new
+   * one); the same level with the same seed is a no-op (true, no screen). Resolves true with the loading screen at
+   * 100 % — the caller hands off with `finishLoad` — or false (superseded, cancelled with Back, or failed: the
+   * screen then offers Retry / Back).
+   */
+  function showLoader(id: LevelId, mode: LevelMode | null, code: string | null): void {
+    const entry = levelEntry(id);
+    if (!entry) return;
+    const kind = id === 'night-loft' ? 'indoor' : id === 'city' ? 'city' : entry.kind === 'seeded' || id === 'alpine' ? 'terrain' : 'authored';
+    loader.show(
+      { id, name: entry.name, mode: mode ? MODE_LABEL[mode] : view.presenting ? 'VR' : 'Free Fly', code },
+      levelStages(kind),
+    );
+    // the music stays on, muffled, until the hand-off brings the level's theme in
+    audio.setLoading(true);
+  }
+
+  /**
+   * The level picked is the one already loaded (behind the menu): the loading screen still takes over at once,
+   * full, and fades into the scene, so the first unfrozen frame (post passes, flight-camera programs) draws
+   * behind it instead of stalling a dead menu.
+   */
+  async function enterLoaded(mode: LevelMode): Promise<void> {
+    if (!view.presenting) {
+      showLoader(level.def.id, mode, level.content?.kind === 'terrain' ? level.content.code : null);
+      loader.report('warm', 1);
+      loader.onCancel = () => {
+        audio.setLoading(false);
+        hud.showScreen('levels');
+      };
+      await afterPaint();
+      if (!loader.loading) return;
+    }
+    newSession(mode);
+    void finishLoad(mode);
+  }
+
+  /** the load running now (a pick of the same level joins it instead of starting over) */
+  let inflight: { id: LevelId; seed: number | undefined; done: Promise<boolean> } | null = null;
+
+  /** Drops the running load without a screen change (a newer pick wants the level already loaded). */
+  function cancelInflight(): void {
+    if (!inflight) return;
+    const id = inflight.id;
+    inflight = null;
+    loadCancel++;
+    loadingLevel = null;
+    loader.hide();
+    audio.setLoading(false);
+    levelEvents.emit({ type: 'failed', id, error: 'cancelled' });
+  }
+
+  function startLevel(id: LevelId, opts: { seed?: number; gen?: number } = {}, mode: LevelMode | null = null, after: () => void = () => void finishLoad(null)): Promise<boolean> {
+    const seed = opts.seed === undefined ? undefined : opts.seed >>> 0;
+    // the same level (and world) is already on its way: wait for that load instead of cancelling it
+    if (inflight && inflight.id === id && (seed === undefined || seed === inflight.seed)) return inflight.done;
+    if (id === level.def.id && (seed === undefined || seed === level.content?.seed)) {
+      // already loaded: nothing to load, and a load of another level that was still running is dropped
+      cancelInflight();
+      return Promise.resolve(true);
+    }
+    const run = loadLevel(id, opts, mode, after, seed);
+    const entry = { id, seed: id === 'infinite' ? (seed ?? lastWorld()?.seed) : seed, done: run };
+    inflight = entry;
+    void run.finally(() => {
+      if (inflight === entry) inflight = null;
+    });
+    return run;
+  }
+
+  async function loadLevel(id: LevelId, opts: { seed?: number; gen?: number }, mode: LevelMode | null, after: () => void, seed: number | undefined): Promise<boolean> {
     const seq = ++levelSeq;
-    if (id === level.def.id) return true;
-    if (!levelEntry(id)) return false;
-    let next: ReturnType<typeof buildLevel>;
+    const entry = levelEntry(id);
+    if (!entry) return false;
+    const cancelToken = ++loadCancel;
+    const live = (): boolean => seq === levelSeq && cancelToken === loadCancel;
+    const last = seed === undefined && id === 'infinite' ? lastWorld() : null;
+    const worldSeed = seed ?? last?.seed;
+    const gen = seed === undefined ? last?.gen : opts.gen;
+    showLoader(id, mode, id === 'infinite' && worldSeed !== undefined ? encodeSeed(worldSeed >>> 0, gen ?? GEN_VERSION) : null);
+    loader.onCancel = () => {
+      loadCancel++;
+      loadingLevel = null;
+      audio.setLoading(false);
+      audio.levelMusic(); // a level already swapped in keeps its theme (it finishes loading behind the menu)
+      menuRenders = 0;
+      hud.showScreen('levels');
+      levelEvents.emit({ type: 'failed', id, error: 'cancelled' });
+    };
+    loadingLevel = { name: entry.name };
+    let markedStage = '';
+    const report = (stage: string, f: number): void => {
+      // stage boundaries on the performance timeline (load audits attribute long tasks to them)
+      if (stage !== markedStage) {
+        markedStage = stage;
+        performance.mark?.(`load:${stage}`);
+      }
+      loader.report(stage, f);
+    };
+    let next: LevelRuntime | null = null;
+    let swapped = false;
     try {
-      next = buildLevel(id);
-      await next.ready;
+      // the screen is painted before any heavy work starts
+      await afterPaint();
+      if (!live()) return false;
+      // a generated world's renderer is its own chunk (cached by the service worker after the first visit)
+      if (entry.world) await loadWorldViews();
+      if (!live()) return false;
+      report('code', 1);
+      report('generate', 0.05);
+      await yieldToMain();
+      next = buildLevel(id, worldSeed, gen);
+      report('generate', 0.3);
+      if (!(await waitReady(next, live, (f) => report('generate', 0.3 + 0.7 * f)))) {
+        next.dispose?.();
+        return false;
+      }
+      await view.materials.prepareLevel(id, (f) => report('textures', 0.5 * f));
+      if (!live()) {
+        next.dispose?.();
+        return false;
+      }
+      await view.prepareArt(next.def, (f) => report('textures', 0.5 + 0.25 * f));
+      if (!live()) {
+        next.dispose?.();
+        return false;
+      }
+      report('scene', 0.1);
+      await yieldToMain();
+      // from here the old scenery is being torn down: a failure can no longer go back to it
+      swapped = true;
+      view.loadLevel(next, { deferred: true });
+      const old = level;
+      level = next;
+      levelReadyFlag = true;
+      sim.world.setLevel(next);
+      race.setLevel(next);
+      old.dispose?.();
+      audio.setLevel(next, true);
+      saveLastLevel(storage, id);
+      rememberWorld(next);
+      toSpawn();
+      publishLevels();
+      publishMinimap(next);
+      report('scene', 1);
+      // past the swap Back only hides the screen: the level finishes getting ready behind the level select
+      await view.prepare((step, f) => report(step === 'textures' ? 'textures' : step, step === 'textures' ? 0.75 + 0.25 * f : f), () => seq !== levelSeq);
+      if (!live()) {
+        loadingLevel = null;
+        return false;
+      }
+      report('warm', 1);
+      // load audits: how many programs the level was readied with (frames after it should add none)
+      performance.mark?.('load:ready', { detail: { programs: view.renderer.info.programs?.length ?? 0 } });
     } catch (err) {
-      // building failed (e.g. GPU context lost): keep the current level, tell the pilot, never reject
       console.error('Level failed to load', id, err);
-      if (seq === levelSeq) toast("Couldn't load that level — staying here");
+      if (!swapped) next?.dispose?.();
+      // superseded by a newer load, or cancelled with Back before the swap: that one owns the screen and the
+      // shared state now (Back already reported the cancel); a broken swap still needs the reload below
+      if (seq !== levelSeq || (!swapped && cancelToken !== loadCancel)) return false;
+      // a chunk this (old) page asks for may be gone after a deploy: onto the new build, once
+      if (!swapped && (await reloadForNewVersion(err, browserVersionProbe(), sessionStore(), () => location.reload()))) return false;
+      if (seq !== levelSeq || (!swapped && cancelToken !== loadCancel)) return false;
+      loadingLevel = null;
+      audio.setLoading(false);
+      audio.levelMusic();
+      const reason = err instanceof Error ? err.message : String(err);
+      levelEvents.emit({ type: 'failed', id, error: reason });
+      if (swapped) {
+        // the old scenery is already gone: the only safe way back is a reload
+        loader.hide();
+        hud.setError(`The level couldn't be loaded (${reason}). Reload to continue.`);
+      } else if (view.presenting) {
+        // a headset cannot see the DOM error: say it on the VR card and give the menu back
+        loader.hide();
+        toast(`${entry.name} couldn't be loaded. Check your connection.`);
+      } else {
+        loader.fail(`${entry.name} couldn't be loaded${reason ? ` (${reason})` : ''}. Check your connection and try again.`, () => {
+          // the retried load ends the way the first one would have (run started, tutorial set up, …)
+          void startLevel(id, opts, mode, after).then((ok) => {
+            if (ok) after();
+          });
+        });
+        loader.onCancel = () => {
+          loadingLevel = null;
+          hud.showScreen('levels');
+        };
+      }
       return false;
     }
-    if (seq !== levelSeq) return false;
-    try {
-      view.loadLevel(next);
-    } catch (err) {
-      // the old scenery may already be gone: the only safe way back is a reload
-      console.error('Level failed to load', id, err);
-      hud.setError(`The level couldn't be loaded (${err instanceof Error ? err.message : String(err)}). Reload to continue.`);
-      return false;
-    }
-    level = next;
-    sim.world.setLevel(next);
-    race.setLevel(next);
-    saveLastLevel(storage, id);
-    toSpawn();
-    publishLevels();
+    loadingLevel = null;
     menuRenders = 0; // the new scenery must show behind the menu
+    levelEvents.emit({ type: 'loaded', level: activeLevel(level) });
     return true;
+  }
+
+  /**
+   * Hand-off after a load: the loading screen fills, says "Ready" in Free Fly, and fades into the scene (~400 ms)
+   * while the scene already renders behind it; physics stay held and arming is refused until it is gone (a Race then
+   * counts down 3-2-1-GO with the drone disarmed on its spawn).
+   */
+  let handoff: Promise<void> | null = null;
+  function finishLoad(mode: LevelMode | null): Promise<void> {
+    // a second caller (a pick that joined the running load) waits for the same hand-off
+    if (handoff) return handoff;
+    // the level's theme comes in with the hand-off (the loading mix glides back to the game's own)
+    audio.levelMusic();
+    audio.setLoading(false);
+    if (!loader.visible) return Promise.resolve();
+    handoffUntil = Infinity;
+    performance.mark?.('handoff:start');
+    let released = false;
+    const release = (): void => {
+      if (released) return;
+      released = true;
+      performance.mark?.('handoff:control');
+      handoffUntil = 0;
+      dynResHoldUntil = performance.now() + DYN_RES_SETTLE_MS;
+      loop.reset();
+    };
+    // control at the start of the fade ("Ready" is short); a cancelled hand-off releases when it ends
+    const done = loader.finish(mode === 'freefly', release).then(release);
+    handoff = done.finally(() => {
+      handoff = null;
+    });
+    return handoff;
+  }
+
+  // The level remembered from the last session streams in behind the menu.
+  {
+    const boot = level;
+    const seq = levelSeq;
+    const name = levelEntry(boot.def.id)?.name ?? boot.def.name;
+    void name;
+    void waitReady(boot, () => seq === levelSeq).then(async (ok) => {
+      if (!ok || level !== boot) return;
+      levelReadyFlag = true;
+      menuRenders = 0;
+      rememberWorld(boot);
+      levelEvents.emit({ type: 'loaded', level: activeLevel(boot) });
+      // behind the menu: the flight frames' programs, so the first one after Fly does not stall
+      await view.warmPrograms();
+    });
+  }
+
+  /**
+   * `?world=CODE` (boot) or a Capacitor `appUrlOpen` URL: record the world as played, drop the parameter from the
+   * address bar (a reload must not re-open it) and fly it in Infinite free fly. A bad code only toasts.
+   */
+  function openWorldLink(src: string | { search: string }, boot: boolean): void {
+    const r = parseWorldParam(src);
+    if (r.kind === 'none') return;
+    if (boot) {
+      try {
+        history.replaceState(null, '', stripWorldParam(location.href));
+      } catch {
+        // sandboxed frames: the link just stays in the address bar
+      }
+    }
+    if (r.kind === 'error') {
+      toast(r.message);
+      return;
+    }
+    playWorld(storage, { seed: r.seed, gen: r.gen }, Date.now());
+    onAction({ type: 'level', id: 'infinite', mode: 'freefly', seed: r.seed, gen: r.gen });
   }
 
   /**
@@ -301,8 +669,8 @@ function boot(caps: EditionCaps): void {
    */
   function startTutorial(fromStep = 1): void {
     vrOffer = false;
-    void startLevel('training').then((ok) => {
-      if (!ok) return;
+    const after = (): void => {
+      void finishLoad(null);
       newSession('freefly');
       cameraMode = 'los';
       tutRings = 0;
@@ -311,6 +679,9 @@ function boot(caps: EditionCaps): void {
       const events = tutorial.start(settings.flightMode, fromStep);
       setTutorialOn(true);
       handleTutorialEvents(events);
+    };
+    void startLevel('training', {}, 'freefly', after).then((ok) => {
+      if (ok) after();
     });
   }
 
@@ -374,6 +745,24 @@ function boot(caps: EditionCaps): void {
     race.pause();
   }
 
+  /**
+   * Outdoor HUD (compass, minimap, AGL) for this frame: the pilot's LOS spot (it moves when the pilot is
+   * re-planted), the next ring while racing. Null indoors.
+   */
+  function outdoorHud(p: Vector3, snap: RaceSnapshot): OutdoorHud | null {
+    if (level.def.kind !== 'outdoor') return null;
+    const pilot = view.pilotEye;
+    const racing = snap.status === 'racing' || snap.status === 'countdown' || snap.status === 'crashed';
+    const r = racing && snap.nextRing >= 0 ? level.def.rings[snap.nextRing] : undefined;
+    return { agl: aglOf(p), pilot: { x: pilot.x, z: pilot.z }, ring: r ? { x: r.position[0], z: r.position[2] } : null };
+  }
+
+  /** Code of the Infinite world flown now (XR cards), else undefined. */
+  function worldCode(): string | undefined {
+    const c = level.content;
+    return level.def.id === 'infinite' && c?.kind === 'terrain' ? c.code : undefined;
+  }
+
   /** Height above the walkable surface under the drone (meadow, prop tops). */
   function aglOf(p: Vector3): number {
     return p.y - level.surfaces.topBelow(p.x, p.y, p.z);
@@ -397,6 +786,8 @@ function boot(caps: EditionCaps): void {
     else race.startFreeFly();
     hud.showScreen('none');
     canvas.focus();
+    // the page was hidden while the level loaded (tab switched away): the flight starts paused, like any other
+    if (document.hidden && !view.presenting) pauseFlight();
   }
 
   function onAction(a: UiAction): void {
@@ -419,8 +810,16 @@ function boot(caps: EditionCaps): void {
         break;
       case 'level': {
         const mode = a.mode;
-        void startLevel(a.id).then((ok) => {
-          if (ok) newSession(mode);
+        if (a.id === level.def.id && (a.seed === undefined || a.seed >>> 0 === level.content?.seed) && levelReadyFlag) {
+          void enterLoaded(mode);
+          break;
+        }
+        const after = (): void => {
+          newSession(mode);
+          void finishLoad(mode);
+        };
+        void startLevel(a.id, { seed: a.seed, gen: a.gen }, mode, after).then((ok) => {
+          if (ok) after();
         });
         break;
       }
@@ -532,7 +931,14 @@ function boot(caps: EditionCaps): void {
     if (status === 'menu') {
       if (b.a) onAction({ type: 'race' });
       else if (b.x) onAction({ type: 'freefly' });
-      else if (b.y) void startLevel(nextLevel(level.def.id));
+      else if (b.y) {
+        // the card cycles the levels; Infinite resumes the last world flown (or rolls a new one)
+        const id = nextLevel(level.def.id);
+        if (id === 'infinite') {
+          const w = resumeOrNewWorld(storage, Date.now());
+          void startLevel('infinite', { seed: w.seed, gen: w.gen }).then((ok) => void (ok && finishLoad(null)));
+        } else void startLevel(id).then((ok) => void (ok && finishLoad(null)));
+      }
       else if (b.rStick) onAction({ type: 'tutorial' });
     } else if (status === 'paused') {
       if (b.a || b.y) onAction({ type: 'resume' });
@@ -620,7 +1026,10 @@ function boot(caps: EditionCaps): void {
       sim.fc.mode = settings.flightMode;
       saveSettings(settings, storage);
       hud.setSettings(settings);
-      toast(`${settings.flightMode.toUpperCase()} mode`);
+      // the first switch to Acro on the touch sticks explains the missing self-level (the tutorial has its own card)
+      const tip = tutOn && tutorial.active ? null : acroTip.take(input.activeSource, settings.flightMode);
+      if (tip) hud.toast(tip, ACRO_TIP_MS);
+      else toast(`${settings.flightMode.toUpperCase()} mode`);
     }
     if (b.cycleCamera) cameraMode = CAMERA_CYCLE[(CAMERA_CYCLE.indexOf(cameraMode) + 1) % CAMERA_CYCLE.length];
     if (b.reset) race.requestReset();
@@ -698,7 +1107,14 @@ function boot(caps: EditionCaps): void {
   let time = 0;
   let lastInput: InputFrame | null = null;
 
+  /** the splash's "Opening menu" gets one painted frame before the first (compiling) draw */
+  let splashPainted = false;
   function frame(now: number): void {
+    if (!splashPainted) {
+      splashPainted = true;
+      last = now;
+      return;
+    }
     // XR frame times share the performance.now() timebase, but never trust a backwards step.
     const frameSec = Math.min(Math.max((now - last) / 1000, 0), 0.1);
     last = now;
@@ -758,6 +1174,13 @@ function boot(caps: EditionCaps): void {
       }
       dialogInput = true;
     }
+    // the loading screen owns menu input: Back / Esc / pad B cancel the load or leave its error
+    // (in a headset an error is a toast on the card; an error screen left from before Enter VR is dropped)
+    if (inVr && loader.failed) loader.cancel();
+    if (loader.blocking) {
+      if (inp.nav.back && !inVr) loader.cancel();
+      dialogInput = true;
+    }
     if (!flying && !dialogInput) {
       if (inVr && inp.xr) {
         handleXrMenu(status, inp.xr);
@@ -769,7 +1192,11 @@ function boot(caps: EditionCaps): void {
 
     let alpha = 1;
     const tutRunning = tutOn && tutorial.active;
+    // hand-off from the loading screen: physics held until it has faded
+    const handoff = performance.now() < handoffUntil;
     if (flying) {
+      // the drone stays disarmed on its spawn through the hand-off and a race's 3-2-1 (it arms after GO)
+      if (handoff || status === 'countdown') inp.buttons.arm = false;
       if (tutRunning) {
         // angle forced on steps 2–8 (the FC only: settings keep the pilot's mode); arm locked on the welcome card
         sim.fc.mode = tutorial.requiredFlightMode() ?? settings.flightMode;
@@ -785,10 +1212,12 @@ function boot(caps: EditionCaps): void {
       // Sources whose throttle springs back to centre fly with altitude hold, centre = hover (DJI 'A/Atti' style):
       // keyboard keys, Quest thumbsticks and touch auto-centre sticks (input-manager holdsAltitude).
       sim.fc.altitudeHold = input.altitudeHold(tutRunning ? { ...settings, flightMode: sim.fc.mode } : settings);
+      // thumbs on glass fly Acro on softer centre rates (rates.ts TOUCH_ACRO_CENTER_SCALE)
+      sim.fc.rates = inp.source === 'touch' && sim.fc.mode === 'acro' ? thumbRates : padRates;
       // …and the right thumbstick flies speed, braking to a stop when released (Angle mode).
       sim.fc.positionHold = inp.source === 'xr';
       const control = status === 'countdown' ? { ...inp.control, throttle: 0 } : inp.control;
-      alpha = loop.advance(frameSec, (dt) => {
+      alpha = holdPose || handoff ? 1 : loop.advance(frameSec, (dt) => {
         prevPos.copy(sim.world.state.position);
         const contacts = sim.step(dt, control);
         const events = race.step(dt, prevPos, sim.world.state, contacts);
@@ -843,8 +1272,11 @@ function boot(caps: EditionCaps): void {
     wasOverlay = overlay;
     // A frozen view's frame time says nothing about the GPU, so dynamic resolution only adapts while rendering.
     // Resize before drawing: resizing the canvas clears it, and after the draw the cleared buffer would be shown.
-    if (settings.quality === 'auto' && !inVr && !overlay) view.setRenderScale(dynRes.update(fpsMeter.frameMs));
-    const renderNow = !overlay || menuRenders < MENU_SETTLE_FRAMES;
+    if (settings.quality === 'auto' && !inVr && !overlay && !loadingLevel && performance.now() >= Math.max(handoffUntil, dynResHoldUntil)) view.setRenderScale(dynRes.update(fpsMeter.frameMs));
+    // a streaming level keeps uploading its chunks behind a menu (still frames, the camera does not move)
+    const renderNow = !loadingLevel && !bootPreparing && (!overlay || menuRenders < MENU_SETTLE_FRAMES || view.levelBusy);
+    // a headset never goes without a frame: during a level load it sees the XR loading panel
+    if (loadingLevel && inVr) view.renderXrLoading(loadingLevel.name, loader.tick(performance.now()));
     if (renderNow) {
       if (overlay) menuRenders++;
       view.frame({
@@ -865,6 +1297,7 @@ function boot(caps: EditionCaps): void {
       if (view.frames === 1) document.body.classList.add('is-ready');
     }
 
+    const outdoor = outdoorHud(drone.position, snap);
     if (inVr) {
       // the take-off prompt is stale as soon as the throttle leaves the latch
       if (xrToast && (performance.now() > xrToastUntil || (xrToast.startsWith('Armed') && !input.takeoffLatched))) xrToast = '';
@@ -890,6 +1323,9 @@ function boot(caps: EditionCaps): void {
             exitHint: questApp ? XR_APP_EXIT_HINT : XR_EXIT_HINT,
             level: levelEntry(level.def.id)?.name,
             tutorial: tutOn && tutorial.active,
+            world: worldCode(),
+            outdoor: outdoor ? { agl: outdoor.agl, pilotDistance: outdoor.pilot ? Math.hypot(outdoor.pilot.x - drone.position.x, outdoor.pilot.z - drone.position.z) : null } : undefined,
+            units: settings.units,
           }),
         );
       }
@@ -906,6 +1342,7 @@ function boot(caps: EditionCaps): void {
       speed,
       tier,
       settings,
+      outdoor,
     });
     // the card hides behind menus (pause) and in a headset (the XR card shows it there)
     tutUi.render(tutOn && !inVr && hud.screen === 'none' ? tutorialView(tutorial, inp.source, settings, sim.fc.armed, inp.gamepadId) : null);
@@ -925,10 +1362,49 @@ function boot(caps: EditionCaps): void {
       motorsMuted = mute;
       audio.setMotorsMuted(mute);
     }
-    audio.update(drone.motors, drone.armed, speed);
+    // the listener is the rendered eye: in a headset, the head pose (spatial audio turns with the head)
+    audio.frame(drone, snap, view.renderedCamera, view.presenting ? view.renderer.xr.getCamera() : view.camera);
   }
   // setAnimationLoop = requestAnimationFrame on a flat screen, the XR session's frame loop in a headset.
   view.renderer.setAnimationLoop(frame);
+
+  // the boot level gets ready in steps behind the splash (no frame draws it meanwhile), then the menu opens on it
+  const BOOT_STEP: Record<string, [number, string]> = {
+    textures: [0.65, 'Loading textures'],
+    shaders: [0.72, 'Compiling shaders'],
+    lighting: [0.9, 'Preparing lighting'],
+    warm: [0.95, 'Opening menu'],
+  };
+  const bootReady = view
+    .prepare((step, f) => {
+      const [at, label] = BOOT_STEP[step] ?? [0.95, 'Opening menu'];
+      bootProgress(at + 0.06 * f, label);
+    })
+    .catch((err: unknown) => console.error('Boot level failed to prepare', err))
+    .finally(() => {
+      // the audio graph too, still behind the splash: built later it would be one long task under the menus
+      audio.prepare();
+      bootPreparing = false;
+      menuRenders = 0;
+      bootProgress(0.97, 'Opening menu');
+    });
+
+  // Idle menu time readies what the first level load would otherwise wait for: the audio graph, the texture and
+  // world workers (their scripts load and compile now), and the next likely level's texture sets.
+  whenIdle(() => {
+    view.materials.warmWorker();
+    void loadWorldViews().catch(() => undefined);
+    prewarmWorldWorkers();
+  }, 3000);
+
+  // a shared world link opens straight into that world (web: ?world=; native shells: the app URL)
+  // after the boot level is ready: its prepare and the deep link's load must not interleave
+  void bootReady.then(() => openWorldLink(location, true));
+  if (device.native) {
+    void import('@capacitor/app')
+      .then(({ App }) => App.addListener('appUrlOpen', (e) => openWorldLink(e.url, false)))
+      .catch(() => undefined);
+  }
 
   // Debug / e2e / selftest hook.
   const hook = {
@@ -966,12 +1442,47 @@ function boot(caps: EditionCaps): void {
       };
     },
     stats: () => view.stats(),
+    /** render internals for debugging and look tests (scene graph, materials) */
+    get view() {
+      return view;
+    },
+    /** analog FPV feed level drawn last frame (0 outside FPV, without post or with the setting off) */
+    get analog() {
+      return view.analogLevel;
+    },
     /** loaded level id */
     get level() {
       return level.def.id;
     },
-    /** switch level without starting a run (resolves false when superseded) */
-    startLevel: (id: LevelId) => startLevel(id),
+    /** switch level without starting a run (resolves false when superseded); `seed` picks the Infinite world */
+    startLevel: (id: LevelId, opts?: { seed?: number; gen?: number }) =>
+      // resolves once the loading screen has handed over (the level is flyable)
+      startLevel(id, opts, null, () => void finishLoad(null)).then(async (ok) => {
+        if (ok) await finishLoad(null);
+        return ok;
+      }),
+    /** the loading screen (tests): shown, still loading, bar value 0..1, stage label */
+    get loading() {
+      return { visible: loader.visible, blocking: loader.blocking, loading: loader.loading, value: loader.value, handoff: performance.now() < handoffUntil };
+    },
+    /** generated level in play: id, seed and (Infinite) world code */
+    get world() {
+      return level.content ? activeLevel(level) : null;
+    },
+    /** the loaded level's rings (scripted race runs) */
+    get rings() {
+      return level.def.rings;
+    },
+    /** ground height of the loaded level (seed determinism probes) */
+    heightAt: (x: number, z: number) => (level.terrain ? level.terrain.heightAt(x, z) : 0),
+    /** visible drawables per scene group (perf audits) */
+    census: () => view.census(),
+    /** streaming / instancing numbers of a generated level */
+    levelStats: () => view.levelStats(),
+    /** the loaded level's `ready` has resolved (chunks around the spawn built) */
+    get levelReady() {
+      return levelReadyFlag;
+    },
     /** tutorial state: phase, current step, open dialog, whether the card is up */
     get tutorial() {
       return { on: tutOn, phase: tutorial.phase, step: tutorial.step.id, index: tutorial.index, progress: tutorial.progress, dialog: tutUi.dialogOpen, vrOffer };
@@ -999,6 +1510,10 @@ function boot(caps: EditionCaps): void {
     get audio() {
       return audio.state;
     },
+    /** bus gains, music state, live node count (audio e2e) */
+    get audioMix() {
+      return audio.debug();
+    },
     get screen() {
       return hud.screen;
     },
@@ -1015,6 +1530,14 @@ function boot(caps: EditionCaps): void {
     /** UI audit: render the fatal-error screen */
     showError: (msg: string) => hud.setError(msg),
     toast: (msg: string) => toast(msg),
+    /** debug: freeze physics in flight (the view keeps rendering) */
+    hold(on: boolean) {
+      holdPose = on;
+    },
+    /** debug: switch the flight camera */
+    setCamera(mode: CameraMode) {
+      cameraMode = mode;
+    },
     teleport(x: number, y: number, z: number, yaw = 0) {
       placeDrone(new Vector3(x, y, z), yaw);
     },
@@ -1047,9 +1570,11 @@ function boot(caps: EditionCaps): void {
     },
     touch: { layer: touchUi?.layer ?? null, sticks: input.touch.sticks },
   };
-  (window as unknown as { __drone: unknown }).__drone = hook;
-
-  if (selftest) void import('./ui/selftest').then((m) => m.runSelfTest(hook, settings.stickMode));
+  // automation sees the game once its boot level is ready (as when the boot was one synchronous task)
+  void bootReady.then(() => {
+    (window as unknown as { __drone: unknown }).__drone = hook;
+    if (selftest) void import('./ui/selftest').then((m) => m.runSelfTest(hook, settings.stickMode));
+  });
 }
 
 /** the boot's HUD, once created: a later fatal error reuses it instead of stacking a second UI */
@@ -1062,6 +1587,35 @@ function showStartupError(err: unknown): void {
   if (!ui) return;
   const detail = err instanceof Error ? err.message : String(err);
   (bootHud ?? new Hud(ui, () => undefined)).setError(`Drone Sim could not start (${detail}). Check your connection and reload.`);
+}
+
+/** the boot waits this long at most for the worker-made texture sets (ms); the rest is made on the main thread */
+const BOOT_PREFETCH_MS = 4000;
+
+/** The boot level's procedural texture sets at the size its quality tier uses, from the texture worker. */
+function prefetchBootSurfaces(level: LevelId): Promise<void> {
+  try {
+    const settings = loadSettings(safeStorage());
+    const form = detectDevice(window).form;
+    const tier = settings.quality === 'auto' ? pickTier(probeGpu(), form) : settings.quality;
+    return prefetchLevelSurfaces(level, qualityProfile(tier, form).textureSize);
+  } catch {
+    return Promise.resolve();
+  }
+}
+
+/** sessionStorage, or null where the browser blocks it */
+function sessionStore(): Storage | null {
+  try {
+    return window.sessionStorage;
+  } catch {
+    return null;
+  }
+}
+
+/** Boot splash progress (index.html's bar): bundle, then level and assets, then the menu's first frame. */
+function bootProgress(f: number, text?: string): void {
+  (window as { __bootProgress?: (f: number, text?: string) => void }).__bootProgress?.(f, text);
 }
 
 /** A boot that throws must not leave the splash covering the page. */
@@ -1091,8 +1645,26 @@ async function start(): Promise<void> {
     document.body.classList.add('is-ready');
     return;
   }
+  // the bundle is in: say what comes next and let it paint before the synchronous level build
+  bootProgress(0.3, 'Loading textures');
+  await afterPaint();
+  // the boot level's texture sets come from the texture worker (the splash keeps moving), its renderer chunk too
+  // when it is a generated world
+  const first = loadLastLevel(safeStorage());
+  await Promise.race([
+    Promise.all([prefetchBootSurfaces(first), isWorldLevel(first) ? loadWorldViews() : Promise.resolve()]),
+    new Promise((r) => setTimeout(r, BOOT_PREFETCH_MS)),
+  ]);
+  bootProgress(0.45, 'Building level');
+  await afterPaint();
   safeBoot(caps);
 }
+
+// any other lazy chunk Vite fails to preload after a deploy: onto the new build, once
+window.addEventListener('vite:preloadError', (e) => {
+  const ev = e as Event & { payload?: unknown };
+  void reloadForNewVersion(ev.payload, browserVersionProbe(), sessionStore(), () => location.reload());
+});
 
 // a failed lazy import (offline, no cache), ownership check or boot shows the error screen
 void start().catch((err: unknown) => {

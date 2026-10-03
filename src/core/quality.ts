@@ -19,24 +19,52 @@ export interface QualityProfile {
   shadowSpots: number;
   /** volumetric-looking light shafts */
   shafts: boolean;
+  /** outdoor sun: two cascaded shadow maps that follow the camera (SunLight) instead of one static map */
+  sunCascades: boolean;
+  /** screen-space ambient occlusion (N8AO, half resolution with depth-aware upsampling): sample budget */
+  ao: 'off' | 'medium' | 'high';
+  /** height fog / aerial perspective post effect (outdoor haze; needs post) */
+  aerial: boolean;
+  /** subtle film grain (dithering is always on with post) */
+  grain: boolean;
+  /** bokeh depth of field on the still frame behind menus */
+  menuDof: boolean;
+  /** camera motion blur at FPV speed */
+  motionBlur: boolean;
+  /** glass: physical transmission (refraction pass) or a cheap reflective coat */
+  glass: 'transmission' | 'reflective';
+  /** download the CC0 PBR texture sets (public/textures); procedural maps otherwise */
+  pbrTextures: boolean;
+  /** edge length of generated (procedural) material textures */
+  textureSize: number;
+  /** cube face size of the captured PMREM environment */
+  envSize: number;
 }
 
 export const QUALITY_PROFILES: Record<QualityTier, QualityProfile> = {
   ultra: {
     tier: 'ultra', shadows: true, shadowMapSize: 4096, post: true, bloom: true, smaa: true,
     maxDpr: 1.5, particles: 1600, envMap: true, pointLights: 8, shadowSpots: 2, shafts: true,
+    sunCascades: true, ao: 'high', aerial: true, grain: true, menuDof: true, motionBlur: true,
+    glass: 'transmission', pbrTextures: true, textureSize: 1024, envSize: 256,
   },
   high: {
     tier: 'high', shadows: true, shadowMapSize: 2048, post: true, bloom: true, smaa: true,
     maxDpr: 1.25, particles: 1000, envMap: true, pointLights: 8, shadowSpots: 1, shafts: true,
+    sunCascades: true, ao: 'medium', aerial: true, grain: true, menuDof: true, motionBlur: true,
+    glass: 'transmission', pbrTextures: true, textureSize: 1024, envSize: 256,
   },
   medium: {
-    tier: 'medium', shadows: true, shadowMapSize: 1024, post: true, bloom: true, smaa: false,
+    tier: 'medium', shadows: true, shadowMapSize: 1024, post: true, bloom: true, smaa: true,
     maxDpr: 1, particles: 500, envMap: true, pointLights: 4, shadowSpots: 0, shafts: true,
+    sunCascades: false, ao: 'off', aerial: true, grain: false, menuDof: true, motionBlur: false,
+    glass: 'reflective', pbrTextures: true, textureSize: 512, envSize: 128,
   },
   low: {
     tier: 'low', shadows: false, shadowMapSize: 512, post: false, bloom: false, smaa: false,
     maxDpr: 0.75, particles: 150, envMap: false, pointLights: 2, shadowSpots: 0, shafts: false,
+    sunCascades: false, ao: 'off', aerial: false, grain: false, menuDof: false, motionBlur: false,
+    glass: 'reflective', pbrTextures: false, textureSize: 256, envSize: 64,
   },
 };
 
@@ -113,7 +141,9 @@ const mobileCache = new Map<string, QualityProfile>();
 
 /**
  * Tier profile adjusted for the device: on phones/tablets DPR is capped at 1.5 / 1.75 (low tier: 1),
- * shadow maps ≤ 1024 and particle budgets reduced (phone ½, tablet ¾). Desktop returns the base profile.
+ * shadow maps ≤ 1024, particle budgets reduced (phone ½, tablet ¾), no motion blur, AO at the medium
+ * sample budget (none on phones), reflective glass on phones and smaller generated textures / environment
+ * maps. Desktop returns the base profile.
  */
 export function qualityProfile(tier: QualityTier, form: FormFactor = 'desktop'): QualityProfile {
   const base = QUALITY_PROFILES[tier];
@@ -126,6 +156,12 @@ export function qualityProfile(tier: QualityTier, form: FormFactor = 'desktop'):
       maxDpr: tier === 'low' ? 1 : MOBILE_MAX_DPR[form],
       shadowMapSize: Math.min(base.shadowMapSize, MOBILE_MAX_TEXTURE),
       particles: Math.round(base.particles * (form === 'phone' ? 0.5 : 0.75)),
+      // phones: full-screen AO and transmission re-renders cost more than they show on a 6" screen
+      ao: form === 'phone' ? 'off' : base.ao === 'off' ? 'off' : 'medium',
+      glass: form === 'phone' ? 'reflective' : base.glass,
+      motionBlur: false,
+      textureSize: Math.min(base.textureSize, MOBILE_MAX_TEXTURE / 2),
+      envSize: Math.min(base.envSize, 128),
     };
     mobileCache.set(key, p);
   }

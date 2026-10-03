@@ -7,7 +7,11 @@ import type { Collider, ColliderShape, Contact, DroneState, RoomLevelData } from
 import { levelColliders } from '../game/level-data';
 import { isRuntime, type LevelRuntime } from '../levels/runtime';
 import { AIR_DENSITY, CENTER_COLLIDER_OFFSET, DEFAULT_DRONE, GRAVITY, MOTOR_LAYOUT, type DroneParams } from './drone-params';
-import { createSphereHit, shapeBoundingRadius, sphereVsPlane, sphereVsShape } from './collision';
+import { DEFAULT_FRICTION, DEFAULT_RESTITUTION, createSphereHit, shapeBoundingRadius, sphereVsShape } from './collision';
+import { IndoorBoundary, NEAR_GROUND_AGL, OutdoorBoundary, type Boundary } from './boundary';
+import { boxTopAt, type ColliderGrid, type GridCollider } from './collider-grid';
+import { FLAT_GROUND } from './terrain';
+import type { MoverCollider, MoverSource } from '../world/life/movers';
 
 /** Ceiling-fan kinematics (design §5). */
 export const FAN_REV_PER_S = 1.4;
@@ -20,12 +24,12 @@ const MAX_CONTACTS = 32;
 const POSITION_CORRECTION = 0.8;
 const SLOP = 0.0005;
 const RESTITUTION_THRESHOLD = 0.2; // m/s: slower impacts are treated as fully inelastic (stable resting)
-const DEFAULT_RESTITUTION = 0.25;
-const DEFAULT_FRICTION = 0.5;
 const ROLLING_DAMPING = 12; // 1/s, damps rocking/rolling while resting on a surface
 const VELOCITY_ITERATIONS = 4;
 const MAX_ANGULAR_SPEED = 80; // rad/s safety clamp
 const GROUND_EFFECT_MAX = 1.4;
+/** Outdoor grid query margin (m) beyond the drone's reach: covers one step of travel up to 400 m/s at 1 kHz. */
+const GRID_MARGIN = 0.4;
 /** prop + bell inertia (kg·m²) and top rotor speed (rad/s): spin-up reaction torque about yaw */
 export const ROTOR_INERTIA = 1.2e-6;
 export const MOTOR_MAX_RAD_S = 3500;
@@ -58,16 +62,11 @@ export function copyDroneState(src: DroneState, dst: DroneState): DroneState {
   return dst;
 }
 
-interface WorldCollider {
-  id: string;
-  shape: ColliderShape;
-  bound: number;
-  restitution: number;
-  friction: number;
+interface WorldCollider extends Omit<GridCollider, 'mark'> {
   /** true for fan blades: surface velocity = fan ω × r */
-  moving: boolean;
+  moving?: boolean;
   /** centre for moving colliders' rotation (fan hub) */
-  pivot: Vector3;
+  pivot?: Vector3;
 }
 
 interface FanBlade {
@@ -101,9 +100,22 @@ export class PhysicsWorld {
   /** per-motor thrust (N) of the last step */
   readonly thrust: [number, number, number, number] = [0, 0, 0, 0];
 
-  /** room shell (indoor: six hard planes); null = open sky over the ground plane y = 0 */
-  private room: { halfX: number; halfZ: number; height: number } | null = null;
+  /** room shell indoors, the ground (flat or a height field) outdoors */
+  private boundary: Boundary = new OutdoorBoundary(FLAT_GROUND, 'ground');
+  /** indoor: flat list (about 30 colliders + fan); outdoor levels query `grid` instead */
   private readonly colliders: WorldCollider[] = [];
+  private grid: ColliderGrid | null = null;
+  private readonly found: GridCollider[] = [];
+  /** outdoor kinematic colliders that move every frame (traffic): queried around the drone each step */
+  private movers: (MoverSource & { readonly size: number }) | null = null;
+  private readonly moverFound: MoverCollider[] = [];
+  private foundCount = 0;
+  /** box [min, max] the last grid query covered */
+  private readonly foundMin = new Vector3();
+  private readonly foundMax = new Vector3();
+  /** distance from the drone centre to the far side of its furthest collision sphere */
+  private reach = 0;
+  private readonly onBoundaryHit = (id: string): void => this.addContact(id, DEFAULT_RESTITUTION, DEFAULT_FRICTION, null);
   private readonly fanBlades: FanBlade[] = [];
   private readonly groundBoxes: { center: [number, number, number]; half: [number, number, number]; yaw: number }[] = [];
 
@@ -154,7 +166,10 @@ export class PhysicsWorld {
       this.sphereRadius.push(params.propColliderRadius);
       this.motorPos.push(new Vector3());
     }
-    for (let i = 0; i < this.sphereLocal.length; i++) this.sphereWorld.push(new Vector3());
+    for (let i = 0; i < this.sphereLocal.length; i++) {
+      this.sphereWorld.push(new Vector3());
+      this.reach = Math.max(this.reach, this.sphereLocal[i].length() + this.sphereRadius[i]);
+    }
 
     for (let i = 0; i < MAX_CONTACTS; i++) {
       this.contactPool.push({ normal: new Vector3(), depth: 0, point: new Vector3(), impactSpeed: 0, colliderId: '' });
@@ -170,15 +185,27 @@ export class PhysicsWorld {
     this.fanBlades.length = 0;
     this.groundBoxes.length = 0;
     this.fanAngle = 0;
-    let colliders: readonly Collider[];
+    this.grid = null;
+    this.movers = null;
+    this.foundCount = 0;
+    this.foundMin.set(Infinity, Infinity, Infinity);
+    this.foundMax.set(-Infinity, -Infinity, -Infinity);
+    let colliders: readonly Collider[] = [];
     let spawn: RoomLevelData['spawn'];
     if (isRuntime(level)) {
       const d = level.def;
-      this.room = d.kind === 'indoor' ? { halfX: d.room.size[0] / 2, halfZ: d.room.size[2] / 2, height: d.room.size[1] } : null;
-      colliders = level.colliders;
+      if (d.kind === 'indoor') {
+        this.boundary = new IndoorBoundary(d.room.size[0] / 2, d.room.size[2] / 2, d.room.size[1]);
+        colliders = level.colliders;
+      } else {
+        this.boundary = new OutdoorBoundary(level.terrain ?? FLAT_GROUND, level.terrain ? 'terrain' : 'ground');
+        this.grid = level.grid;
+        this.movers = level.life?.movers ?? null;
+        if (!this.grid) colliders = level.colliders;
+      }
       spawn = d.spawn;
     } else {
-      this.room = { halfX: level.room.size[0] / 2, halfZ: level.room.size[2] / 2, height: level.room.size[1] };
+      this.boundary = new IndoorBoundary(level.room.size[0] / 2, level.room.size[2] / 2, level.room.size[1]);
       colliders = levelColliders(level);
       spawn = level.spawn;
     }
@@ -210,7 +237,7 @@ export class PhysicsWorld {
       this.updateFan();
       return;
     }
-    this.colliders.push({ id: c.id, shape: c.shape, bound: shapeBoundingRadius(c.shape), restitution, friction, moving: false, pivot: new Vector3() });
+    this.colliders.push({ id: c.id, shape: c.shape, bound: shapeBoundingRadius(c.shape), restitution, friction });
     if (c.shape.kind === 'box') this.groundBoxes.push({ center: c.shape.center, half: c.shape.half, yaw: c.shape.yaw ?? 0 });
   }
 
@@ -234,11 +261,12 @@ export class PhysicsWorld {
 
   /**
    * Place the drone level at `position` facing `yaw` (rad about +Y; 0 = facing -Z), at rest.
-   * The height is raised if needed so the drone does not start inside the floor.
+   * The height is raised if needed so the drone does not start inside the floor / ground.
    */
   reset(position: Vector3, yaw: number, refillBattery = true): void {
     const s = this.state;
-    const minY = this.params.colliderRadius - CENTER_COLLIDER_OFFSET[1] + SLOP;
+    const ground = this.boundary.groundAt(position.x, position.z);
+    const minY = ground + this.params.colliderRadius - CENTER_COLLIDER_OFFSET[1] + SLOP;
     s.position.set(position.x, Math.max(position.y, minY), position.z);
     s.velocity.set(0, 0, 0);
     s.orientation.setFromAxisAngle(this.axis.set(0, 1, 0), yaw);
@@ -247,7 +275,13 @@ export class PhysicsWorld {
     if (refillBattery) this.consumed = 0;
     s.batteryVoltage = this.restingVoltage();
     this.contactCount = 0;
+    this.boundary.begin(s.position);
     copyDroneState(s, this.prevState);
+  }
+
+  /** Ground height (no colliders) under (x, z): 0 on flat levels and indoors. */
+  groundAt(x: number, z: number): number {
+    return this.boundary.groundAt(x, z);
   }
 
   private restingVoltage(): number {
@@ -296,6 +330,8 @@ export class PhysicsWorld {
 
     const q = s.orientation;
     this.qInv.copy(q).invert();
+
+    if (this.grid) this.queryGrid(s.position, NEAR_GROUND_AGL);
 
     // Thrust + ground effect and torques (body frame).
     this.fBody.set(0, 0, 0);
@@ -369,8 +405,17 @@ export class PhysicsWorld {
     s.orientation.normalize();
   }
 
+  /** Outdoor grid candidates around `p`: its reach plus GRID_MARGIN, extended `below` metres down. */
+  private queryGrid(p: Vector3, below: number): void {
+    const m = this.reach + GRID_MARGIN;
+    this.foundMin.set(p.x - m, p.y - m - below, p.z - m);
+    this.foundMax.set(p.x + m, p.y + m, p.z + m);
+    this.foundCount = this.grid!.query(this.foundMin.x, this.foundMin.y, this.foundMin.z, this.foundMax.x, this.foundMax.y, this.foundMax.z, this.found);
+  }
+
   /** Cheeseman–Bennett factor for a rotor at world position `mp` (floor and box tops below it). */
   private groundEffectAt(mp: Vector3): number {
+    if (this.boundary instanceof OutdoorBoundary) return this.outdoorGroundEffectAt(mp);
     let h = mp.y;
     for (let i = 0; i < this.groundBoxes.length; i++) {
       const b = this.groundBoxes[i];
@@ -387,29 +432,44 @@ export class PhysicsWorld {
     return groundEffectFactor(h, this.params.propRadius);
   }
 
+  /**
+   * Outdoors: height over the terrain (exact per rotor near the ground; above NEAR_GROUND_AGL the
+   * ground under the drone centre, where the factor differs from 1 by < 1e-4) or over a grid box top.
+   */
+  private outdoorGroundEffectAt(mp: Vector3): number {
+    const b = this.boundary;
+    let h = mp.y - (this.state.position.y - b.ground <= NEAR_GROUND_AGL ? b.groundAt(mp.x, mp.z) : b.ground);
+    for (let i = 0; i < this.foundCount; i++) {
+      const top = boxTopAt(this.found[i]!.shape, mp.x, mp.z);
+      if (mp.y >= top && mp.y - top < h) h = mp.y - top;
+    }
+    return groundEffectFactor(h, this.params.propRadius);
+  }
+
   private collide(dt: number): void {
     const s = this.state;
     const q = s.orientation;
     this.contactCount = 0;
+    this.boundary.begin(s.position);
+    let list: readonly WorldCollider[] = this.colliders;
+    let count = this.colliders.length;
+    if (this.grid) {
+      const p = s.position;
+      const m = this.reach;
+      const lo = this.foundMin;
+      const hi = this.foundMax;
+      if (p.x - m < lo.x || p.y - m < lo.y || p.z - m < lo.z || p.x + m > hi.x || p.y + m > hi.y || p.z + m > hi.z) this.queryGrid(p, 0);
+      list = this.found;
+      count = this.foundCount;
+    }
 
     for (let i = 0; i < this.sphereLocal.length; i++) {
       const c = this.sphereWorld[i].copy(this.sphereLocal[i]).applyQuaternion(q).add(s.position);
       const r = this.sphereRadius[i];
       const hit = this.hit;
-      const room = this.room;
-      if (room) {
-        if (sphereVsPlane(c, r, 0, 1, 0, 0, hit)) this.addContact('floor', DEFAULT_RESTITUTION, DEFAULT_FRICTION, null);
-        if (sphereVsPlane(c, r, 0, -1, 0, -room.height, hit)) this.addContact('ceiling', DEFAULT_RESTITUTION, DEFAULT_FRICTION, null);
-        if (sphereVsPlane(c, r, 1, 0, 0, -room.halfX, hit)) this.addContact('wall-west', DEFAULT_RESTITUTION, DEFAULT_FRICTION, null);
-        if (sphereVsPlane(c, r, -1, 0, 0, -room.halfX, hit)) this.addContact('wall-east', DEFAULT_RESTITUTION, DEFAULT_FRICTION, null);
-        if (sphereVsPlane(c, r, 0, 0, 1, -room.halfZ, hit)) this.addContact('wall-north', DEFAULT_RESTITUTION, DEFAULT_FRICTION, null);
-        if (sphereVsPlane(c, r, 0, 0, -1, -room.halfZ, hit)) this.addContact('wall-south', DEFAULT_RESTITUTION, DEFAULT_FRICTION, null);
-      } else if (sphereVsPlane(c, r, 0, 1, 0, 0, hit)) {
-        // open sky: only the ground stops the drone; leaving the level is the race's soft bounds
-        this.addContact('ground', DEFAULT_RESTITUTION, DEFAULT_FRICTION, null);
-      }
-      for (let j = 0; j < this.colliders.length; j++) {
-        const col = this.colliders[j];
+      this.boundary.sphere(c, r, hit, this.onBoundaryHit);
+      for (let j = 0; j < count; j++) {
+        const col = list[j]!;
         const sc = col.shape.center;
         const dx = c.x - sc[0];
         const dy = c.y - sc[1];
@@ -419,8 +479,44 @@ export class PhysicsWorld {
         if (sphereVsShape(c, r, col.shape, hit)) this.addContact(col.id, col.restitution, col.friction, col.moving ? col : null);
       }
     }
+    if (this.movers && this.movers.size > 0) this.collideMovers();
     if (this.contactCount === 0) return;
     this.resolve(dt);
+  }
+
+  /** Cars and other kinematic movers near the drone: contacts carry the mover's velocity. */
+  private collideMovers(): void {
+    const s = this.state;
+    const p = s.position;
+    const m = this.reach + GRID_MARGIN;
+    const n = this.movers!.queryMovers(p.x - m, p.y - m, p.z - m, p.x + m, p.y + m, p.z + m, this.moverFound);
+    if (n === 0) return;
+    const hit = this.hit;
+    for (let i = 0; i < this.sphereLocal.length; i++) {
+      const c = this.sphereWorld[i];
+      const r = this.sphereRadius[i];
+      for (let j = 0; j < n; j++) {
+        const col = this.moverFound[j]!;
+        const sc = col.shape.center;
+        const dx = c.x - sc[0];
+        const dy = c.y - sc[1];
+        const dz = c.z - sc[2];
+        const reach = col.bound + r;
+        if (dx * dx + dy * dy + dz * dz > reach * reach) continue;
+        if (!sphereVsShape(c, r, col.shape, hit)) continue;
+        const k = this.contactCount;
+        this.addContact(col.id, col.restitution, col.friction, null);
+        if (this.contactCount > k) {
+          // re-evaluate the approach against the mover's motion
+          const e = this.extras[k];
+          const v = col.velocity;
+          e.obstacleVelocity.set(v[0], v[1], v[2]);
+          const vn = this.pointVelocity(e.r, e.obstacleVelocity, this.vp).dot(this.contactPool[k].normal);
+          e.approach = vn;
+          this.contactPool[k].impactSpeed = -vn;
+        }
+      }
+    }
   }
 
   private addContact(id: string, restitution: number, friction: number, moving: WorldCollider | null): void {
@@ -437,7 +533,7 @@ export class PhysicsWorld {
     e.friction = friction;
     e.normalImpulse = 0;
     e.r.copy(c.point).sub(s.position);
-    if (moving) e.obstacleVelocity.crossVectors(this.fanOmega, this.tmp2.copy(c.point).sub(moving.pivot));
+    if (moving) e.obstacleVelocity.crossVectors(this.fanOmega, this.tmp2.copy(c.point).sub(moving.pivot!));
     else e.obstacleVelocity.set(0, 0, 0);
     const vn = this.pointVelocity(e.r, e.obstacleVelocity, this.vp).dot(c.normal);
     e.approach = vn;

@@ -4,6 +4,7 @@ import {
   DEFAULT_AXIS_MAP,
   DEFAULT_SETTINGS,
   RATE_AXES,
+  minimapOn,
   SETTINGS_OPTIONS,
   applyRatePreset,
   cloneSettings,
@@ -18,7 +19,10 @@ import { isQuestBrowser } from '../core/xr';
 import { AxisCapture, MODE_TABLE, STICK_SLOTS, type Channel, type StickSlot } from '../input/stick';
 import type { InputFrame, LevelId, NavEvents } from '../types';
 import { formatTime } from './format';
-import { drawThumbs, levelAct, levelCardsHtml, parseLevelAct, type LevelCard, type LevelMode } from './level-select';
+import { cardModes, drawThumbs, isSeededCard, levelAct, levelCardsHtml, parseLevelAct, type LevelCard, type LevelCardMode, type LevelMode } from './level-select';
+import { lastPlayedWorld, loadWorlds, type SavedWorld } from '../game/worlds';
+import { resumeOrNewWorld, type WorldPick } from './worlds-model';
+import { WORLD_ACT, WorldsScreen, worldsScreenHtml } from './worlds-screen';
 import { controllerDiagram } from './icons';
 import { actionGlyphs, channelHints, glyphHtml, glyphsHtml, keyGlyph, type HintAction, type HintScheme } from './input-glyphs';
 import { HOVER, RateCharts } from './rate-charts';
@@ -31,10 +35,14 @@ export const APP_VERSION = __APP_VERSION__;
 export const SUPPORT_EMAIL = 'support@coworkgamestudio.com';
 /** The bundled copy inside the iOS / Android shells cannot open in the system browser: link the hosted one there. */
 const SITE_URL = 'https://dronesim.coworkgamestudio.com/';
+/** a pressed button keeps its pressed look this long after release (ms): visible even on a quick tap */
+const PRESS_HOLD_MS = 160;
 
 export type ScreenName =
   | 'main'
   | 'levels'
+  | 'worlds'
+  | 'confirm-world-delete'
   | 'settings'
   | 'controller'
   | 'rates'
@@ -51,8 +59,11 @@ export type ScreenName =
 export type UiAction =
   | { type: 'race' }
   | { type: 'freefly' }
-  /** level picker: switch to that level (if needed) and start a run */
-  | { type: 'level'; id: LevelId; mode: LevelMode }
+  /**
+   * level picker: switch to that level (if needed) and start a run. Seeded levels (Infinite) always carry the
+   * world's `seed` and generator version `gen`, already recorded in the saved-worlds store.
+   */
+  | { type: 'level'; id: LevelId; mode: LevelMode; seed?: number; gen?: number }
   | { type: 'resume' }
   | { type: 'menu' }
   | { type: 'retry' }
@@ -85,6 +96,19 @@ interface Item {
   el: HTMLElement;
   activate?: () => void;
   adjust?: (dir: -1 | 1) => void;
+  /** up / down replacement (grids of buttons: keep the column) */
+  vert?: (dir: -1 | 1) => void;
+}
+
+/** Optional Menus services. */
+export interface MenusOptions {
+  /** saved worlds (Worlds screen, Infinite card); default: none, so nothing is remembered */
+  storage?: Storage | null;
+  toast?: (msg: string) => void;
+  /** ms clock for "last played" (tests) */
+  now?: () => number;
+  /** seed source for "New random world" (tests); default crypto.getRandomValues */
+  randomSeed?: () => number;
 }
 
 type Val = string | number;
@@ -98,7 +122,7 @@ type Row =
   | (RowBase & { kind: 'range'; range: { min: number; max: number; step: number }; fmt: (v: number) => string; get: (s: Settings) => number; set: (s: Settings, v: number) => void })
   | (RowBase & { kind: 'bool'; on?: string; off?: string; get: (s: Settings) => boolean; set: (s: Settings, v: boolean) => void });
 
-type NumKey = 'cameraTiltDeg' | 'fovDeg' | 'volume' | 'deadzone' | 'throttleExpo' | 'throttleLimit' | 'angleMaxTiltDeg' | 'mouseSensitivity' | 'mouseExpo' | 'mouseDeadzone';
+type NumKey = 'cameraTiltDeg' | 'fovDeg' | 'analogStrength' | 'volume' | 'musicVolume' | 'sfxVolume' | 'ambienceVolume' | 'deadzone' | 'throttleExpo' | 'throttleLimit' | 'angleMaxTiltDeg' | 'mouseSensitivity' | 'mouseExpo' | 'mouseDeadzone';
 const rangeRow = (id: NumKey, label: string, hint: string, fmt: (v: number) => string): Row => ({
   id,
   label,
@@ -216,7 +240,7 @@ const ROW_DEFS: Row[] = [
   {
     id: 'ratePreset',
     label: 'Rates',
-    hint: 'Stick sensitivity (Betaflight Actual)',
+    hint: 'Stick sensitivity (Betaflight Actual) · touch Acro: half the centre rate',
     kind: 'enum',
     options: [
       { value: 'beginner', label: 'Beginner' },
@@ -256,6 +280,17 @@ const ROW_DEFS: Row[] = [
   rangeRow('cameraTiltDeg', 'Camera tilt', 'FPV camera uptilt', (v) => `${Math.round(v)}°`),
   rangeRow('fovDeg', 'Field of view', FOV_HINT, (v) => `${Math.round(v)}°`),
   {
+    id: 'analogVideo',
+    label: 'Analog FPV feed',
+    hint: 'Scanlines and video noise in FPV, like an analog goggle feed (not on Low or in VR)',
+    kind: 'bool',
+    get: (s) => s.analogVideo,
+    set: (s, v) => {
+      s.analogVideo = v;
+    },
+  },
+  rangeRow('analogStrength', 'Analog strength', 'How strong the analog feed look is', pct),
+  {
     id: 'quality',
     label: 'Graphics',
     hint: 'Auto picks a tier from your GPU',
@@ -266,7 +301,7 @@ const ROW_DEFS: Row[] = [
       s.quality = v as Settings['quality'];
     },
   },
-  rangeRow('volume', 'Volume', 'Master volume', (v) => `${Math.round(v * 100)}%`),
+  rangeRow('volume', 'Master volume', 'Everything the game plays', (v) => `${Math.round(v * 100)}%`),
   {
     id: 'showFps',
     label: 'Show FPS',
@@ -350,12 +385,102 @@ const ROW_DEFS: Row[] = [
     },
   },
 ];
+/** The minimap row shows its device default (off in a headset) until the pilot picks; set by Menus. */
+const DEVICE = { xr: false };
+const TIME_LABEL: Record<Settings['timeOfDay'], string> = { auto: 'Auto', dawn: 'Dawn', noon: 'Noon', golden: 'Golden hour', dusk: 'Dusk' };
+const VIEW_LABEL: Record<Settings['viewDistance'], string> = { auto: 'Auto', short: 'Short', medium: 'Medium', long: 'Long' };
+ROW_DEFS.push(
+  {
+    id: 'timeOfDay',
+    label: 'Time of day',
+    hint: 'City, Alpine and Infinite · Auto: each level’s own (dusk, golden hour, day)',
+    kind: 'enum',
+    options: SETTINGS_OPTIONS.timeOfDay.map((t) => ({ value: t, label: TIME_LABEL[t] })),
+    get: (s) => s.timeOfDay,
+    set: (s, v) => {
+      s.timeOfDay = v as Settings['timeOfDay'];
+    },
+  },
+  {
+    id: 'viewDistance',
+    label: 'View distance',
+    hint: 'Outdoor terrain and fog · Auto follows Graphics',
+    kind: 'enum',
+    options: SETTINGS_OPTIONS.viewDistance.map((t) => ({ value: t, label: VIEW_LABEL[t] })),
+    get: (s) => s.viewDistance,
+    set: (s, v) => {
+      s.viewDistance = v as Settings['viewDistance'];
+    },
+  },
+  {
+    id: 'minimap',
+    label: 'Minimap',
+    hint: 'North-up map of the outdoor levels',
+    kind: 'bool',
+    get: (s) => minimapOn(s, DEVICE.xr),
+    set: (s, v) => {
+      s.minimap = v;
+    },
+  },
+  {
+    id: 'units',
+    label: 'Units',
+    hint: 'Height, distance and speed',
+    kind: 'enum',
+    options: [
+      { value: 'm', label: 'Metres · km/h' },
+      { value: 'ft', label: 'Feet · mph' },
+    ],
+    get: (s) => s.units,
+    set: (s, v) => {
+      s.units = v as Settings['units'];
+    },
+  },
+  {
+    id: 'musicOn',
+    label: 'Music',
+    hint: 'Adaptive soundtrack, one theme per level',
+    kind: 'bool',
+    get: (s) => s.musicOn,
+    set: (s, v) => {
+      s.musicOn = v;
+    },
+  },
+  rangeRow('musicVolume', 'Music volume', 'Soundtrack level', pct),
+  rangeRow('sfxVolume', 'Effects volume', 'Motors, impacts, chimes and beeps', pct),
+  rangeRow('ambienceVolume', 'Ambience volume', 'Wind, room tone, traffic, rivers and birds', pct),
+);
 /** Rows only shown on touch devices. */
 const TOUCH_ROWS: ReadonlySet<string> = new Set(['touchThrottleCentre', 'touchSticksFixed']);
 /** Rows hidden on touch devices (pointer-lock mouse flight is a desktop feature). */
 const MOUSE_ROWS: ReadonlySet<string> = new Set(['mouseStick', 'mouseSensitivity', 'mouseInvertY', 'mouseXAxis', 'mouseExpo', 'mouseDeadzone']);
 const ROWS = new Map(ROW_DEFS.map((r) => [r.id, r]));
-const SETTINGS_ROWS = ['stickMode', 'touchThrottleCentre', 'touchSticksFixed', 'throttleSource', 'flightMode', 'ratePreset', 'cameraTiltDeg', 'fovDeg', 'quality', 'volume', 'showFps', 'headingArrow', 'deadzone', ...MOUSE_ROWS];
+const SETTINGS_ROWS = [
+  'stickMode',
+  'touchThrottleCentre',
+  'touchSticksFixed',
+  'throttleSource',
+  'flightMode',
+  'ratePreset',
+  'cameraTiltDeg',
+  'fovDeg',
+  'analogVideo',
+  'analogStrength',
+  'quality',
+  'viewDistance',
+  'timeOfDay',
+  'volume',
+  'musicOn',
+  'musicVolume',
+  'sfxVolume',
+  'ambienceVolume',
+  'units',
+  'minimap',
+  'showFps',
+  'headingArrow',
+  'deadzone',
+  ...MOUSE_ROWS,
+];
 const CONTROLLER_ROWS = ['stickMode', 'throttleSource', 'squareGate', 'invert.throttle', 'invert.yaw', 'invert.pitch', 'invert.roll'];
 const CHANNELS: readonly Channel[] = ['throttle', 'yaw', 'pitch', 'roll'];
 const SLOT_NAME: Record<StickSlot, string> = { lx: 'LX', ly: 'LY', rx: 'RX', ry: 'RY' };
@@ -436,6 +561,14 @@ export class Menus {
   private currentLevel: LevelId | null = null;
   private levelsKey = '';
   private readonly levelsBox: HTMLElement;
+  private readonly worldsUi: WorldsScreen;
+  private readonly storage: Storage | null;
+  private readonly toast: (msg: string) => void;
+  private readonly now: () => number;
+  private readonly randomSeedFn: (() => number) | undefined;
+  /** world waiting for the delete confirmation */
+  private deleting: SavedWorld | null = null;
+  private readonly deleteText: HTMLElement;
   private menuBestValue: number | null = null;
   private readonly platform: Platform;
   /** installed app (Capacitor shell or home-screen / Quest app) rather than a browser tab */
@@ -447,15 +580,41 @@ export class Menus {
     private readonly root: HTMLElement,
     private readonly onAction: (a: UiAction) => void,
     settings: Settings,
+    opts: MenusOptions = {},
   ) {
     this.settings = cloneSettings(settings);
+    this.storage = opts.storage ?? null;
+    this.toast = opts.toast ?? (() => undefined);
+    this.now = opts.now ?? (() => Date.now());
+    this.randomSeedFn = opts.randomSeed;
     const dev = detectDevice(window);
     this.quest = isQuestBrowser(navigator.userAgent) && 'xr' in navigator;
     this.platform = dev.ios ? 'ios' : this.quest ? 'quest' : /Android/i.test(navigator.userAgent) || dev.native === 'android' ? 'android' : 'desktop';
     this.installed = dev.standalone;
     this.native = dev.native !== null;
+    DEVICE.xr = this.quest;
     this.screens.set('main', this.buildMain());
     this.screens.set('levels', this.buildLevels());
+    const worlds = this.screen('worlds', worldsScreenHtml((a, l, p, e, at) => this.btn(a, l, p, e, at)));
+    this.screens.set('worlds', worlds);
+    this.worldsUi = new WorldsScreen(worlds, {
+      storage: this.storage,
+      now: this.now,
+      toast: (m) => this.toast(m),
+      play: (pick) => this.playWorld(pick),
+      confirmDelete: (w) => {
+        this.deleting = w;
+        this.deleteText.textContent = `${w.name} (${w.code}) leaves your list. You can fly it again any time with its code.`;
+        this.show('confirm-world-delete');
+      },
+      refresh: (act) => this.refreshItems(act),
+      move: (dir) => this.navigate({ up: dir < 0, down: dir > 0, left: false, right: false, back: false }, false),
+      native: this.native,
+      randomSeed: opts.randomSeed,
+    });
+    const confirmDel = this.buildConfirmWorldDelete();
+    this.screens.set('confirm-world-delete', confirmDel);
+    this.deleteText = confirmDel.querySelector<HTMLElement>('[data-f="delText"]')!;
     this.screens.set('settings', this.buildSettings());
     const ctl = this.buildController();
     this.screens.set('controller', ctl);
@@ -562,6 +721,7 @@ export class Menus {
   /** WebXR headset (immersive-vr supported): reveal the Enter VR button. */
   enableVr(): void {
     this.vr = true;
+    DEVICE.xr = true;
     for (const el of this.screens.values()) {
       el.querySelectorAll<HTMLElement>('[data-vr-only]').forEach((x) => {
         x.hidden = false;
@@ -571,14 +731,20 @@ export class Menus {
     this.refreshItems();
   }
 
+  /** Quest browser or an immersive-VR capable device: outdoor HUD defaults (minimap off) follow the headset. */
+  get xrDevice(): boolean {
+    return this.quest || this.vr;
+  }
+
   /** Re-reads the focusable items of the open screen after elements were shown / hidden, keeping the focused one. */
-  private refreshItems(): void {
+  private refreshItems(act?: string): void {
     if (this.current === 'none') return;
     const was = this.items[this.focus]?.el ?? null;
     was?.classList.remove('is-focused');
     this.items = this.collectItems(this.screens.get(this.current)!);
-    const i = was ? this.items.findIndex((it) => it.el === was) : -1;
-    this.setFocus(i >= 0 ? i : Math.max(0, Math.min(this.focus, this.items.length - 1)), false);
+    const byAct = act ? this.items.findIndex((it) => it.el.dataset.act === act) : -1;
+    const i = byAct >= 0 ? byAct : was ? this.items.findIndex((it) => it.el === was) : -1;
+    this.setFocus(i >= 0 ? i : Math.max(0, Math.min(this.focus, this.items.length - 1)), byAct >= 0);
   }
 
   /** Shows gamepad / keyboard-only hints unless this is a touch device without a pad; pad-only controls need a pad. */
@@ -626,6 +792,13 @@ export class Menus {
     this.levelCards = cards;
     this.currentLevel = current;
     this.renderMenuBest();
+    this.renderLevelCards();
+  }
+
+  /** Redraws the cards when they (or the Infinite card's last-world line) changed, keeping the focused button. */
+  private renderLevelCards(): void {
+    const cards = this.levelCards.map((c) => (isSeededCard(c) ? { ...c, note: this.worldNote() } : c));
+    const current = this.currentLevel ?? cards[0]?.id ?? 'training';
     const key = JSON.stringify([cards, current]);
     if (key === this.levelsKey) return;
     this.levelsKey = key;
@@ -638,23 +811,65 @@ export class Menus {
     if (i >= 0) this.setFocus(i, false);
   }
 
-  /** Open the picker focused on the current level's Race or Free Fly button. */
+  /** Infinite card line: the world Free Fly continues, or what it does the first time. */
+  private worldNote(): string {
+    const last = lastPlayedWorld(loadWorlds(this.storage));
+    return last ? `Last world · ${last.code}` : 'Free Fly starts a new random world';
+  }
+
+  /** Open the picker focused on the current level's Race or Free Fly button (Free Fly on a seeded level). */
   private openLevels(mode: LevelMode): void {
     this.show('levels');
-    const act = this.currentLevel ? levelAct(mode, this.currentLevel) : null;
+    const card = this.levelCards.find((c) => c.id === this.currentLevel);
+    const m: LevelCardMode = card && !cardModes(card).includes(mode) ? cardModes(card)[0] : mode;
+    const act = this.currentLevel ? levelAct(m, this.currentLevel) : null;
     const i = act ? this.items.findIndex((it) => it.el.dataset.act === act) : -1;
     this.setFocus(Math.max(0, i), false);
   }
 
-  /** Left / right on a card button: the same button on the neighbouring card. */
+  /** Left / right on a card button: the button in the same place on the neighbouring card. */
   private moveCard(el: HTMLElement, dir: -1 | 1): void {
     const parsed = parseLevelAct(el.dataset.act ?? '');
     if (!parsed) return;
-    const ids = this.levelCards.map((c) => c.id);
-    const k = ids.indexOf(parsed.id as LevelId);
-    if (k < 0 || ids.length < 2) return;
-    const target = levelAct(parsed.mode, ids[(k + dir + ids.length) % ids.length]!);
+    const cards = this.levelCards;
+    const k = cards.findIndex((c) => c.id === parsed.id);
+    if (k < 0 || cards.length < 2) return;
+    const slot = Math.max(0, cardModes(cards[k]!).indexOf(parsed.mode));
+    const next = cards[(k + dir + cards.length) % cards.length]!;
+    const target = levelAct(cardModes(next)[slot]!, next.id);
     const i = this.items.findIndex((it) => it.el.dataset.act === target);
+    if (i >= 0) this.setFocus(i);
+  }
+
+  /** Records nothing itself: WorldsScreen / resumeOrNewWorld already saved the play. */
+  private playWorld(pick: WorldPick): void {
+    const card = this.levelCards.find(isSeededCard);
+    this.onAction({ type: 'level', id: card?.id ?? 'infinite', mode: 'freefly', seed: pick.seed, gen: pick.gen });
+  }
+
+  /** Worlds list rows: up / down keep the action column, left / right walk the row's buttons. */
+  private gridMove(el: HTMLElement, dx: number, dy: number): void {
+    const row = el.closest('.ds-wrow');
+    if (!row) return;
+    const btns = [...row.querySelectorAll<HTMLElement>('[data-nav]')];
+    const col = btns.indexOf(el);
+    let target: HTMLElement | undefined;
+    if (dx) {
+      target = btns[col + dx];
+    } else {
+      const sib = (dy < 0 ? row.previousElementSibling : row.nextElementSibling) as HTMLElement | null;
+      if (sib) {
+        const other = [...sib.querySelectorAll<HTMLElement>('[data-nav]')];
+        target = other[Math.min(col, other.length - 1)];
+      } else {
+        // off the list: the neighbouring item in reading order (the seed field above, Back below)
+        const i = this.items.findIndex((it) => it.el === (dy < 0 ? btns[0] : btns[btns.length - 1]));
+        const j = i + dy;
+        if (i >= 0 && j >= 0 && j < this.items.length) this.setFocus(j);
+        return;
+      }
+    }
+    const i = target ? this.items.findIndex((it) => it.el === target) : -1;
     if (i >= 0) this.setFocus(i);
   }
 
@@ -674,6 +889,9 @@ export class Menus {
     if (name !== 'controller') this.stopCapture('');
     if (name === 'finish' && data) this.renderFinish(data);
     if (name === 'settings') this.renderFovHint();
+    if (name === 'worlds' && this.current !== 'confirm-world-delete') this.worldsUi.open();
+    if (name === 'levels') this.renderLevelCards();
+    if (name !== 'worlds' && name !== 'confirm-world-delete') this.blurField();
     this.current = name;
     for (const [n, el] of this.screens) {
       const on = n === name;
@@ -730,8 +948,10 @@ export class Menus {
     if (n === 0) return;
     // On the controller screen the sticks are being tested: only d-pad / keys move the focus.
     const dirOk = this.current !== 'controller' || !this.stickDriven();
-    if (dirOk && nav.up) this.setFocus((this.focus - 1 + n) % n);
-    if (dirOk && nav.down) this.setFocus((this.focus + 1) % n);
+    const vert = this.items[this.focus]?.vert;
+    if (dirOk && (nav.up || nav.down) && vert) vert(nav.up ? -1 : 1);
+    else if (dirOk && nav.up) this.setFocus((this.focus - 1 + n) % n);
+    else if (dirOk && nav.down) this.setFocus((this.focus + 1) % n);
     const item = this.items[this.focus];
     if (!item) return;
     if (dirOk && nav.left) item.adjust?.(-1);
@@ -757,6 +977,18 @@ export class Menus {
       case 'levels':
         this.show('main');
         break;
+      case 'worlds':
+        if (this.blurField()) break;
+        this.show('levels');
+        this.focusAct(levelAct('worlds', this.levelCards.find(isSeededCard)?.id ?? 'infinite'));
+        break;
+      case 'confirm-world-delete': {
+        const w = this.deleting;
+        this.deleting = null;
+        this.show('worlds');
+        if (w) this.focusAct(`world-delete:${w.id}`);
+        break;
+      }
       case 'settings':
       case 'controls':
         this.show(this.returnTo);
@@ -848,6 +1080,9 @@ export class Menus {
     const it = this.items[i];
     if (!it) return;
     it.el.classList.add('is-focused');
+    // a text field keeps the keyboard only while its item has the menu focus
+    const ae = this.root.ownerDocument.activeElement;
+    if (ae instanceof HTMLInputElement && this.root.contains(ae) && !it.el.contains(ae)) ae.blur();
     if (scroll) it.el.scrollIntoView?.({ block: 'nearest' });
   }
 
@@ -864,6 +1099,10 @@ export class Menus {
       } else if (act) {
         item.activate = () => this.act(act);
         if (parseLevelAct(act)) item.adjust = (dir) => this.moveCard(el, dir);
+        if (el.closest('.ds-wrow')) {
+          item.adjust = (dir) => this.gridMove(el, dir, 0);
+          item.vert = (dir) => this.gridMove(el, 0, dir);
+        }
       } else if (el instanceof HTMLAnchorElement) {
         item.activate = () => el.click();
       }
@@ -876,10 +1115,24 @@ export class Menus {
     const lvl = parseLevelAct(act);
     if (lvl) {
       const card = this.levelCards.find((c) => c.id === lvl.id);
-      if (card) this.onAction({ type: 'level', id: card.id, mode: lvl.mode });
+      if (!card) return;
+      if (lvl.mode === 'worlds') this.show('worlds');
+      else if (isSeededCard(card)) this.playWorld(resumeOrNewWorld(this.storage, this.now(), this.randomSeedFn));
+      else this.onAction({ type: 'level', id: card.id, mode: lvl.mode });
+      return;
+    }
+    if (WORLD_ACT.test(act)) {
+      this.worldsUi.act(act);
       return;
     }
     switch (act) {
+      case 'world-delete-confirm': {
+        const w = this.deleting;
+        this.deleting = null;
+        this.show('worlds');
+        if (w) this.focusAct(this.worldsUi.remove(w.id));
+        break;
+      }
       case 'levels-race':
         this.openLevels('race');
         break;
@@ -1201,6 +1454,18 @@ export class Menus {
       this.items[idx]?.activate?.();
     });
     el.addEventListener('pointerdown', (e) => {
+      // pressed state on the down event: painted before the click's work starts (a level load, a screen change)
+      const pressed = (e.target as HTMLElement).closest<HTMLElement>('.ds-btn');
+      if (pressed) {
+        pressed.classList.add('is-pressed');
+        const release = (): void => {
+          window.removeEventListener('pointerup', release);
+          window.removeEventListener('pointercancel', release);
+          window.setTimeout(() => pressed.classList.remove('is-pressed'), PRESS_HOLD_MS);
+        };
+        window.addEventListener('pointerup', release);
+        window.addEventListener('pointercancel', release);
+      }
       const dirBtn = (e.target as HTMLElement).closest<HTMLElement>('[data-dir]');
       const navEl = dirBtn?.closest<HTMLElement>('[data-nav]');
       if (!dirBtn || !navEl) return;
@@ -1476,6 +1741,8 @@ export class Menus {
     const oss: [string, string][] = [
       ['three.js', 'MIT'],
       ['postprocessing', 'Zlib'],
+      ['N8AO', 'CC0'],
+      ['Poly Haven textures', 'CC0'],
       ['Capacitor', 'MIT'],
       ['IWER', 'MIT'],
       ['gl-matrix', 'MIT'],
@@ -1492,6 +1759,7 @@ export class Menus {
             <tr><th scope="row">Version</th><td data-f="version">${APP_VERSION}</td></tr>
             <tr><th scope="row">Developer</th><td>COWORK Game Studio</td></tr>
             <tr><th scope="row">Support</th><td>${SUPPORT_EMAIL}</td></tr>
+            <tr><th scope="row">Music &amp; sound</th><td>Original score and effects, synthesised on your device</td></tr>
           </tbody>
         </table>
         <h3 class="ds-h3">Open-source software</h3>
@@ -1504,6 +1772,37 @@ export class Menus {
         <div class="ds-dialog__actions">${this.btn('back', 'Back', true)}</div>
       </div>`,
     );
+  }
+
+  private buildConfirmWorldDelete(): HTMLElement {
+    return this.screen(
+      'confirm-world-delete',
+      `
+      <div class="ds-panel ds-glass ds-dialog">
+        <h2 class="ds-dialog__title">Delete world?</h2>
+        <p class="ds-dialog__text" data-f="delText"></p>
+        <nav class="ds-menu">
+          ${this.btn('world-delete-confirm', 'Delete', false, ' ds-btn--quit')}
+          ${this.btn('back', 'Cancel', true, '', ' data-autofocus')}
+        </nav>
+      </div>`,
+    );
+  }
+
+  /** Moves the menu focus to the item with this act (after a screen change). */
+  private focusAct(act: string): void {
+    const i = this.items.findIndex((it) => it.el.dataset.act === act);
+    if (i >= 0) this.setFocus(i);
+  }
+
+  /** Leaves a focused text field (Esc / B first closes the keyboard). True when one was focused. */
+  private blurField(): boolean {
+    const ae = this.root.ownerDocument.activeElement;
+    if (ae instanceof HTMLInputElement && this.root.contains(ae)) {
+      ae.blur();
+      return true;
+    }
+    return false;
   }
 
   private buildConfirmReset(): HTMLElement {

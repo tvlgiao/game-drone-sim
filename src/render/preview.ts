@@ -2,12 +2,14 @@
  * Standalone render preview (render-preview.html): GameView with a scripted drone flying a smooth
  * loop through the rings, so rendering/VFX can be judged without physics, input or UI.
  * Query params: ?tier=ultra|high|medium|low  &cam=fpv|chase|los  &t=<start seconds>  &pause  &level=training|night-loft
+ *   &tm=agx|aces|neutral (tone-mapper look test)  &gallery[=x,y,z] (material library swatches)  &analog=0..1
  */
 import * as THREE from 'three';
 import { DynamicResolution, pickTier, probeGpu } from '../core/quality';
 import { buildLevel } from '../levels/registry';
 import type { CameraMode, DroneState, GameEvent, QualityTier } from '../types';
 import { GameView } from './game-view';
+import { PRESET_NAMES } from './materials/library';
 
 const params = new URLSearchParams(location.search);
 const canvas = document.getElementById('c') as HTMLCanvasElement;
@@ -18,6 +20,27 @@ const level = runtime.def;
 const gpu = probeGpu();
 let tier: QualityTier = (params.get('tier') as QualityTier | null) ?? pickTier(gpu);
 const view = new GameView(canvas, runtime, tier);
+const tm = params.get('tm');
+if (tm === 'agx' || tm === 'aces' || tm === 'neutral') view.setToneMapping(tm);
+if (params.has('gallery')) addGallery(params.get('gallery') ?? '');
+// the game's default analog FPV feed (Settings → Analog FPV feed); &analog=0 turns it off
+view.setAnalogVideo(params.has('analog') ? Number(params.get('analog')) || 0 : 0.35);
+
+/** Material library swatches in a row (x = 0 centred), at `at` = "x,y,z" (default: in front of the training pilot). */
+function addGallery(at: string): void {
+  const [gx, gy, gz] = at ? at.split(',').map(Number) : [0, 1.1, 32.4];
+  const g = new THREE.Group();
+  g.name = 'gallery';
+  const sphere = new THREE.SphereGeometry(0.24, 64, 32);
+  const leaf = new THREE.PlaneGeometry(0.5, 0.5);
+  PRESET_NAMES.forEach((name, i) => {
+    const m = new THREE.Mesh(name === 'foliage' ? leaf : sphere, view.library.material(name, { uvMeters: 0.5 }));
+    m.position.set(gx! + (i - (PRESET_NAMES.length - 1) / 2) * 0.56, gy!, gz!);
+    m.castShadow = m.receiveShadow = true;
+    g.add(m);
+  });
+  view.scene.add(g);
+}
 
 // ---- scripted path through the rings ------------------------------------------------------
 const pts: THREE.Vector3[] = [];

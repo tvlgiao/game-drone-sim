@@ -3,6 +3,9 @@ Drone Sim — third-party software notices
 Drone Sim (c) COWORK Game Studio includes the open-source components below.
 Each is used under the licence reproduced here.
 
+Music and sound effects: original works (c) COWORK Game Studio, synthesised
+in the app at run time. No third-party recordings or samples are included.
+
 ========================================================================
 three.js 0.186.1 — MIT licence
 https://threejs.org
@@ -371,3 +374,29 @@ Copyright (c) 2021 Facebook, Inc. and its affiliates.
    WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
    See the License for the specific language governing permissions and
    limitations under the License.
+
+========================================================================
+N8AO (n8ao) 2.0.1 — CC0 1.0 Universal (public domain dedication)
+https://github.com/N8python/n8ao
+========================================================================
+
+Screen-space ambient occlusion pass by N8python. Released under CC0 1.0
+Universal: https://creativecommons.org/publicdomain/zero/1.0/legalcode
+(the npm package metadata also lists ISC; both permit use without conditions).
+
+========================================================================
+PBR texture sets from Poly Haven — CC0 1.0 Universal (public domain)
+https://polyhaven.com/license
+========================================================================
+
+No attribution is required; credited with thanks:
+
+  Concrete Floor Worn 001 by Dimitrios Savva, Rico Cilliers — https://polyhaven.com/a/concrete_floor_worn_001 (CC0 1.0)
+  Red Brick by Rob Tuytel — https://polyhaven.com/a/red_brick (CC0 1.0)
+  Wood Floor by Dimitrios Savva — https://polyhaven.com/a/wood_floor (CC0 1.0)
+  Asphalt 02 by Rob Tuytel — https://polyhaven.com/a/asphalt_02 (CC0 1.0)
+  Painted Plaster Wall by Amal Kumar — https://polyhaven.com/a/painted_plaster_wall (CC0 1.0)
+  Leafy Grass by Charlotte Baglioni — https://polyhaven.com/a/leafy_grass (CC0 1.0)
+  Bark Brown 02 by Rob Tuytel — https://polyhaven.com/a/bark_brown_02 (CC0 1.0)
+  Aerial Rocks 02 by Rob Tuytel — https://polyhaven.com/a/aerial_rocks_02 (CC0 1.0)
+  Forest Ground 04 by Rico Cilliers, Rob Tuytel — https://polyhaven.com/a/forest_ground_04 (CC0 1.0)

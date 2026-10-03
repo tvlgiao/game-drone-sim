@@ -58,21 +58,39 @@ html, body {
   overflow: hidden;
   background: rgba(255, 255, 255, 0.1);
 }
+#splash .sp-fill {
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  background: linear-gradient(90deg, #28e7ff, #ff3de8);
+  box-shadow: 0 0 10px rgba(40, 231, 255, 0.55);
+  transform: scaleX(0.04);
+  transform-origin: left center;
+}
 #splash .sp-bar::after {
   content: '';
   position: absolute;
   inset: 0;
   width: 40%;
   border-radius: inherit;
-  background: linear-gradient(90deg, transparent, #28e7ff, #ff3de8, transparent);
+  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.55), transparent);
   animation: sp-slide 1.3s ease-in-out infinite;
+}
+#splash .sp-stage {
+  margin: calc(clamp(14px, 2.4vh, 30px) * -0.5) 0 0;
+  min-height: 1.2em;
+  font-size: clamp(10px, min(0.9vw, 1.4vh), 14px);
+  font-weight: 600;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: rgba(200, 225, 245, 0.5);
 }
 @keyframes sp-slide {
   from { transform: translateX(-100%); }
   to { transform: translateX(250%); }
 }
 @media (prefers-reduced-motion: reduce) {
-  #splash .sp-bar::after { animation: none; width: 100%; opacity: 0.6; }
+  #splash .sp-bar::after { animation: none; display: none; }
 }
 body.is-ready #splash { opacity: 0; visibility: hidden; pointer-events: none; }
 .sp-sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }

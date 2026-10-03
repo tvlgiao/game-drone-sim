@@ -4,11 +4,14 @@ import * as THREE from 'three';
 const VERT = /* glsl */ `
 varying vec2 vUv;
 varying float vY;
+varying float vDepth;
 void main() {
   vUv = uv;
   vec4 wp = modelMatrix * vec4(position, 1.0);
   vY = wp.y;
-  gl_Position = projectionMatrix * viewMatrix * wp;
+  vec4 vp = viewMatrix * wp;
+  vDepth = -vp.z;
+  gl_Position = projectionMatrix * vp;
 }`;
 
 const FRAG = /* glsl */ `
@@ -17,13 +20,16 @@ uniform float uAlpha;
 uniform float uFloorFade;
 varying vec2 vUv;
 varying float vY;
+varying float vDepth;
 void main() {
   // CircleGeometry uv.y is not radial; derive radial position from uv distance to centre
   float r = length(vUv - 0.5) * 2.0;
   float band = smoothstep(0.8, 0.93, r) * (1.0 - smoothstep(0.95, 1.0, r));
-  float inner = smoothstep(0.35, 0.93, r) * 0.25;
+  float inner = smoothstep(0.35, 0.93, r) * 0.1;
   // soften where the wave slices into the floor
-  gl_FragColor = vec4(uColor * 2.5, (band + inner) * uAlpha * mix(1.0, smoothstep(0.0, 0.35, vY + 0.02), uFloorFade));
+  // and where it sweeps past the camera (a full-screen wash otherwise)
+  float nearFade = smoothstep(0.3, 1.4, vDepth);
+  gl_FragColor = vec4(uColor * 2.5, (band + inner) * uAlpha * nearFade * mix(1.0, smoothstep(0.0, 0.35, vY + 0.02), uFloorFade));
   #include <colorspace_fragment>
 }`;
 

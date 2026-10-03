@@ -185,7 +185,8 @@ test('sound stops when the window is hidden and when quitting the game', async (
     document.dispatchEvent(new Event('visibilitychange'));
   });
   await page.waitForFunction(() => window.__drone.audio === 'suspended');
-  expect(await page.evaluate(() => window.__drone.race.status)).toBe('paused');
+  // hidden during the loading screen's hand-off: the flight starts paused
+  await expect.poll(() => page.evaluate(() => window.__drone.race.status)).toBe('paused');
   await page.evaluate(() => {
     Object.defineProperty(document, 'hidden', { configurable: true, get: () => false });
     document.dispatchEvent(new Event('visibilitychange'));
@@ -341,14 +342,20 @@ test('unplugging the gamepad that is flying pauses the flight', async ({ page })
     window.__drone.action({ type: 'resume' });
   });
   await page.waitForFunction(() => window.__drone.race.status === 'freefly');
-  await page.evaluate(() => {
-    (window as unknown as PadWin).__pad.buttons[0] = { pressed: true, touched: true, value: 1 };
-  });
-  await page.waitForFunction(() => window.__drone.armed);
-  await page.evaluate(() => {
-    (window as unknown as PadWin).__pad.buttons[0] = { pressed: false, touched: false, value: 0 };
-    window.__drone.teleport(-9, 4.5, 5.8, 0); // into the duct: crash
-  });
+  // re-arm with A taps: a press that lands on the frame the resumed flight takes over the pad can be eaten
+  // by the closing menu, so tap (press, release) until the quad is armed
+  for (let i = 0; i < 6 && !(await page.evaluate(() => window.__drone.armed)); i++) {
+    await page.evaluate(() => {
+      (window as unknown as PadWin).__pad.buttons[0] = { pressed: true, touched: true, value: 1 };
+    });
+    await page.waitForTimeout(200);
+    await page.evaluate(() => {
+      (window as unknown as PadWin).__pad.buttons[0] = { pressed: false, touched: false, value: 0 };
+    });
+    await page.waitForTimeout(200);
+  }
+  expect(await page.evaluate(() => window.__drone.armed)).toBe(true);
+  await page.evaluate(() => window.__drone.teleport(-9, 4.5, 5.8, 0)); // into the duct: crash
   await page.waitForFunction(() => window.__drone.race.status === 'crashed', null, { timeout: 3000 });
   await page.evaluate(() => {
     const w = window as unknown as PadWin;

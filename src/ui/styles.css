@@ -514,6 +514,62 @@
   text-align: right;
 }
 
+/* Acro artificial horizon: sky over ground on a ball that turns against the roll; red rim while belly up */
+.ds-att {
+  position: relative;
+  align-self: center;
+  width: calc(46 * var(--ds-u));
+  height: calc(46 * var(--ds-u));
+  border-radius: 50%;
+  overflow: hidden;
+  border: 1px solid var(--ds-edge);
+  box-shadow: inset 0 0 calc(8 * var(--ds-u)) rgba(0, 0, 0, 0.5);
+}
+
+.ds-att[hidden] {
+  display: none;
+}
+
+.ds-att__ball {
+  position: absolute;
+  left: -50%;
+  top: -50%;
+  width: 200%;
+  height: 200%;
+  background: linear-gradient(180deg, rgba(40, 231, 255, 0.38) 0 50%, rgba(255, 197, 61, 0.3) 50% 100%);
+  will-change: transform;
+}
+
+.ds-att__ball::after {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: calc(50% - 0.5px);
+  height: 1px;
+  background: var(--ds-text);
+  opacity: 0.8;
+}
+
+/* the quad: fixed wings and a centre dot */
+.ds-att__wings {
+  position: absolute;
+  left: 22%;
+  right: 22%;
+  top: calc(50% - 1px);
+  height: 2px;
+  border-radius: 1px;
+  background: var(--ds-magenta);
+  box-shadow: 0 0 calc(4 * var(--ds-u)) rgba(255, 61, 232, 0.6);
+}
+
+.ds-att.is-inv {
+  border-color: var(--ds-red);
+  box-shadow:
+    inset 0 0 calc(8 * var(--ds-u)) rgba(0, 0, 0, 0.5),
+    0 0 calc(8 * var(--ds-u)) rgba(255, 70, 97, 0.7);
+}
+
 .ds-tele__row.is-warn .ds-num {
   color: var(--ds-amber);
 }
@@ -1392,8 +1448,10 @@ a.ds-btn { text-decoration: none; }
   animation: ds-sweep 0.7s ease-out;
 }
 
-.ds-btn:active {
-  transform: scale(0.985);
+.ds-btn:active,
+.ds-btn.is-pressed {
+  transform: scale(0.97);
+  filter: brightness(1.2);
 }
 
 .ds-foot {
@@ -2530,13 +2588,15 @@ body.is-quest .ds-foot {
 /* ---------- modal dialogs (first run, tutorial complete, quit / reset confirmations) ---------- */
 .ds-ui .ds-tut-screen,
 .ds-ui .ds-screen--confirm-quit,
-.ds-ui .ds-screen--confirm-reset {
+.ds-ui .ds-screen--confirm-reset,
+.ds-ui .ds-screen--confirm-world-delete {
   background: rgba(5, 8, 14, 0.7);
 }
 
 .ds-ui .ds-tut-screen > .ds-dialog,
 .ds-ui .ds-screen--confirm-quit > .ds-dialog,
-.ds-ui .ds-screen--confirm-reset > .ds-dialog {
+.ds-ui .ds-screen--confirm-reset > .ds-dialog,
+.ds-ui .ds-screen--confirm-world-delete > .ds-dialog {
   background: linear-gradient(160deg, rgba(14, 22, 38, 0.97), rgba(7, 11, 21, 0.98));
 }
 

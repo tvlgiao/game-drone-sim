@@ -172,7 +172,8 @@ export class RateCharts {
       el('line', { x1: TP.l, x2: TW - TP.r, y1: this.ty(v), y2: this.ty(v) }, g);
       el('text', { x: TP.l - T_LABEL_GAP, y: this.ty(v) + 4, class: 'ds-chart__ylabel' }, g).textContent = `${v * 100}%`;
       el('line', { x1: this.tx(v), x2: this.tx(v), y1: TP.t, y2: TH - TP.b }, g);
-      el('text', { x: this.tx(v), y: TH - TP.b + T_LABEL_GAP + 8, class: 'ds-chart__xlabel' }, g).textContent = `${v * 100}`;
+      // the x labels sit a little lower than the y labels are inset: the live dot at the origin must clear the 0
+      el('text', { x: this.tx(v), y: TH - TP.b + T_LABEL_GAP + 10, class: 'ds-chart__xlabel' }, g).textContent = `${v * 100}`;
     }
     el('line', { x1: TP.l, x2: TW - TP.r, y1: this.ty(HOVER), y2: this.ty(HOVER), class: 'is-hover' }, g);
     if (s.throttleLimit < 1) el('line', { x1: TP.l, x2: TW - TP.r, y1: this.ty(s.throttleLimit), y2: this.ty(s.throttleLimit), class: 'is-limit' }, g);

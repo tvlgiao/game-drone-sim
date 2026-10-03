@@ -18,6 +18,7 @@ interface Hook {
   screen: string;
   level: string;
   race: { status: string; totalRings: number; nextRing: number };
+  loading: { visible: boolean };
   state: { position: { x: number; y: number; z: number } };
   renders: number;
   stats: () => Stats;
@@ -70,9 +71,8 @@ test('level picker: cards with thumbnails and Race / Free Fly per level, focus o
   await click(page, 'Race');
   await expect.poll(() => hook(page, (d) => d.screen)).toBe('levels');
   const cards = page.locator('.ds-screen--levels .ds-lvl');
-  await expect(cards).toHaveCount(2);
-  await expect(cards.nth(0)).toContainText('Training Field');
-  await expect(cards.nth(1)).toContainText('Night Loft');
+  await expect(cards).toHaveCount(5);
+  for (const [i, name] of ['Training Field', 'Night Loft', 'City', 'Alpine Valley', 'Infinite World'].entries()) await expect(cards.nth(i)).toContainText(name);
   // a first-time pilot is on the beginner field
   await expect(cards.nth(0)).toContainText('Selected');
   // opened from Race: the current level's Race button has the focus
@@ -135,9 +135,13 @@ test.describe('desktop', () => {
   test('leaving the Training field shows a countdown and respawns on the pad after 5 s', async ({ page }) => {
     await boot(page);
     await hook(page, (d) => d.action({ type: 'level', id: 'training', mode: 'freefly' }));
-    await expect.poll(() => hook(page, (d) => d.race.status)).toBe('freefly');
+    // physics run once the loading screen has handed over
+    await expect.poll(() => hook(page, (d) => [d.race.status, d.loading.visible]), { timeout: 15_000 }).toEqual(['freefly', false]);
+    // the first frames of a freshly built level compile its shaders: fly out only once it is rendering
+    const r0 = await hook(page, (d) => d.renders);
+    await expect.poll(() => hook(page, (d) => d.renders), { timeout: 15_000 }).toBeGreaterThan(r0 + 10);
     await hook(page, (d) => d.teleport(55, 0.2, 0));
-    await expect(page.locator('.ds-center__big')).toHaveText('OUT OF BOUNDS');
+    await expect(page.locator('.ds-center__big')).toHaveText('OUT OF BOUNDS', { timeout: 10_000 });
     await expect(page.locator('.ds-center__sub')).toContainText(/respawn in [1-5] s/);
     await expect.poll(() => hook(page, (d) => Math.round(d.state.position.z)), { timeout: 9_000 }).toBe(33);
     expect(await hook(page, (d) => Math.round(d.state.position.x))).toBe(0);
@@ -153,14 +157,18 @@ test.describe('desktop', () => {
     };
     const go = async (id: string): Promise<Stats> => {
       await page.evaluate((id) => (window as unknown as { __drone: Hook }).__drone.action({ type: 'level', id, mode: 'freefly' }), id);
-      await expect.poll(() => hook(page, (d) => d.level)).toBe(id);
+      await expect.poll(() => hook(page, (d) => [d.level, d.loading.visible]), { timeout: 20_000 }).toEqual([id, false]);
       return settled();
     };
+    test.setTimeout(150_000); // ten loads, each with its loading screen and a settle
     const pick = (s: Stats): number[] => [s.geometries, s.textures, s.calls];
     const first = await go('night-loft');
     const training = await go('training');
     expect(training.calls).toBeGreaterThan(10);
-    // the first round trip may create one-off shared resources; after it every trip must be identical
+    // the first round trips may create one-off shared resources (library sets a level's loading screen uploads
+    // whole, the boot level never went through one); after them every trip must be identical
+    await go('night-loft');
+    await go('training');
     const warm = await go('night-loft');
     expect(warm.geometries).toBe(first.geometries);
     const warmTraining = pick(await go('training'));

@@ -164,16 +164,17 @@ export class Lights {
       s.shadow.map?.dispose();
       s.shadow.map = null;
       s.shadow.needsUpdate = true;
-      s.visible = p.tier !== 'low' || i === 0;
+      // low / VR keeps the warm key and the brick wall-washer: they set the loft's mood (the cool fill goes)
+      s.visible = p.tier !== 'low' || i < 2;
     });
     const sorted = [...this.practicals].sort((a, b) => a.priority - b.priority);
     const budget = Math.max(0, p.pointLights - 1); // ring light always counts
     sorted.forEach((pr, i) => {
       pr.light.visible = i < budget;
       // Compensate for dropped lights on low tiers so the room is not darker.
-      pr.light.intensity = pr.base * (p.pointLights < 6 ? 1.4 : 1);
+      pr.light.intensity = pr.base * (p.pointLights < 6 ? 1.2 : 1);
     });
-    this.hemi.intensity = p.tier === 'low' ? 0.7 : 0.55;
+    this.hemi.intensity = p.tier === 'low' ? 0.6 : 0.55;
   }
 
   /** Request re-render of static shadow maps on next frame. */
@@ -182,8 +183,22 @@ export class Lights {
     for (const s of this.spots) s.shadow.needsUpdate = true;
   }
 
+  /** The practical (bulb / lamp / neon) light nearest to `p` (living-world flicker hooks). */
+  practicalNear(p: THREE.Vector3): THREE.PointLight | null {
+    let best: THREE.PointLight | null = null;
+    let bd = Infinity;
+    for (const pr of this.practicals) {
+      const d = pr.light.position.distanceToSquared(p);
+      if (d < bd) {
+        bd = d;
+        best = pr.light;
+      }
+    }
+    return best;
+  }
+
   update(time: number): void {
-    const boost = this.profile && this.profile.pointLights < 6 ? 1.4 : 1;
+    const boost = this.profile && this.profile.pointLights < 6 ? 1.2 : 1;
     for (const p of this.practicals) {
       if (!p.light.visible || p.flicker === 0) continue;
       const n = Math.sin(time * 7.3 + p.phase) * 0.5 + Math.sin(time * 17.1 + p.phase * 2.3) * 0.3 + Math.sin(time * 2.1 + p.phase) * 0.2;

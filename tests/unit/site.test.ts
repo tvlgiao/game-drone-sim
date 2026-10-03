@@ -1,5 +1,6 @@
+import { existsSync, readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
-import { precacheUrls, swSource } from '../../build/offline-sw';
+import { RUNTIME_ASSET_RE, WORLD_WORKER_RE, assertWorkerPrecached, precacheFiles, precacheUrls, swSource } from '../../build/offline-sw';
 import { legacyGameUrl } from '../../src/landing/legacy';
 import { storeBadgeHtml, storeBadgesHtml } from '../../src/site/badge';
 import { STORE_LINKS } from '../../src/site/stores';
@@ -53,8 +54,57 @@ describe('offline service worker', () => {
     expect(new Set(urls).size).toBe(urls.length);
   });
 
+  it('the CC0 texture maps are not precached (runtime cache on first use); code chunks and workers are', () => {
+    const built = ['play/index.html', 'assets/main-A1.js', 'assets/world-level-view-B2.js', 'assets/world-worker-C3.js', 'assets/texture-worker-D4.js', 'assets/albedo-x1Y2.webp', 'assets/normal-Ab_c.webp', 'assets/arm-Q9.webp', 'icons/icon-192.png'];
+    const pre = precacheFiles(built);
+    expect(pre).toEqual(['assets/main-A1.js', 'assets/texture-worker-D4.js', 'assets/world-level-view-B2.js', 'assets/world-worker-C3.js', 'icons/icon-192.png', 'play/index.html']);
+    expect(RUNTIME_ASSET_RE.test('/drone-sim/assets/albedo-x1Y2.webp')).toBe(true);
+    expect(RUNTIME_ASSET_RE.test('/assets/main-A1.js')).toBe(false);
+    // the worker caches them on first fetch, into the same versioned cache
+    const src = swSource(pre, 'abc');
+    expect(src).toContain('RUNTIME');
+    expect(src).toMatch(/c\.put\(req/);
+  });
+
   it('the generated worker lists them', () => {
     expect(swSource(files, 'abc')).toContain('"./play/"');
     expect(swSource(files, 'abc')).toContain("const CACHE = 'dronesim-abc'");
+  });
+
+  it('the build fails when the world chunk worker is not precached, and passes once it is', () => {
+    expect(() => assertWorkerPrecached(files)).toThrow(/world chunk worker/);
+    const withWorker = [...files, 'assets/world-worker-BxQ1a9Zz.js'];
+    expect(() => assertWorkerPrecached(withWorker)).not.toThrow();
+    expect(swSource(withWorker, 'abc')).toContain('"./assets/world-worker-BxQ1a9Zz.js"');
+    expect(WORLD_WORKER_RE.test('assets/world-worker.js.map')).toBe(false);
+    expect(WORLD_WORKER_RE.test('assets/my-world-worker-x.js')).toBe(false);
+  });
+});
+
+describe('native deep links (shared world links open the apps)', () => {
+  const root = new URL('../../', import.meta.url);
+  const read = (p: string): string => readFileSync(new URL(p, root), 'utf8');
+
+  it('Android App Links: the Quest TWA and the Play upload certificates verify com.cowork.dronesim', () => {
+    const links = JSON.parse(read('public/.well-known/assetlinks.json')) as { relation: string[]; target: { package_name: string; sha256_cert_fingerprints: string[] } }[];
+    const prints = links.filter((l) => l.relation.includes('delegate_permission/common.handle_all_urls') && l.target.package_name === 'com.cowork.dronesim').flatMap((l) => l.target.sha256_cert_fingerprints);
+    expect(prints).toContain('D3:4F:86:7E:4F:D6:1B:68:0D:4F:44:A8:5D:54:D5:49:B9:FC:A5:FB:EF:E1:60:BA:8C:1D:56:DA:24:B0:AA:12'); // Quest TWA
+    expect(prints).toContain('6E:5A:75:96:0F:C8:31:5F:2F:24:58:EC:BC:EE:7B:1E:18:3C:56:17:44:66:14:BA:CF:7E:19:E0:45:A0:82:9A'); // Play upload key
+    const manifest = read('android/app/src/main/AndroidManifest.xml');
+    expect(manifest).toMatch(/<intent-filter android:autoVerify="true">[\s\S]*?android\.intent\.action\.VIEW[\s\S]*?android\.intent\.category\.BROWSABLE[\s\S]*?android:scheme="https" android:host="dronesim\.coworkgamestudio\.com" android:pathPrefix="\/play\/"/);
+  });
+
+  it('iOS Associated Domains: the entitlement and the site association for /play/*', () => {
+    const aasa = JSON.parse(read('public/.well-known/apple-app-site-association')) as { applinks: { details: { appIDs: string[]; appID: string; paths: string[]; components: { '/': string }[] }[] } };
+    const d = aasa.applinks.details[0]!;
+    expect(d.appIDs).toEqual(['X6R8YNM53Z.com.cowork.dronesim']);
+    expect(d.appID).toBe('X6R8YNM53Z.com.cowork.dronesim');
+    expect(d.paths).toEqual(['/play/*']);
+    expect(d.components[0]!['/']).toBe('/play/*');
+    expect(read('ios/App/App/App.entitlements')).toContain('<string>applinks:dronesim.coworkgamestudio.com</string>');
+    expect(read('ios/App/App.xcodeproj/project.pbxproj').match(/CODE_SIGN_ENTITLEMENTS = App\/App\.entitlements;/g)?.length).toBe(2);
+    // served as-is (no Jekyll on Pages), never precached by the offline worker
+    expect(existsSync(new URL('public/.nojekyll', root))).toBe(true);
+    expect(precacheFiles(['.well-known/apple-app-site-association', '.well-known/assetlinks.json', 'play/index.html'])).toEqual(['play/index.html']);
   });
 });

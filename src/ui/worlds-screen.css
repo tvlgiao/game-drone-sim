@@ -1,0 +1,448 @@
+/* Worlds screen (Infinite World): new world, seed / code field, saved list. */
+.ds-input {
+  width: 100%;
+  min-height: max(44px, calc(44 * var(--ds-u)));
+  padding: 0 calc(14 * var(--ds-u));
+  font: inherit;
+  font-size: max(16px, 1em); /* ≥ 16 px: iOS would zoom the page into a smaller field */
+  color: var(--ds-text);
+  background: rgba(2, 6, 14, 0.7);
+  border: 1px solid rgba(120, 220, 255, 0.28);
+  border-radius: calc(10 * var(--ds-u));
+  outline: none;
+  user-select: text;
+  -webkit-user-select: text;
+  touch-action: manipulation;
+  transition: border-color 0.16s ease, box-shadow 0.16s ease;
+}
+
+.ds-input::placeholder {
+  color: rgba(200, 225, 245, 0.32);
+  letter-spacing: 0.12em;
+}
+
+.ds-input:focus {
+  border-color: var(--ds-edge-hot);
+  box-shadow: 0 0 0 1px rgba(40, 231, 255, 0.4), 0 0 calc(18 * var(--ds-u)) rgba(40, 231, 255, 0.2);
+}
+
+.ds-input[aria-invalid='true'] {
+  border-color: rgba(255, 70, 97, 0.7);
+}
+
+.ds-worlds__start {
+  display: grid;
+  grid-template-columns: minmax(0, 0.9fr) minmax(0, 1.4fr);
+  gap: calc(14 * var(--ds-u));
+  align-items: start;
+}
+
+.ds-worlds__new {
+  min-height: calc(96 * var(--ds-u));
+  height: 100%;
+  letter-spacing: 0.16em;
+  text-wrap: balance;
+}
+
+.ds-worlds__new > span {
+  display: inline-flex;
+  flex-direction: column;
+  align-items: center;
+  gap: calc(10 * var(--ds-u));
+}
+
+.ds-worlds__die {
+  width: calc(30 * var(--ds-u));
+  height: calc(30 * var(--ds-u));
+  fill: var(--ds-cyan);
+  color: var(--ds-cyan);
+  filter: drop-shadow(0 0 calc(8 * var(--ds-u)) rgba(40, 231, 255, 0.55));
+}
+
+/* the field wrapper is one menu item: focus shows on the whole block */
+.ds-worlds__seed {
+  display: grid;
+  gap: calc(8 * var(--ds-u));
+  padding: calc(12 * var(--ds-u)) calc(14 * var(--ds-u));
+  border: 1px solid var(--ds-edge);
+  border-radius: calc(12 * var(--ds-u));
+  background: rgba(255, 255, 255, 0.025);
+  transition: border-color 0.16s ease, box-shadow 0.16s ease;
+}
+
+.ds-worlds__seed.is-focused,
+.ds-worlds__seed:has(.is-focused),
+.ds-worlds__seed:focus-within {
+  border-color: rgba(40, 231, 255, 0.5);
+  box-shadow: 0 0 calc(20 * var(--ds-u)) rgba(40, 231, 255, 0.14);
+}
+
+.ds-worlds__entry {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: calc(8 * var(--ds-u));
+}
+
+.ds-worlds__input {
+  font-family: var(--ds-mono);
+  letter-spacing: 0.08em;
+}
+
+.ds-worlds__go {
+  width: auto;
+  min-width: calc(96 * var(--ds-u));
+  min-height: max(44px, calc(44 * var(--ds-u)));
+}
+
+.ds-worlds__go:disabled {
+  cursor: default;
+  opacity: 0.45;
+}
+
+.ds-worlds__status {
+  min-height: 1.35em;
+  margin: 0;
+  font-size: 0.88em;
+  line-height: 1.35;
+  color: var(--ds-muted);
+  overflow-wrap: anywhere;
+}
+
+.ds-worlds__status[data-tone='ok'] {
+  color: var(--ds-green);
+}
+
+.ds-worlds__status[data-tone='ok']::before {
+  content: '✓ ';
+}
+
+.ds-worlds__status[data-tone='warn'] {
+  color: var(--ds-amber);
+}
+
+.ds-worlds__status[data-tone='error'] {
+  color: var(--ds-danger-text);
+}
+
+.ds-worlds__status[data-tone='error']::before {
+  content: '! ';
+  font-weight: 800;
+}
+
+.ds-worlds__status.is-nudge {
+  animation: ds-nudge 0.32s ease;
+}
+
+@keyframes ds-nudge {
+  25% { transform: translateX(-4px); }
+  75% { transform: translateX(4px); }
+}
+
+.ds-worlds__head {
+  display: flex;
+  align-items: baseline;
+  gap: calc(10 * var(--ds-u));
+  margin-top: calc(22 * var(--ds-u));
+}
+
+.ds-worlds__head small {
+  font-family: var(--ds-mono);
+  color: var(--ds-muted);
+  letter-spacing: 0.04em;
+}
+
+.ds-worlds__cap {
+  margin: 0 0 calc(10 * var(--ds-u));
+  padding: calc(8 * var(--ds-u)) calc(12 * var(--ds-u));
+  font-size: 0.88em;
+  color: var(--ds-amber);
+  border: 1px solid rgba(255, 197, 61, 0.35);
+  border-radius: calc(10 * var(--ds-u));
+  background: rgba(60, 40, 6, 0.35);
+}
+
+.ds-worlds__list {
+  display: grid;
+  gap: calc(8 * var(--ds-u));
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.ds-wrow {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: calc(8 * var(--ds-u)) calc(14 * var(--ds-u));
+  padding: calc(10 * var(--ds-u)) calc(10 * var(--ds-u)) calc(10 * var(--ds-u)) calc(16 * var(--ds-u));
+  border: 1px solid rgba(120, 220, 255, 0.12);
+  border-radius: calc(12 * var(--ds-u));
+  background: linear-gradient(160deg, rgba(20, 34, 56, 0.45), rgba(8, 12, 24, 0.4));
+  transition: border-color 0.16s ease;
+}
+
+.ds-wrow:has(.is-focused) {
+  border-color: rgba(40, 231, 255, 0.45);
+}
+
+.ds-wrow__main {
+  display: grid;
+  gap: calc(4 * var(--ds-u));
+  min-width: 0;
+}
+
+.ds-wrow__name {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: calc(4 * var(--ds-u)) calc(10 * var(--ds-u));
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  overflow-wrap: anywhere;
+}
+
+.ds-wrow__name .ds-lvl__tag {
+  font-size: 0.66em;
+}
+
+.ds-wrow__meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: calc(4 * var(--ds-u)) calc(12 * var(--ds-u));
+  font-size: 0.88em;
+  color: var(--ds-muted);
+}
+
+.ds-wrow__code {
+  color: var(--ds-cyan);
+  letter-spacing: 0.08em;
+}
+
+.ds-wrow__acts {
+  display: flex;
+  gap: calc(6 * var(--ds-u));
+}
+
+.ds-wrow__acts .ds-btn {
+  width: auto;
+  min-width: calc(76 * var(--ds-u));
+  min-height: max(44px, calc(40 * var(--ds-u)));
+  padding: 0 calc(12 * var(--ds-u));
+  font-size: 0.78em;
+  letter-spacing: 0.12em;
+}
+
+.ds-wrow.is-editing .ds-wrow__main {
+  gap: calc(6 * var(--ds-u));
+}
+
+.ds-worlds__empty {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+  gap: calc(16 * var(--ds-u));
+  padding: calc(18 * var(--ds-u)) calc(20 * var(--ds-u));
+  color: var(--ds-muted);
+  border: 1px dashed rgba(120, 220, 255, 0.22);
+  border-radius: calc(12 * var(--ds-u));
+}
+
+.ds-worlds__empty svg {
+  width: calc(64 * var(--ds-u));
+  color: var(--ds-cyan-dim);
+}
+
+.ds-worlds__empty p {
+  margin: 0;
+  line-height: 1.45;
+}
+
+.ds-worlds__empty b {
+  color: var(--ds-text);
+}
+
+.ds-worlds__foot {
+  margin-right: auto;
+  align-self: center;
+}
+
+/* phones and narrow windows: one column, each saved world's buttons on their own row */
+@media (max-width: 760px), (max-height: 500px) {
+  .ds-worlds__start {
+    grid-template-columns: 1fr;
+  }
+
+  .ds-worlds__new {
+    min-height: max(44px, calc(48 * var(--ds-u)));
+  }
+
+  .ds-worlds__new > span {
+    flex-direction: row;
+  }
+
+  .ds-worlds__die {
+    width: 1.3em;
+    height: 1.3em;
+  }
+
+  .ds-wrow {
+    grid-template-columns: 1fr;
+  }
+
+  .ds-wrow__acts {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+
+  .ds-wrow.is-editing .ds-wrow__acts {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .ds-wrow__acts .ds-btn {
+    min-width: 0;
+  }
+}
+
+/* landscape phones: the new-world button and the field share a row, the list scrolls under them */
+@media (max-height: 500px) and (min-width: 540px) {
+  .ds-worlds__start {
+    grid-template-columns: minmax(0, 0.8fr) minmax(0, 1.5fr);
+  }
+
+  .ds-worlds__new {
+    min-height: 0;
+  }
+
+  .ds-worlds__new > span {
+    flex-direction: column;
+    gap: 6px;
+  }
+
+  .ds-worlds__seed {
+    gap: 6px;
+    padding: 8px 10px;
+  }
+
+  .ds-worlds__status {
+    font-size: 0.8em;
+  }
+
+  /* the placeholder already says what goes in: the label stays for screen readers only */
+  .ds-worlds__seed > .ds-label {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+  }
+
+  .ds-worlds__seed {
+    position: relative;
+  }
+
+  .ds-wrow {
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+
+  .ds-wrow__acts {
+    display: flex;
+  }
+
+  .ds-worlds__head {
+    margin-top: 10px;
+  }
+
+  /* short screens: everything above the list on as few lines as it takes, so three saved worlds show at once */
+  .ds-screen:has(.ds-worlds__list) .ds-dialog__title {
+    margin-bottom: 8px;
+    font-size: 18px;
+  }
+
+  .ds-worlds__start {
+    gap: 8px;
+  }
+
+  .ds-worlds__new > span {
+    flex-direction: row;
+    gap: 8px;
+  }
+
+  .ds-worlds__die {
+    width: 1.2em;
+    height: 1.2em;
+  }
+
+  .ds-worlds__seed {
+    padding: 0;
+    border: 0;
+    background: none;
+  }
+
+  /* the placeholder already shows a code: the idle hint only costs a line */
+  .ds-worlds__status[data-tone='idle'] {
+    display: none;
+  }
+
+  .ds-worlds__cap {
+    margin-bottom: 6px;
+    padding: 4px 10px;
+    font-size: 0.74em;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .ds-worlds__list {
+    gap: 6px;
+  }
+
+  .ds-wrow {
+    padding: 4px 6px 4px 12px;
+  }
+
+  .ds-wrow__main {
+    gap: 2px;
+  }
+
+  .ds-wrow__acts .ds-btn {
+    min-height: 40px;
+  }
+
+  /* name, tag and code on two lines at most */
+  .ds-wrow__name {
+    flex-wrap: nowrap;
+    white-space: nowrap;
+  }
+}
+
+/* the shortest phones (iPhone SE landscape): a tighter dialog frame and smaller row buttons */
+@media (max-height: 400px) and (min-width: 540px) {
+  .ds-screen:has(.ds-worlds__list) > .ds-dialog {
+    --ds-dlg-pad: 14px;
+  }
+
+  .ds-screen:has(.ds-worlds__list) > .ds-dialog > .ds-dialog__actions:last-of-type {
+    padding-block: 8px;
+  }
+
+  .ds-worlds__new {
+    font-size: 0.86em;
+  }
+
+  .ds-worlds__head {
+    margin-top: 6px;
+  }
+
+  .ds-wrow__acts .ds-btn {
+    min-width: 0;
+    padding: 0 10px;
+    font-size: 0.7em;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ds-worlds__status.is-nudge {
+    animation: none;
+  }
+}

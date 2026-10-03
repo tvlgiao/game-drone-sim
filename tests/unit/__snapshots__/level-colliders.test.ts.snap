@@ -1,0 +1,4316 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`gameplay geometry is frozen > Night Loft colliders, props, rings, spawn and pilot 1`] = `
+{
+  "bounds": {
+    "kind": "room",
+    "maxAgl": 6,
+  },
+  "colliders": [
+    {
+      "id": "pillar-nw",
+      "shape": {
+        "center": [
+          -4.5,
+          3,
+          -2,
+        ],
+        "halfHeight": 3,
+        "kind": "cylinder",
+        "radius": 0.25,
+      },
+    },
+    {
+      "id": "pillar-sw",
+      "shape": {
+        "center": [
+          -4.5,
+          3,
+          2.5,
+        ],
+        "halfHeight": 3,
+        "kind": "cylinder",
+        "radius": 0.25,
+      },
+    },
+    {
+      "id": "pillar-ne",
+      "shape": {
+        "center": [
+          4.5,
+          3,
+          -2,
+        ],
+        "halfHeight": 3,
+        "kind": "cylinder",
+        "radius": 0.25,
+      },
+    },
+    {
+      "id": "pillar-se",
+      "shape": {
+        "center": [
+          4.5,
+          3,
+          2.5,
+        ],
+        "halfHeight": 3,
+        "kind": "cylinder",
+        "radius": 0.25,
+      },
+    },
+    {
+      "id": "beam-w",
+      "shape": {
+        "center": [
+          -8,
+          5.65,
+          0,
+        ],
+        "half": [
+          0.15,
+          0.2,
+          7,
+        ],
+        "kind": "box",
+        "yaw": 0,
+      },
+    },
+    {
+      "id": "beam-c",
+      "shape": {
+        "center": [
+          0,
+          5.65,
+          0,
+        ],
+        "half": [
+          0.15,
+          0.2,
+          7,
+        ],
+        "kind": "box",
+        "yaw": 0,
+      },
+    },
+    {
+      "id": "beam-e",
+      "shape": {
+        "center": [
+          8,
+          5.65,
+          0,
+        ],
+        "half": [
+          0.15,
+          0.2,
+          7,
+        ],
+        "kind": "box",
+        "yaw": 0,
+      },
+    },
+    {
+      "id": "duct-n",
+      "shape": {
+        "center": [
+          0,
+          5,
+          -6.3,
+        ],
+        "half": [
+          11,
+          0.25,
+          0.25,
+        ],
+        "kind": "box",
+        "yaw": 0,
+      },
+    },
+    {
+      "id": "sofa",
+      "shape": {
+        "center": [
+          6.2,
+          0.425,
+          5.9,
+        ],
+        "half": [
+          1.2,
+          0.425,
+          0.475,
+        ],
+        "kind": "box",
+        "yaw": 3.141593,
+      },
+    },
+    {
+      "id": "coffee-table",
+      "shape": {
+        "center": [
+          3.2,
+          0.21,
+          4.9,
+        ],
+        "half": [
+          0.6,
+          0.21,
+          0.3,
+        ],
+        "kind": "box",
+        "yaw": 0,
+      },
+    },
+    {
+      "id": "tv-wall",
+      "shape": {
+        "center": [
+          6.2,
+          1.825,
+          -6.9,
+        ],
+        "half": [
+          1.1,
+          0.625,
+          0.04,
+        ],
+        "kind": "box",
+        "yaw": 0,
+      },
+    },
+    {
+      "id": "plant-se",
+      "shape": {
+        "center": [
+          10.9,
+          0.65,
+          6.2,
+        ],
+        "half": [
+          0.3,
+          0.65,
+          0.3,
+        ],
+        "kind": "box",
+        "yaw": 0,
+      },
+    },
+    {
+      "id": "shelf-nw",
+      "shape": {
+        "center": [
+          -9,
+          1.1,
+          -6.6,
+        ],
+        "half": [
+          1.1,
+          1.1,
+          0.225,
+        ],
+        "kind": "box",
+        "yaw": 0,
+      },
+    },
+    {
+      "id": "shelf-nc",
+      "shape": {
+        "center": [
+          -1.5,
+          1.1,
+          -6.6,
+        ],
+        "half": [
+          1.1,
+          1.1,
+          0.225,
+        ],
+        "kind": "box",
+        "yaw": 0,
+      },
+    },
+    {
+      "id": "crate-1",
+      "shape": {
+        "center": [
+          8.6,
+          0.4,
+          -1,
+        ],
+        "half": [
+          0.4,
+          0.4,
+          0.4,
+        ],
+        "kind": "box",
+        "yaw": 0.2,
+      },
+    },
+    {
+      "id": "crate-2",
+      "shape": {
+        "center": [
+          8.6,
+          1.2,
+          -1,
+        ],
+        "half": [
+          0.4,
+          0.4,
+          0.4,
+        ],
+        "kind": "box",
+        "yaw": -0.15,
+      },
+    },
+    {
+      "id": "crate-3",
+      "shape": {
+        "center": [
+          9.5,
+          0.4,
+          -1.2,
+        ],
+        "half": [
+          0.4,
+          0.4,
+          0.4,
+        ],
+        "kind": "box",
+        "yaw": 0.05,
+      },
+    },
+    {
+      "id": "crate-4",
+      "shape": {
+        "center": [
+          -10.6,
+          0.4,
+          -2.5,
+        ],
+        "half": [
+          0.4,
+          0.4,
+          0.4,
+        ],
+        "kind": "box",
+        "yaw": 0.3,
+      },
+    },
+    {
+      "id": "lamp-floor-w",
+      "shape": {
+        "center": [
+          -11,
+          0.9,
+          -5,
+        ],
+        "halfHeight": 0.9,
+        "kind": "cylinder",
+        "radius": 0.2,
+      },
+    },
+    {
+      "id": "bulb-0",
+      "shape": {
+        "center": [
+          -1.2,
+          4.4,
+          -2.2,
+        ],
+        "half": [
+          0.07,
+          0.12,
+          0.07,
+        ],
+        "kind": "box",
+      },
+    },
+    {
+      "id": "bulb-1",
+      "shape": {
+        "center": [
+          0,
+          4.1,
+          -2.6,
+        ],
+        "half": [
+          0.07,
+          0.12,
+          0.07,
+        ],
+        "kind": "box",
+      },
+    },
+    {
+      "id": "bulb-2",
+      "shape": {
+        "center": [
+          1.1,
+          4.5,
+          -1.9,
+        ],
+        "half": [
+          0.07,
+          0.12,
+          0.07,
+        ],
+        "kind": "box",
+      },
+    },
+    {
+      "id": "bulb-3",
+      "shape": {
+        "center": [
+          6.5,
+          3.7,
+          4.6,
+        ],
+        "half": [
+          0.07,
+          0.12,
+          0.07,
+        ],
+        "kind": "box",
+      },
+    },
+    {
+      "id": "bulb-4",
+      "shape": {
+        "center": [
+          5.5,
+          3.9,
+          5.1,
+        ],
+        "half": [
+          0.07,
+          0.12,
+          0.07,
+        ],
+        "kind": "box",
+      },
+    },
+    {
+      "id": "bulb-5",
+      "shape": {
+        "center": [
+          -9,
+          4,
+          4.4,
+        ],
+        "half": [
+          0.07,
+          0.12,
+          0.07,
+        ],
+        "kind": "box",
+      },
+    },
+    {
+      "dynamic": "fan",
+      "id": "fan",
+      "shape": {
+        "center": [
+          3.5,
+          5.25,
+          1,
+        ],
+        "halfHeight": 0.04,
+        "kind": "cylinder",
+        "radius": 0.9,
+      },
+    },
+    {
+      "id": "ring-0",
+      "restitution": 0.3,
+      "shape": {
+        "center": [
+          -9,
+          1.5,
+          1,
+        ],
+        "kind": "torus",
+        "majorRadius": 0.82,
+        "normal": [
+          0,
+          0,
+          -1,
+        ],
+        "tubeRadius": 0.07,
+      },
+    },
+    {
+      "id": "ring-1",
+      "restitution": 0.3,
+      "shape": {
+        "center": [
+          -7.5,
+          2.2,
+          -3.8,
+        ],
+        "kind": "torus",
+        "majorRadius": 0.82,
+        "normal": [
+          0.50702,
+          0,
+          -0.861934,
+        ],
+        "tubeRadius": 0.07,
+      },
+    },
+    {
+      "id": "ring-2",
+      "restitution": 0.3,
+      "shape": {
+        "center": [
+          -2,
+          1.3,
+          -5.2,
+        ],
+        "kind": "torus",
+        "majorRadius": 0.82,
+        "normal": [
+          1,
+          0,
+          0,
+        ],
+        "tubeRadius": 0.07,
+      },
+    },
+    {
+      "id": "ring-3",
+      "restitution": 0.3,
+      "shape": {
+        "center": [
+          3,
+          2.6,
+          -4.6,
+        ],
+        "kind": "torus",
+        "majorRadius": 0.82,
+        "normal": [
+          0.990148,
+          0.099015,
+          0.099015,
+        ],
+        "tubeRadius": 0.07,
+      },
+    },
+    {
+      "id": "ring-4",
+      "restitution": 0.3,
+      "shape": {
+        "center": [
+          8.5,
+          3.6,
+          -3.2,
+        ],
+        "kind": "torus",
+        "majorRadius": 0.82,
+        "normal": [
+          0.6,
+          0,
+          0.8,
+        ],
+        "tubeRadius": 0.07,
+      },
+    },
+    {
+      "id": "ring-5",
+      "restitution": 0.3,
+      "shape": {
+        "center": [
+          9.8,
+          1.3,
+          1.8,
+        ],
+        "kind": "torus",
+        "majorRadius": 0.82,
+        "normal": [
+          0,
+          -0.242536,
+          0.970143,
+        ],
+        "tubeRadius": 0.07,
+      },
+    },
+    {
+      "id": "ring-6",
+      "restitution": 0.3,
+      "shape": {
+        "center": [
+          5.6,
+          0.9,
+          3.4,
+        ],
+        "kind": "torus",
+        "majorRadius": 0.82,
+        "normal": [
+          -1,
+          0,
+          0,
+        ],
+        "tubeRadius": 0.07,
+      },
+    },
+    {
+      "id": "ring-7",
+      "restitution": 0.3,
+      "shape": {
+        "center": [
+          1,
+          2,
+          2.8,
+        ],
+        "kind": "torus",
+        "majorRadius": 0.82,
+        "normal": [
+          -0.96225,
+          0.19245,
+          -0.19245,
+        ],
+        "tubeRadius": 0.07,
+      },
+    },
+    {
+      "id": "ring-8",
+      "restitution": 0.3,
+      "shape": {
+        "center": [
+          -3,
+          3,
+          1.2,
+        ],
+        "kind": "torus",
+        "majorRadius": 0.82,
+        "normal": [
+          0,
+          1,
+          0,
+        ],
+        "tubeRadius": 0.07,
+      },
+    },
+    {
+      "id": "ring-9",
+      "restitution": 0.3,
+      "shape": {
+        "center": [
+          -7,
+          4.3,
+          -0.5,
+        ],
+        "kind": "torus",
+        "majorRadius": 0.82,
+        "normal": [
+          -1,
+          0,
+          0,
+        ],
+        "tubeRadius": 0.07,
+      },
+    },
+    {
+      "id": "ring-10",
+      "restitution": 0.3,
+      "shape": {
+        "center": [
+          -10.3,
+          2.2,
+          1.8,
+        ],
+        "kind": "torus",
+        "majorRadius": 0.82,
+        "normal": [
+          0,
+          -0.196116,
+          0.980581,
+        ],
+        "tubeRadius": 0.07,
+      },
+    },
+    {
+      "id": "ring-11",
+      "restitution": 0.3,
+      "shape": {
+        "center": [
+          -6.5,
+          1.4,
+          4.6,
+        ],
+        "kind": "torus",
+        "majorRadius": 0.82,
+        "normal": [
+          1,
+          0,
+          0,
+        ],
+        "tubeRadius": 0.07,
+      },
+    },
+  ],
+  "pilot": [
+    -11.3,
+    1.7,
+    6.5,
+  ],
+  "props": [
+    {
+      "id": "pillar-nw",
+      "kind": "pillar",
+      "position": [
+        -4.5,
+        0,
+        -2,
+      ],
+      "size": [
+        0.5,
+        6,
+        0.5,
+      ],
+      "yaw": 0,
+    },
+    {
+      "id": "pillar-sw",
+      "kind": "pillar",
+      "position": [
+        -4.5,
+        0,
+        2.5,
+      ],
+      "size": [
+        0.5,
+        6,
+        0.5,
+      ],
+      "yaw": 0,
+    },
+    {
+      "id": "pillar-ne",
+      "kind": "pillar",
+      "position": [
+        4.5,
+        0,
+        -2,
+      ],
+      "size": [
+        0.5,
+        6,
+        0.5,
+      ],
+      "yaw": 0,
+    },
+    {
+      "id": "pillar-se",
+      "kind": "pillar",
+      "position": [
+        4.5,
+        0,
+        2.5,
+      ],
+      "size": [
+        0.5,
+        6,
+        0.5,
+      ],
+      "yaw": 0,
+    },
+    {
+      "id": "beam-w",
+      "kind": "beam",
+      "position": [
+        -8,
+        5.45,
+        0,
+      ],
+      "size": [
+        0.3,
+        0.4,
+        14,
+      ],
+      "yaw": 0,
+    },
+    {
+      "id": "beam-c",
+      "kind": "beam",
+      "position": [
+        0,
+        5.45,
+        0,
+      ],
+      "size": [
+        0.3,
+        0.4,
+        14,
+      ],
+      "yaw": 0,
+    },
+    {
+      "id": "beam-e",
+      "kind": "beam",
+      "position": [
+        8,
+        5.45,
+        0,
+      ],
+      "size": [
+        0.3,
+        0.4,
+        14,
+      ],
+      "yaw": 0,
+    },
+    {
+      "id": "duct-n",
+      "kind": "duct",
+      "position": [
+        0,
+        4.75,
+        -6.3,
+      ],
+      "size": [
+        22,
+        0.5,
+        0.5,
+      ],
+      "yaw": 0,
+    },
+    {
+      "id": "sofa",
+      "kind": "sofa",
+      "position": [
+        6.2,
+        0,
+        5.9,
+      ],
+      "size": [
+        2.4,
+        0.85,
+        0.95,
+      ],
+      "yaw": 3.141593,
+    },
+    {
+      "id": "coffee-table",
+      "kind": "table",
+      "position": [
+        3.2,
+        0,
+        4.9,
+      ],
+      "size": [
+        1.2,
+        0.42,
+        0.6,
+      ],
+      "yaw": 0,
+    },
+    {
+      "id": "rug",
+      "kind": "rug",
+      "position": [
+        4.5,
+        0,
+        4.4,
+      ],
+      "size": [
+        4.2,
+        0.01,
+        2.8,
+      ],
+      "yaw": 0,
+    },
+    {
+      "id": "tv-wall",
+      "kind": "tv-wall",
+      "position": [
+        6.2,
+        1.2,
+        -6.9,
+      ],
+      "size": [
+        2.2,
+        1.25,
+        0.08,
+      ],
+      "yaw": 0,
+    },
+    {
+      "id": "plant-se",
+      "kind": "plant",
+      "position": [
+        10.9,
+        0,
+        6.2,
+      ],
+      "size": [
+        0.6,
+        1.3,
+        0.6,
+      ],
+      "yaw": 0,
+    },
+    {
+      "id": "shelf-nw",
+      "kind": "shelf",
+      "position": [
+        -9,
+        0,
+        -6.6,
+      ],
+      "size": [
+        2.2,
+        2.2,
+        0.45,
+      ],
+      "yaw": 0,
+    },
+    {
+      "id": "shelf-nc",
+      "kind": "shelf",
+      "position": [
+        -1.5,
+        0,
+        -6.6,
+      ],
+      "size": [
+        2.2,
+        2.2,
+        0.45,
+      ],
+      "yaw": 0,
+    },
+    {
+      "id": "crate-1",
+      "kind": "crate",
+      "position": [
+        8.6,
+        0,
+        -1,
+      ],
+      "size": [
+        0.8,
+        0.8,
+        0.8,
+      ],
+      "yaw": 0.2,
+    },
+    {
+      "id": "crate-2",
+      "kind": "crate",
+      "position": [
+        8.6,
+        0.8,
+        -1,
+      ],
+      "size": [
+        0.8,
+        0.8,
+        0.8,
+      ],
+      "yaw": -0.15,
+    },
+    {
+      "id": "crate-3",
+      "kind": "crate",
+      "position": [
+        9.5,
+        0,
+        -1.2,
+      ],
+      "size": [
+        0.8,
+        0.8,
+        0.8,
+      ],
+      "yaw": 0.05,
+    },
+    {
+      "id": "crate-4",
+      "kind": "crate",
+      "position": [
+        -10.6,
+        0,
+        -2.5,
+      ],
+      "size": [
+        0.8,
+        0.8,
+        0.8,
+      ],
+      "yaw": 0.3,
+    },
+    {
+      "id": "lamp-floor-w",
+      "kind": "lamp-floor",
+      "position": [
+        -11,
+        0,
+        -5,
+      ],
+      "size": [
+        0.45,
+        1.8,
+        0.45,
+      ],
+      "yaw": 0,
+    },
+    {
+      "id": "bulb-0",
+      "kind": "bulb-hanging",
+      "position": [
+        -1.2,
+        4.3,
+        -2.2,
+      ],
+      "size": [
+        0.14,
+        1.7,
+        0.14,
+      ],
+      "yaw": 0,
+    },
+    {
+      "id": "bulb-1",
+      "kind": "bulb-hanging",
+      "position": [
+        0,
+        4,
+        -2.6,
+      ],
+      "size": [
+        0.14,
+        2,
+        0.14,
+      ],
+      "yaw": 0,
+    },
+    {
+      "id": "bulb-2",
+      "kind": "bulb-hanging",
+      "position": [
+        1.1,
+        4.4,
+        -1.9,
+      ],
+      "size": [
+        0.14,
+        1.6,
+        0.14,
+      ],
+      "yaw": 0,
+    },
+    {
+      "id": "bulb-3",
+      "kind": "bulb-hanging",
+      "position": [
+        6.5,
+        3.6,
+        4.6,
+      ],
+      "size": [
+        0.14,
+        2.4,
+        0.14,
+      ],
+      "yaw": 0,
+    },
+    {
+      "id": "bulb-4",
+      "kind": "bulb-hanging",
+      "position": [
+        5.5,
+        3.8,
+        5.1,
+      ],
+      "size": [
+        0.14,
+        2.2,
+        0.14,
+      ],
+      "yaw": 0,
+    },
+    {
+      "id": "bulb-5",
+      "kind": "bulb-hanging",
+      "position": [
+        -9,
+        3.9,
+        4.4,
+      ],
+      "size": [
+        0.14,
+        2.1,
+        0.14,
+      ],
+      "yaw": 0,
+    },
+    {
+      "id": "fan",
+      "kind": "fan",
+      "position": [
+        3.5,
+        5.25,
+        1,
+      ],
+      "size": [
+        1.8,
+        0.3,
+        1.8,
+      ],
+      "yaw": 0,
+    },
+  ],
+  "rings": [
+    {
+      "direction": [
+        0,
+        0,
+        -1,
+      ],
+      "id": "ring-0",
+      "position": [
+        -9,
+        1.5,
+        1,
+      ],
+      "radius": 0.75,
+      "tube": 0.07,
+    },
+    {
+      "direction": [
+        0.50702,
+        0,
+        -0.861934,
+      ],
+      "id": "ring-1",
+      "position": [
+        -7.5,
+        2.2,
+        -3.8,
+      ],
+      "radius": 0.75,
+      "tube": 0.07,
+    },
+    {
+      "direction": [
+        1,
+        0,
+        0,
+      ],
+      "id": "ring-2",
+      "position": [
+        -2,
+        1.3,
+        -5.2,
+      ],
+      "radius": 0.75,
+      "tube": 0.07,
+    },
+    {
+      "direction": [
+        0.990148,
+        0.099015,
+        0.099015,
+      ],
+      "id": "ring-3",
+      "position": [
+        3,
+        2.6,
+        -4.6,
+      ],
+      "radius": 0.75,
+      "tube": 0.07,
+    },
+    {
+      "direction": [
+        0.6,
+        0,
+        0.8,
+      ],
+      "id": "ring-4",
+      "position": [
+        8.5,
+        3.6,
+        -3.2,
+      ],
+      "radius": 0.75,
+      "tube": 0.07,
+    },
+    {
+      "direction": [
+        0,
+        -0.242536,
+        0.970143,
+      ],
+      "id": "ring-5",
+      "position": [
+        9.8,
+        1.3,
+        1.8,
+      ],
+      "radius": 0.75,
+      "tube": 0.07,
+    },
+    {
+      "direction": [
+        -1,
+        0,
+        0,
+      ],
+      "id": "ring-6",
+      "position": [
+        5.6,
+        0.9,
+        3.4,
+      ],
+      "radius": 0.75,
+      "tube": 0.07,
+    },
+    {
+      "direction": [
+        -0.96225,
+        0.19245,
+        -0.19245,
+      ],
+      "id": "ring-7",
+      "position": [
+        1,
+        2,
+        2.8,
+      ],
+      "radius": 0.75,
+      "tube": 0.07,
+    },
+    {
+      "direction": [
+        0,
+        1,
+        0,
+      ],
+      "id": "ring-8",
+      "position": [
+        -3,
+        3,
+        1.2,
+      ],
+      "radius": 0.75,
+      "tube": 0.07,
+    },
+    {
+      "direction": [
+        -1,
+        0,
+        0,
+      ],
+      "id": "ring-9",
+      "position": [
+        -7,
+        4.3,
+        -0.5,
+      ],
+      "radius": 0.75,
+      "tube": 0.07,
+    },
+    {
+      "direction": [
+        0,
+        -0.196116,
+        0.980581,
+      ],
+      "id": "ring-10",
+      "position": [
+        -10.3,
+        2.2,
+        1.8,
+      ],
+      "radius": 0.75,
+      "tube": 0.07,
+    },
+    {
+      "direction": [
+        1,
+        0,
+        0,
+      ],
+      "id": "ring-11",
+      "position": [
+        -6.5,
+        1.4,
+        4.6,
+      ],
+      "radius": 0.75,
+      "tube": 0.07,
+    },
+  ],
+  "room": {
+    "size": [
+      24,
+      6,
+      14,
+    ],
+    "windows": [
+      {
+        "center": [
+          -6,
+          3.9,
+        ],
+        "size": [
+          3,
+          2.6,
+        ],
+        "wall": "north",
+      },
+      {
+        "center": [
+          2.5,
+          3.9,
+        ],
+        "size": [
+          3,
+          2.6,
+        ],
+        "wall": "north",
+      },
+      {
+        "center": [
+          0,
+          3.2,
+        ],
+        "size": [
+          4.5,
+          3.2,
+        ],
+        "wall": "east",
+      },
+      {
+        "center": [
+          0,
+          3.2,
+        ],
+        "size": [
+          5,
+          3,
+        ],
+        "wall": "south",
+      },
+    ],
+  },
+  "spawn": {
+    "position": [
+      -9,
+      0.06,
+      5.8,
+    ],
+    "yaw": 0,
+  },
+}
+`;
+
+exports[`gameplay geometry is frozen > Training Field colliders, props, rings, spawn and pilot 1`] = `
+{
+  "bounds": {
+    "kind": "rect",
+    "max": [
+      40,
+      40,
+    ],
+    "maxAgl": 40,
+    "min": [
+      -40,
+      -40,
+    ],
+  },
+  "colliders": [
+    {
+      "id": "pole-nw",
+      "shape": {
+        "center": [
+          -40,
+          3,
+          -40,
+        ],
+        "halfHeight": 3,
+        "kind": "cylinder",
+        "radius": 0.12,
+      },
+    },
+    {
+      "id": "pole-ne",
+      "shape": {
+        "center": [
+          40,
+          3,
+          -40,
+        ],
+        "halfHeight": 3,
+        "kind": "cylinder",
+        "radius": 0.12,
+      },
+    },
+    {
+      "id": "pole-sw",
+      "shape": {
+        "center": [
+          -40,
+          3,
+          40,
+        ],
+        "halfHeight": 3,
+        "kind": "cylinder",
+        "radius": 0.12,
+      },
+    },
+    {
+      "id": "pole-se",
+      "shape": {
+        "center": [
+          40,
+          3,
+          40,
+        ],
+        "halfHeight": 3,
+        "kind": "cylinder",
+        "radius": 0.12,
+      },
+    },
+    {
+      "id": "cone-0",
+      "shape": {
+        "center": [
+          -2.6,
+          0.25,
+          30.4,
+        ],
+        "halfHeight": 0.25,
+        "kind": "cylinder",
+        "radius": 0.16,
+      },
+    },
+    {
+      "id": "cone-1",
+      "shape": {
+        "center": [
+          2.6,
+          0.25,
+          30.4,
+        ],
+        "halfHeight": 0.25,
+        "kind": "cylinder",
+        "radius": 0.16,
+      },
+    },
+    {
+      "id": "cone-2",
+      "shape": {
+        "center": [
+          -2.6,
+          0.25,
+          25.5,
+        ],
+        "halfHeight": 0.25,
+        "kind": "cylinder",
+        "radius": 0.16,
+      },
+    },
+    {
+      "id": "cone-3",
+      "shape": {
+        "center": [
+          2.6,
+          0.25,
+          25.5,
+        ],
+        "halfHeight": 0.25,
+        "kind": "cylinder",
+        "radius": 0.16,
+      },
+    },
+    {
+      "id": "cone-4",
+      "shape": {
+        "center": [
+          19.5,
+          0.25,
+          13.5,
+        ],
+        "halfHeight": 0.25,
+        "kind": "cylinder",
+        "radius": 0.16,
+      },
+    },
+    {
+      "id": "cone-5",
+      "shape": {
+        "center": [
+          21,
+          0.25,
+          9,
+        ],
+        "halfHeight": 0.25,
+        "kind": "cylinder",
+        "radius": 0.16,
+      },
+    },
+    {
+      "id": "cone-6",
+      "shape": {
+        "center": [
+          -7,
+          0.25,
+          21,
+        ],
+        "halfHeight": 0.25,
+        "kind": "cylinder",
+        "radius": 0.16,
+      },
+    },
+    {
+      "id": "cone-7",
+      "shape": {
+        "center": [
+          -7.5,
+          0.25,
+          25,
+        ],
+        "halfHeight": 0.25,
+        "kind": "cylinder",
+        "radius": 0.16,
+      },
+    },
+    {
+      "id": "windsock",
+      "shape": {
+        "center": [
+          -24,
+          2.25,
+          30,
+        ],
+        "halfHeight": 2.25,
+        "kind": "cylinder",
+        "radius": 0.05,
+      },
+    },
+    {
+      "id": "tree-0",
+      "shape": {
+        "center": [
+          -0.369652,
+          1.607216,
+          -71.894386,
+        ],
+        "halfHeight": 1.607216,
+        "kind": "cylinder",
+        "radius": 0.25,
+      },
+    },
+    {
+      "id": "tree-0",
+      "shape": {
+        "center": [
+          -0.369652,
+          4.982368,
+          -71.894386,
+        ],
+        "halfHeight": 3.053709,
+        "kind": "cylinder",
+        "radius": 2.290544,
+      },
+    },
+    {
+      "id": "tree-1",
+      "shape": {
+        "center": [
+          7.801702,
+          1.818034,
+          -69.350729,
+        ],
+        "halfHeight": 1.818034,
+        "kind": "cylinder",
+        "radius": 0.25,
+      },
+    },
+    {
+      "id": "tree-1",
+      "shape": {
+        "center": [
+          7.801702,
+          5.635904,
+          -69.350729,
+        ],
+        "halfHeight": 3.454264,
+        "kind": "cylinder",
+        "radius": 2.045727,
+      },
+    },
+    {
+      "id": "tree-2",
+      "shape": {
+        "center": [
+          30.045873,
+          2.322822,
+          -54.52122,
+        ],
+        "halfHeight": 2.322822,
+        "kind": "cylinder",
+        "radius": 0.25,
+      },
+    },
+    {
+      "id": "tree-2",
+      "shape": {
+        "center": [
+          30.045873,
+          7.200748,
+          -54.52122,
+        ],
+        "halfHeight": 4.413361,
+        "kind": "cylinder",
+        "radius": 2.940467,
+      },
+    },
+    {
+      "id": "tree-3",
+      "shape": {
+        "center": [
+          21.014468,
+          2.049632,
+          -51.34932,
+        ],
+        "halfHeight": 2.049632,
+        "kind": "cylinder",
+        "radius": 0.25,
+      },
+    },
+    {
+      "id": "tree-3",
+      "shape": {
+        "center": [
+          21.014468,
+          6.353859,
+          -51.34932,
+        ],
+        "halfHeight": 3.894301,
+        "kind": "cylinder",
+        "radius": 2.786144,
+      },
+    },
+    {
+      "id": "tree-4",
+      "shape": {
+        "center": [
+          58.195236,
+          2.328794,
+          -51.731018,
+        ],
+        "halfHeight": 2.328794,
+        "kind": "cylinder",
+        "radius": 0.25,
+      },
+    },
+    {
+      "id": "tree-4",
+      "shape": {
+        "center": [
+          58.195236,
+          7.219261,
+          -51.731018,
+        ],
+        "halfHeight": 4.424709,
+        "kind": "cylinder",
+        "radius": 2.775309,
+      },
+    },
+    {
+      "id": "tree-5",
+      "shape": {
+        "center": [
+          53.556646,
+          2.314203,
+          -55.614436,
+        ],
+        "halfHeight": 2.314203,
+        "kind": "cylinder",
+        "radius": 0.25,
+      },
+    },
+    {
+      "id": "tree-5",
+      "shape": {
+        "center": [
+          53.556646,
+          7.17403,
+          -55.614436,
+        ],
+        "halfHeight": 4.396986,
+        "kind": "cylinder",
+        "radius": 3.133802,
+      },
+    },
+    {
+      "id": "tree-6",
+      "shape": {
+        "center": [
+          59.656326,
+          1.525916,
+          -45.658262,
+        ],
+        "halfHeight": 1.525916,
+        "kind": "cylinder",
+        "radius": 0.25,
+      },
+    },
+    {
+      "id": "tree-6",
+      "shape": {
+        "center": [
+          59.656326,
+          4.730338,
+          -45.658262,
+        ],
+        "halfHeight": 2.899239,
+        "kind": "cylinder",
+        "radius": 2.094945,
+      },
+    },
+    {
+      "id": "tree-7",
+      "shape": {
+        "center": [
+          54.523913,
+          1.552165,
+          -45.855957,
+        ],
+        "halfHeight": 1.552165,
+        "kind": "cylinder",
+        "radius": 0.25,
+      },
+    },
+    {
+      "id": "tree-7",
+      "shape": {
+        "center": [
+          54.523913,
+          4.81171,
+          -45.855957,
+        ],
+        "halfHeight": 2.949113,
+        "kind": "cylinder",
+        "radius": 1.785221,
+      },
+    },
+    {
+      "id": "tree-8",
+      "shape": {
+        "center": [
+          60.700082,
+          1.579374,
+          -46.344837,
+        ],
+        "halfHeight": 1.579374,
+        "kind": "cylinder",
+        "radius": 0.25,
+      },
+    },
+    {
+      "id": "tree-8",
+      "shape": {
+        "center": [
+          60.700082,
+          4.896061,
+          -46.344837,
+        ],
+        "halfHeight": 3.000811,
+        "kind": "cylinder",
+        "radius": 1.999356,
+      },
+    },
+    {
+      "id": "tree-9",
+      "shape": {
+        "center": [
+          67.627514,
+          1.593182,
+          -19.74127,
+        ],
+        "halfHeight": 1.593182,
+        "kind": "cylinder",
+        "radius": 0.25,
+      },
+    },
+    {
+      "id": "tree-9",
+      "shape": {
+        "center": [
+          67.627514,
+          4.938865,
+          -19.74127,
+        ],
+        "halfHeight": 3.027046,
+        "kind": "cylinder",
+        "radius": 1.983948,
+      },
+    },
+    {
+      "id": "tree-10",
+      "shape": {
+        "center": [
+          71.509057,
+          2.371662,
+          -17.673003,
+        ],
+        "halfHeight": 2.371662,
+        "kind": "cylinder",
+        "radius": 0.25,
+      },
+    },
+    {
+      "id": "tree-10",
+      "shape": {
+        "center": [
+          71.509057,
+          7.352151,
+          -17.673003,
+        ],
+        "halfHeight": 4.506157,
+        "kind": "cylinder",
+        "radius": 3.392381,
+      },
+    },
+    {
+      "id": "tree-11",
+      "shape": {
+        "center": [
+          68.282524,
+          2.142271,
+          -18.721947,
+        ],
+        "halfHeight": 2.142271,
+        "kind": "cylinder",
+        "radius": 0.25,
+      },
+    },
+    {
+      "id": "tree-11",
+      "shape": {
+        "center": [
+          68.282524,
+          6.64104,
+          -18.721947,
+        ],
+        "halfHeight": 4.070315,
+        "kind": "cylinder",
+        "radius": 2.369513,
+      },
+    },
+    {
+      "id": "tree-12",
+      "shape": {
+        "center": [
+          62.871482,
+          1.59273,
+          -19.980496,
+        ],
+        "halfHeight": 1.59273,
+        "kind": "cylinder",
+        "radius": 0.25,
+      },
+    },
+    {
+      "id": "tree-12",
+      "shape": {
+        "center": [
+          62.871482,
+          4.937464,
+          -19.980496,
+        ],
+        "halfHeight": 3.026187,
+        "kind": "cylinder",
+        "radius": 1.830022,
+      },
+    },
+    {
+      "id": "tree-13",
+      "shape": {
+        "center": [
+          75.377235,
+          1.788284,
+          11.668667,
+        ],
+        "halfHeight": 1.788284,
+        "kind": "cylinder",
+        "radius": 0.25,
+      },
+    },
+    {
+      "id": "tree-13",
+      "shape": {
+        "center": [
+          75.377235,
+          5.543681,
+          11.668667,
+        ],
+        "halfHeight": 3.39774,
+        "kind": "cylinder",
+        "radius": 1.889034,
+      },
+    },
+    {
+      "id": "tree-14",
+      "shape": {
+        "center": [
+          80.324188,
+          1.446635,
+          6.741236,
+        ],
+        "halfHeight": 1.446635,
+        "kind": "cylinder",
+        "radius": 0.25,
+      },
+    },
+    {
+      "id": "tree-14",
+      "shape": {
+        "center": [
+          80.324188,
+          4.484568,
+          6.741236,
+        ],
+        "halfHeight": 2.748606,
+        "kind": "cylinder",
+        "radius": 1.668897,
+      },
+    },
+    {
+      "id": "tree-15",
+      "shape": {
+        "center": [
+          77.433986,
+          2.044099,
+          15.534009,
+        ],
+        "halfHeight": 2.044099,
+        "kind": "cylinder",
+        "radius": 0.25,
+      },
+    },
+    {
+      "id": "tree-15",
+      "shape": {
+        "center": [
+          77.433986,
+          6.336706,
+          15.534009,
+        ],
+        "halfHeight": 3.883788,
+        "kind": "cylinder",
+        "radius": 2.300015,
+      },
+    },
+    {
+      "id": "tree-16",
+      "shape": {
+        "center": [
+          60.496506,
+          1.922064,
+          25.704046,
+        ],
+        "halfHeight": 1.922064,
+        "kind": "cylinder",
+        "radius": 0.25,
+      },
+    },
+    {
+      "id": "tree-16",
+      "shape": {
+        "center": [
+          60.496506,
+          5.958399,
+          25.704046,
+        ],
+        "halfHeight": 3.651922,
+        "kind": "cylinder",
+        "radius": 2.073742,
+      },
+    },
+    {
+      "id": "tree-17",
+      "shape": {
+        "center": [
+          62.082867,
+          1.970175,
+          33.221308,
+        ],
+        "halfHeight": 1.970175,
+        "kind": "cylinder",
+        "radius": 0.25,
+      },
+    },
+    {
+      "id": "tree-17",
+      "shape": {
+        "center": [
+          62.082867,
+          6.107543,
+          33.221308,
+        ],
+        "halfHeight": 3.743333,
+        "kind": "cylinder",
+        "radius": 2.675708,
+      },
+    },
+    {
+      "id": "tree-18",
+      "shape": {
+        "center": [
+          64.730754,
+          1.787692,
+          22.823106,
+        ],
+        "halfHeight": 1.787692,
+        "kind": "cylinder",
+        "radius": 0.25,
+      },
+    },
+    {
+      "id": "tree-18",
+      "shape": {
+        "center": [
+          64.730754,
+          5.541846,
+          22.823106,
+        ],
+        "halfHeight": 3.396615,
+        "kind": "cylinder",
+        "radius": 2.549292,
+      },
+    },
+    {
+      "id": "tree-19",
+      "shape": {
+        "center": [
+          63.316842,
+          1.517817,
+          24.220273,
+        ],
+        "halfHeight": 1.517817,
+        "kind": "cylinder",
+        "radius": 0.25,
+      },
+    },
+    {
+      "id": "tree-19",
+      "shape": {
+        "center": [
+          63.316842,
+          4.705233,
+          24.220273,
+        ],
+        "halfHeight": 2.883853,
+        "kind": "cylinder",
+        "radius": 2.010911,
+      },
+    },
+    {
+      "id": "tree-20",
+      "shape": {
+        "center": [
+          69.529509,
+          2.593095,
+          54.842882,
+        ],
+        "halfHeight": 2.593095,
+        "kind": "cylinder",
+        "radius": 0.25,
+      },
+    },
+    {
+      "id": "tree-20",
+      "shape": {
+        "center": [
+          69.529509,
+          8.038595,
+          54.842882,
+        ],
+        "halfHeight": 4.926881,
+        "kind": "cylinder",
+        "radius": 2.760335,
+      },
+    },
+    {
+      "id": "tree-21",
+      "shape": {
+        "center": [
+          63.169537,
+          2.304177,
+          49.157524,
+        ],
+        "halfHeight": 2.304177,
+        "kind": "cylinder",
+        "radius": 0.25,
+      },
+    },
+    {
+      "id": "tree-21",
+      "shape": {
+        "center": [
+          63.169537,
+          7.142948,
+          49.157524,
+        ],
+        "halfHeight": 4.377936,
+        "kind": "cylinder",
+        "radius": 2.586645,
+      },
+    },
+    {
+      "id": "tree-22",
+      "shape": {
+        "center": [
+          63.810838,
+          1.523305,
+          48.056381,
+        ],
+        "halfHeight": 1.523305,
+        "kind": "cylinder",
+        "radius": 0.25,
+      },
+    },
+    {
+      "id": "tree-22",
+      "shape": {
+        "center": [
+          63.810838,
+          4.722246,
+          48.056381,
+        ],
+        "halfHeight": 2.89428,
+        "kind": "cylinder",
+        "radius": 2.168864,
+      },
+    },
+    {
+      "id": "tree-23",
+      "shape": {
+        "center": [
+          64.097442,
+          1.665278,
+          48.430062,
+        ],
+        "halfHeight": 1.665278,
+        "kind": "cylinder",
+        "radius": 0.25,
+      },
+    },
+    {
+      "id": "tree-23",
+      "shape": {
+        "center": [
+          64.097442,
+          5.162362,
+          48.430062,
+        ],
+        "halfHeight": 3.164028,
+        "kind": "cylinder",
+        "radius": 1.815044,
+      },
+    },
+    {
+      "id": "tree-24",
+      "shape": {
+        "center": [
+          57.032168,
+          1.389518,
+          46.746903,
+        ],
+        "halfHeight": 1.389518,
+        "kind": "cylinder",
+        "radius": 0.25,
+      },
+    },
+    {
+      "id": "tree-24",
+      "shape": {
+        "center": [
+          57.032168,
+          4.307506,
+          46.746903,
+        ],
+        "halfHeight": 2.640085,
+        "kind": "cylinder",
+        "radius": 1.731451,
+      },
+    },
+    {
+      "id": "tree-25",
+      "shape": {
+        "center": [
+          26.545757,
+          1.774594,
+          50.845386,
+        ],
+        "halfHeight": 1.774594,
+        "kind": "cylinder",
+        "radius": 0.25,
+      },
+    },
+    {
+      "id": "tree-25",
+      "shape": {
+        "center": [
+          26.545757,
+          5.50124,
+          50.845386,
+        ],
+        "halfHeight": 3.371728,
+        "kind": "cylinder",
+        "radius": 2.010714,
+      },
+    },
+    {
+      "id": "tree-26",
+      "shape": {
+        "center": [
+          28.47298,
+          2.567686,
+          59.836534,
+        ],
+        "halfHeight": 2.567686,
+        "kind": "cylinder",
+        "radius": 0.25,
+      },
+    },
+    {
+      "id": "tree-26",
+      "shape": {
+        "center": [
+          28.47298,
+          7.959826,
+          59.836534,
+        ],
+        "halfHeight": 4.878603,
+        "kind": "cylinder",
+        "radius": 3.114943,
+      },
+    },
+    {
+      "id": "tree-27",
+      "shape": {
+        "center": [
+          24.634887,
+          2.517189,
+          51.847036,
+        ],
+        "halfHeight": 2.517189,
+        "kind": "cylinder",
+        "radius": 0.25,
+      },
+    },
+    {
+      "id": "tree-27",
+      "shape": {
+        "center": [
+          24.634887,
+          7.803286,
+          51.847036,
+        ],
+        "halfHeight": 4.782659,
+        "kind": "cylinder",
+        "radius": 3.1893,
+      },
+    },
+    {
+      "id": "tree-28",
+      "shape": {
+        "center": [
+          19.490367,
+          1.790489,
+          61.937492,
+        ],
+        "halfHeight": 1.790489,
+        "kind": "cylinder",
+        "radius": 0.25,
+      },
+    },
+    {
+      "id": "tree-28",
+      "shape": {
+        "center": [
+          19.490367,
+          5.550516,
+          61.937492,
+        ],
+        "halfHeight": 3.401929,
+        "kind": "cylinder",
+        "radius": 2.405385,
+      },
+    },
+    {
+      "id": "tree-29",
+      "shape": {
+        "center": [
+          22.455021,
+          1.702053,
+          54.448555,
+        ],
+        "halfHeight": 1.702053,
+        "kind": "cylinder",
+        "radius": 0.25,
+      },
+    },
+    {
+      "id": "tree-29",
+      "shape": {
+        "center": [
+          22.455021,
+          5.276365,
+          54.448555,
+        ],
+        "halfHeight": 3.233901,
+        "kind": "cylinder",
+        "radius": 2.220872,
+      },
+    },
+    {
+      "id": "tree-30",
+      "shape": {
+        "center": [
+          0.87665,
+          2.488851,
+          81.41609,
+        ],
+        "halfHeight": 2.488851,
+        "kind": "cylinder",
+        "radius": 0.25,
+      },
+    },
+    {
+      "id": "tree-30",
+      "shape": {
+        "center": [
+          0.87665,
+          7.715437,
+          81.41609,
+        ],
+        "halfHeight": 4.728816,
+        "kind": "cylinder",
+        "radius": 2.69673,
+      },
+    },
+    {
+      "id": "tree-31",
+      "shape": {
+        "center": [
+          -4.968521,
+          2.005704,
+          76.163125,
+        ],
+        "halfHeight": 2.005704,
+        "kind": "cylinder",
+        "radius": 0.25,
+      },
+    },
+    {
+      "id": "tree-31",
+      "shape": {
+        "center": [
+          -4.968521,
+          6.217683,
+          76.163125,
+        ],
+        "halfHeight": 3.810838,
+        "kind": "cylinder",
+        "radius": 2.17198,
+      },
+    },
+    {
+      "id": "tree-32",
+      "shape": {
+        "center": [
+          -1.559563,
+          1.419919,
+          74.678861,
+        ],
+        "halfHeight": 1.419919,
+        "kind": "cylinder",
+        "radius": 0.25,
+      },
+    },
+    {
+      "id": "tree-32",
+      "shape": {
+        "center": [
+          -1.559563,
+          4.40175,
+          74.678861,
+        ],
+        "halfHeight": 2.697847,
+        "kind": "cylinder",
+        "radius": 2.019629,
+      },
+    },
+    {
+      "id": "tree-33",
+      "shape": {
+        "center": [
+          -3.283266,
+          2.362309,
+          78.40121,
+        ],
+        "halfHeight": 2.362309,
+        "kind": "cylinder",
+        "radius": 0.25,
+      },
+    },
+    {
+      "id": "tree-33",
+      "shape": {
+        "center": [
+          -3.283266,
+          7.323158,
+          78.40121,
+        ],
+        "halfHeight": 4.488387,
+        "kind": "cylinder",
+        "radius": 2.715869,
+      },
+    },
+    {
+      "id": "tree-34",
+      "shape": {
+        "center": [
+          -5.127686,
+          2.429207,
+          84.818179,
+        ],
+        "halfHeight": 2.429207,
+        "kind": "cylinder",
+        "radius": 0.25,
+      },
+    },
+    {
+      "id": "tree-34",
+      "shape": {
+        "center": [
+          -5.127686,
+          7.530543,
+          84.818179,
+        ],
+        "halfHeight": 4.615494,
+        "kind": "cylinder",
+        "radius": 2.64356,
+      },
+    },
+    {
+      "id": "tree-35",
+      "shape": {
+        "center": [
+          -22.772645,
+          2.218493,
+          60.691612,
+        ],
+        "halfHeight": 2.218493,
+        "kind": "cylinder",
+        "radius": 0.25,
+      },
+    },
+    {
+      "id": "tree-35",
+      "shape": {
+        "center": [
+          -22.772645,
+          6.877329,
+          60.691612,
+        ],
+        "halfHeight": 4.215137,
+        "kind": "cylinder",
+        "radius": 2.657541,
+      },
+    },
+    {
+      "id": "tree-36",
+      "shape": {
+        "center": [
+          -22.538458,
+          1.907975,
+          56.525333,
+        ],
+        "halfHeight": 1.907975,
+        "kind": "cylinder",
+        "radius": 0.25,
+      },
+    },
+    {
+      "id": "tree-36",
+      "shape": {
+        "center": [
+          -22.538458,
+          5.914724,
+          56.525333,
+        ],
+        "halfHeight": 3.625153,
+        "kind": "cylinder",
+        "radius": 2.09393,
+      },
+    },
+    {
+      "id": "tree-37",
+      "shape": {
+        "center": [
+          -15.350821,
+          1.399068,
+          48.733109,
+        ],
+        "halfHeight": 1.399068,
+        "kind": "cylinder",
+        "radius": 0.25,
+      },
+    },
+    {
+      "id": "tree-37",
+      "shape": {
+        "center": [
+          -15.350821,
+          4.337112,
+          48.733109,
+        ],
+        "halfHeight": 2.65823,
+        "kind": "cylinder",
+        "radius": 1.804842,
+      },
+    },
+    {
+      "id": "tree-38",
+      "shape": {
+        "center": [
+          -22.645244,
+          1.308623,
+          61.791856,
+        ],
+        "halfHeight": 1.308623,
+        "kind": "cylinder",
+        "radius": 0.25,
+      },
+    },
+    {
+      "id": "tree-38",
+      "shape": {
+        "center": [
+          -22.645244,
+          4.056733,
+          61.791856,
+        ],
+        "halfHeight": 2.486385,
+        "kind": "cylinder",
+        "radius": 1.62917,
+      },
+    },
+    {
+      "id": "tree-39",
+      "shape": {
+        "center": [
+          -44.499918,
+          1.959106,
+          51.995686,
+        ],
+        "halfHeight": 1.959106,
+        "kind": "cylinder",
+        "radius": 0.25,
+      },
+    },
+    {
+      "id": "tree-39",
+      "shape": {
+        "center": [
+          -44.499918,
+          6.073229,
+          51.995686,
+        ],
+        "halfHeight": 3.722302,
+        "kind": "cylinder",
+        "radius": 2.243795,
+      },
+    },
+    {
+      "id": "tree-40",
+      "shape": {
+        "center": [
+          -47.168275,
+          2.263996,
+          50.668147,
+        ],
+        "halfHeight": 2.263996,
+        "kind": "cylinder",
+        "radius": 0.25,
+      },
+    },
+    {
+      "id": "tree-40",
+      "shape": {
+        "center": [
+          -47.168275,
+          7.018386,
+          50.668147,
+        ],
+        "halfHeight": 4.301592,
+        "kind": "cylinder",
+        "radius": 2.890791,
+      },
+    },
+    {
+      "id": "tree-41",
+      "shape": {
+        "center": [
+          -70.882119,
+          1.865849,
+          36.51294,
+        ],
+        "halfHeight": 1.865849,
+        "kind": "cylinder",
+        "radius": 0.25,
+      },
+    },
+    {
+      "id": "tree-41",
+      "shape": {
+        "center": [
+          -70.882119,
+          5.784132,
+          36.51294,
+        ],
+        "halfHeight": 3.545113,
+        "kind": "cylinder",
+        "radius": 2.434907,
+      },
+    },
+    {
+      "id": "tree-42",
+      "shape": {
+        "center": [
+          -74.712921,
+          1.695317,
+          35.229024,
+        ],
+        "halfHeight": 1.695317,
+        "kind": "cylinder",
+        "radius": 0.25,
+      },
+    },
+    {
+      "id": "tree-42",
+      "shape": {
+        "center": [
+          -74.712921,
+          5.255482,
+          35.229024,
+        ],
+        "halfHeight": 3.221102,
+        "kind": "cylinder",
+        "radius": 1.94837,
+      },
+    },
+    {
+      "id": "tree-43",
+      "shape": {
+        "center": [
+          -84.79522,
+          1.419903,
+          6.992753,
+        ],
+        "halfHeight": 1.419903,
+        "kind": "cylinder",
+        "radius": 0.25,
+      },
+    },
+    {
+      "id": "tree-43",
+      "shape": {
+        "center": [
+          -84.79522,
+          4.4017,
+          6.992753,
+        ],
+        "halfHeight": 2.697816,
+        "kind": "cylinder",
+        "radius": 1.576817,
+      },
+    },
+    {
+      "id": "tree-44",
+      "shape": {
+        "center": [
+          -81.837003,
+          2.365093,
+          5.684503,
+        ],
+        "halfHeight": 2.365093,
+        "kind": "cylinder",
+        "radius": 0.25,
+      },
+    },
+    {
+      "id": "tree-44",
+      "shape": {
+        "center": [
+          -81.837003,
+          7.331789,
+          5.684503,
+        ],
+        "halfHeight": 4.493677,
+        "kind": "cylinder",
+        "radius": 2.707584,
+      },
+    },
+    {
+      "id": "tree-45",
+      "shape": {
+        "center": [
+          -77.917033,
+          1.755783,
+          2.053452,
+        ],
+        "halfHeight": 1.755783,
+        "kind": "cylinder",
+        "radius": 0.25,
+      },
+    },
+    {
+      "id": "tree-45",
+      "shape": {
+        "center": [
+          -77.917033,
+          5.442928,
+          2.053452,
+        ],
+        "halfHeight": 3.335988,
+        "kind": "cylinder",
+        "radius": 2.425213,
+      },
+    },
+    {
+      "id": "tree-46",
+      "shape": {
+        "center": [
+          -79.841222,
+          2.10955,
+          5.378599,
+        ],
+        "halfHeight": 2.10955,
+        "kind": "cylinder",
+        "radius": 0.25,
+      },
+    },
+    {
+      "id": "tree-46",
+      "shape": {
+        "center": [
+          -79.841222,
+          6.539604,
+          5.378599,
+        ],
+        "halfHeight": 4.008144,
+        "kind": "cylinder",
+        "radius": 2.647994,
+      },
+    },
+    {
+      "id": "tree-47",
+      "shape": {
+        "center": [
+          -82.598961,
+          2.135134,
+          5.882631,
+        ],
+        "halfHeight": 2.135134,
+        "kind": "cylinder",
+        "radius": 0.25,
+      },
+    },
+    {
+      "id": "tree-47",
+      "shape": {
+        "center": [
+          -82.598961,
+          6.618915,
+          5.882631,
+        ],
+        "halfHeight": 4.056754,
+        "kind": "cylinder",
+        "radius": 2.317653,
+      },
+    },
+    {
+      "id": "tree-48",
+      "shape": {
+        "center": [
+          -66.110984,
+          2.412644,
+          -17.44626,
+        ],
+        "halfHeight": 2.412644,
+        "kind": "cylinder",
+        "radius": 0.25,
+      },
+    },
+    {
+      "id": "tree-48",
+      "shape": {
+        "center": [
+          -66.110984,
+          7.479197,
+          -17.44626,
+        ],
+        "halfHeight": 4.584024,
+        "kind": "cylinder",
+        "radius": 2.697656,
+      },
+    },
+    {
+      "id": "tree-49",
+      "shape": {
+        "center": [
+          -71.924934,
+          2.194091,
+          -16.286508,
+        ],
+        "halfHeight": 2.194091,
+        "kind": "cylinder",
+        "radius": 0.25,
+      },
+    },
+    {
+      "id": "tree-49",
+      "shape": {
+        "center": [
+          -71.924934,
+          6.801683,
+          -16.286508,
+        ],
+        "halfHeight": 4.168773,
+        "kind": "cylinder",
+        "radius": 2.427598,
+      },
+    },
+    {
+      "id": "tree-50",
+      "shape": {
+        "center": [
+          -66.279618,
+          1.213021,
+          -14.899257,
+        ],
+        "halfHeight": 1.213021,
+        "kind": "cylinder",
+        "radius": 0.25,
+      },
+    },
+    {
+      "id": "tree-50",
+      "shape": {
+        "center": [
+          -66.279618,
+          3.760366,
+          -14.899257,
+        ],
+        "halfHeight": 2.30474,
+        "kind": "cylinder",
+        "radius": 1.291972,
+      },
+    },
+    {
+      "id": "tree-51",
+      "shape": {
+        "center": [
+          -62.688252,
+          1.279642,
+          -22.161142,
+        ],
+        "halfHeight": 1.279642,
+        "kind": "cylinder",
+        "radius": 0.25,
+      },
+    },
+    {
+      "id": "tree-51",
+      "shape": {
+        "center": [
+          -62.688252,
+          3.966891,
+          -22.161142,
+        ],
+        "halfHeight": 2.43132,
+        "kind": "cylinder",
+        "radius": 1.397593,
+      },
+    },
+    {
+      "id": "tree-52",
+      "shape": {
+        "center": [
+          -66.716319,
+          2.294823,
+          -15.577003,
+        ],
+        "halfHeight": 2.294823,
+        "kind": "cylinder",
+        "radius": 0.25,
+      },
+    },
+    {
+      "id": "tree-52",
+      "shape": {
+        "center": [
+          -66.716319,
+          7.11395,
+          -15.577003,
+        ],
+        "halfHeight": 4.360163,
+        "kind": "cylinder",
+        "radius": 2.684009,
+      },
+    },
+    {
+      "id": "tree-53",
+      "shape": {
+        "center": [
+          -50.165285,
+          1.407193,
+          -30.70219,
+        ],
+        "halfHeight": 1.407193,
+        "kind": "cylinder",
+        "radius": 0.25,
+      },
+    },
+    {
+      "id": "tree-53",
+      "shape": {
+        "center": [
+          -50.165285,
+          4.362298,
+          -30.70219,
+        ],
+        "halfHeight": 2.673667,
+        "kind": "cylinder",
+        "radius": 2.018541,
+      },
+    },
+    {
+      "id": "tree-54",
+      "shape": {
+        "center": [
+          -42.404795,
+          1.746436,
+          -67.497988,
+        ],
+        "halfHeight": 1.746436,
+        "kind": "cylinder",
+        "radius": 0.25,
+      },
+    },
+    {
+      "id": "tree-54",
+      "shape": {
+        "center": [
+          -42.404795,
+          5.413952,
+          -67.497988,
+        ],
+        "halfHeight": 3.318229,
+        "kind": "cylinder",
+        "radius": 2.308816,
+      },
+    },
+    {
+      "id": "tree-55",
+      "shape": {
+        "center": [
+          -45.59921,
+          2.506833,
+          -74.773919,
+        ],
+        "halfHeight": 2.506833,
+        "kind": "cylinder",
+        "radius": 0.25,
+      },
+    },
+    {
+      "id": "tree-55",
+      "shape": {
+        "center": [
+          -45.59921,
+          7.771184,
+          -74.773919,
+        ],
+        "halfHeight": 4.762984,
+        "kind": "cylinder",
+        "radius": 3.063891,
+      },
+    },
+    {
+      "id": "tree-56",
+      "shape": {
+        "center": [
+          -47.538763,
+          1.791922,
+          -70.17362,
+        ],
+        "halfHeight": 1.791922,
+        "kind": "cylinder",
+        "radius": 0.25,
+      },
+    },
+    {
+      "id": "tree-56",
+      "shape": {
+        "center": [
+          -47.538763,
+          5.554957,
+          -70.17362,
+        ],
+        "halfHeight": 3.404651,
+        "kind": "cylinder",
+        "radius": 2.43713,
+      },
+    },
+    {
+      "id": "tree-57",
+      "shape": {
+        "center": [
+          -42.051542,
+          2.017464,
+          -71.999975,
+        ],
+        "halfHeight": 2.017464,
+        "kind": "cylinder",
+        "radius": 0.25,
+      },
+    },
+    {
+      "id": "tree-57",
+      "shape": {
+        "center": [
+          -42.051542,
+          6.254139,
+          -71.999975,
+        ],
+        "halfHeight": 3.833182,
+        "kind": "cylinder",
+        "radius": 2.666153,
+      },
+    },
+    {
+      "id": "tree-58",
+      "shape": {
+        "center": [
+          -7.863916,
+          2.310273,
+          -74.639862,
+        ],
+        "halfHeight": 2.310273,
+        "kind": "cylinder",
+        "radius": 0.25,
+      },
+    },
+    {
+      "id": "tree-58",
+      "shape": {
+        "center": [
+          -7.863916,
+          7.161847,
+          -74.639862,
+        ],
+        "halfHeight": 4.389519,
+        "kind": "cylinder",
+        "radius": 2.644681,
+      },
+    },
+    {
+      "id": "tree-59",
+      "shape": {
+        "center": [
+          -9.738977,
+          2.08913,
+          -74.254787,
+        ],
+        "halfHeight": 2.08913,
+        "kind": "cylinder",
+        "radius": 0.25,
+      },
+    },
+    {
+      "id": "tree-59",
+      "shape": {
+        "center": [
+          -9.738977,
+          6.476304,
+          -74.254787,
+        ],
+        "halfHeight": 3.969348,
+        "kind": "cylinder",
+        "radius": 2.86915,
+      },
+    },
+    {
+      "id": "ring-0",
+      "restitution": 0.3,
+      "shape": {
+        "center": [
+          0,
+          3,
+          22,
+        ],
+        "kind": "torus",
+        "majorRadius": 1.35,
+        "normal": [
+          0,
+          0,
+          -1,
+        ],
+        "tubeRadius": 0.1,
+      },
+    },
+    {
+      "id": "ring-1",
+      "restitution": 0.3,
+      "shape": {
+        "center": [
+          14,
+          4,
+          8,
+        ],
+        "kind": "torus",
+        "majorRadius": 1.35,
+        "normal": [
+          -0.707107,
+          0,
+          -0.707107,
+        ],
+        "tubeRadius": 0.1,
+      },
+    },
+    {
+      "id": "ring-2",
+      "restitution": 0.3,
+      "shape": {
+        "center": [
+          -4,
+          3,
+          28,
+        ],
+        "kind": "torus",
+        "majorRadius": 1.35,
+        "normal": [
+          0,
+          0,
+          1,
+        ],
+        "tubeRadius": 0.1,
+      },
+    },
+  ],
+  "pilot": [
+    0,
+    1.7,
+    36,
+  ],
+  "props": [
+    {
+      "id": "pad",
+      "kind": "pad",
+      "position": [
+        0,
+        0,
+        33,
+      ],
+      "size": [
+        5,
+        0.01,
+        5,
+      ],
+      "yaw": 0,
+    },
+    {
+      "id": "pole-nw",
+      "kind": "pole",
+      "position": [
+        -40,
+        0,
+        -40,
+      ],
+      "size": [
+        0.24,
+        6,
+        0.24,
+      ],
+      "yaw": 0,
+    },
+    {
+      "id": "pole-ne",
+      "kind": "pole",
+      "position": [
+        40,
+        0,
+        -40,
+      ],
+      "size": [
+        0.24,
+        6,
+        0.24,
+      ],
+      "yaw": 0,
+    },
+    {
+      "id": "pole-sw",
+      "kind": "pole",
+      "position": [
+        -40,
+        0,
+        40,
+      ],
+      "size": [
+        0.24,
+        6,
+        0.24,
+      ],
+      "yaw": 0,
+    },
+    {
+      "id": "pole-se",
+      "kind": "pole",
+      "position": [
+        40,
+        0,
+        40,
+      ],
+      "size": [
+        0.24,
+        6,
+        0.24,
+      ],
+      "yaw": 0,
+    },
+    {
+      "id": "cone-0",
+      "kind": "cone",
+      "position": [
+        -2.6,
+        0,
+        30.4,
+      ],
+      "size": [
+        0.36,
+        0.5,
+        0.36,
+      ],
+      "yaw": 0,
+    },
+    {
+      "id": "cone-1",
+      "kind": "cone",
+      "position": [
+        2.6,
+        0,
+        30.4,
+      ],
+      "size": [
+        0.36,
+        0.5,
+        0.36,
+      ],
+      "yaw": 0,
+    },
+    {
+      "id": "cone-2",
+      "kind": "cone",
+      "position": [
+        -2.6,
+        0,
+        25.5,
+      ],
+      "size": [
+        0.36,
+        0.5,
+        0.36,
+      ],
+      "yaw": 0,
+    },
+    {
+      "id": "cone-3",
+      "kind": "cone",
+      "position": [
+        2.6,
+        0,
+        25.5,
+      ],
+      "size": [
+        0.36,
+        0.5,
+        0.36,
+      ],
+      "yaw": 0,
+    },
+    {
+      "id": "cone-4",
+      "kind": "cone",
+      "position": [
+        19.5,
+        0,
+        13.5,
+      ],
+      "size": [
+        0.36,
+        0.5,
+        0.36,
+      ],
+      "yaw": 0,
+    },
+    {
+      "id": "cone-5",
+      "kind": "cone",
+      "position": [
+        21,
+        0,
+        9,
+      ],
+      "size": [
+        0.36,
+        0.5,
+        0.36,
+      ],
+      "yaw": 0,
+    },
+    {
+      "id": "cone-6",
+      "kind": "cone",
+      "position": [
+        -7,
+        0,
+        21,
+      ],
+      "size": [
+        0.36,
+        0.5,
+        0.36,
+      ],
+      "yaw": 0,
+    },
+    {
+      "id": "cone-7",
+      "kind": "cone",
+      "position": [
+        -7.5,
+        0,
+        25,
+      ],
+      "size": [
+        0.36,
+        0.5,
+        0.36,
+      ],
+      "yaw": 0,
+    },
+    {
+      "id": "windsock",
+      "kind": "windsock",
+      "position": [
+        -24,
+        0,
+        30,
+      ],
+      "size": [
+        0.1,
+        4.5,
+        0.1,
+      ],
+      "yaw": 0,
+    },
+    {
+      "id": "hill-w",
+      "kind": "hill",
+      "position": [
+        -230,
+        0,
+        -390,
+      ],
+      "size": [
+        380,
+        62,
+        240,
+      ],
+      "yaw": 0,
+    },
+    {
+      "id": "hill-e",
+      "kind": "hill",
+      "position": [
+        250,
+        0,
+        -350,
+      ],
+      "size": [
+        420,
+        84,
+        260,
+      ],
+      "yaw": 0.4,
+    },
+    {
+      "id": "tree-0",
+      "kind": "tree",
+      "position": [
+        -0.369652,
+        0,
+        -71.894386,
+      ],
+      "size": [
+        4.581087,
+        8.036078,
+        4.581087,
+      ],
+      "yaw": 5.41957,
+    },
+    {
+      "id": "tree-1",
+      "kind": "tree",
+      "position": [
+        7.801702,
+        0,
+        -69.350729,
+      ],
+      "size": [
+        4.091455,
+        9.090168,
+        4.091455,
+      ],
+      "yaw": 1.214118,
+    },
+    {
+      "id": "tree-2",
+      "kind": "tree",
+      "position": [
+        30.045873,
+        0,
+        -54.52122,
+      ],
+      "size": [
+        5.880934,
+        11.614109,
+        5.880934,
+      ],
+      "yaw": 0.931351,
+    },
+    {
+      "id": "tree-3",
+      "kind": "tree",
+      "position": [
+        21.014468,
+        0,
+        -51.34932,
+      ],
+      "size": [
+        5.572288,
+        10.24816,
+        5.572288,
+      ],
+      "yaw": 3.38298,
+    },
+    {
+      "id": "tree-4",
+      "kind": "tree",
+      "position": [
+        58.195236,
+        0,
+        -51.731018,
+      ],
+      "size": [
+        5.550618,
+        11.64397,
+        5.550618,
+      ],
+      "yaw": 5.346083,
+    },
+    {
+      "id": "tree-5",
+      "kind": "tree",
+      "position": [
+        53.556646,
+        0,
+        -55.614436,
+      ],
+      "size": [
+        6.267605,
+        11.571016,
+        6.267605,
+      ],
+      "yaw": 0.571825,
+    },
+    {
+      "id": "tree-6",
+      "kind": "tree",
+      "position": [
+        59.656326,
+        0,
+        -45.658262,
+      ],
+      "size": [
+        4.189889,
+        7.629578,
+        4.189889,
+      ],
+      "yaw": 2.500979,
+    },
+    {
+      "id": "tree-7",
+      "kind": "tree",
+      "position": [
+        54.523913,
+        0,
+        -45.855957,
+      ],
+      "size": [
+        3.570442,
+        7.760823,
+        3.570442,
+      ],
+      "yaw": 3.04407,
+    },
+    {
+      "id": "tree-8",
+      "kind": "tree",
+      "position": [
+        60.700082,
+        0,
+        -46.344837,
+      ],
+      "size": [
+        3.998711,
+        7.896872,
+        3.998711,
+      ],
+      "yaw": 2.404697,
+    },
+    {
+      "id": "tree-9",
+      "kind": "tree",
+      "position": [
+        67.627514,
+        0,
+        -19.74127,
+      ],
+      "size": [
+        3.967896,
+        7.965911,
+        3.967896,
+      ],
+      "yaw": 0.360494,
+    },
+    {
+      "id": "tree-10",
+      "kind": "tree",
+      "position": [
+        71.509057,
+        0,
+        -17.673003,
+      ],
+      "size": [
+        6.784763,
+        11.858308,
+        6.784763,
+      ],
+      "yaw": 4.681804,
+    },
+    {
+      "id": "tree-11",
+      "kind": "tree",
+      "position": [
+        68.282524,
+        0,
+        -18.721947,
+      ],
+      "size": [
+        4.739027,
+        10.711355,
+        4.739027,
+      ],
+      "yaw": 5.985614,
+    },
+    {
+      "id": "tree-12",
+      "kind": "tree",
+      "position": [
+        62.871482,
+        0,
+        -19.980496,
+      ],
+      "size": [
+        3.660043,
+        7.963651,
+        3.660043,
+      ],
+      "yaw": 3.396564,
+    },
+    {
+      "id": "tree-13",
+      "kind": "tree",
+      "position": [
+        75.377235,
+        0,
+        11.668667,
+      ],
+      "size": [
+        3.778068,
+        8.941421,
+        3.778068,
+      ],
+      "yaw": 1.075459,
+    },
+    {
+      "id": "tree-14",
+      "kind": "tree",
+      "position": [
+        80.324188,
+        0,
+        6.741236,
+      ],
+      "size": [
+        3.337793,
+        7.233174,
+        3.337793,
+      ],
+      "yaw": 5.328602,
+    },
+    {
+      "id": "tree-15",
+      "kind": "tree",
+      "position": [
+        77.433986,
+        0,
+        15.534009,
+      ],
+      "size": [
+        4.60003,
+        10.220493,
+        4.60003,
+      ],
+      "yaw": 4.062407,
+    },
+    {
+      "id": "tree-16",
+      "kind": "tree",
+      "position": [
+        60.496506,
+        0,
+        25.704046,
+      ],
+      "size": [
+        4.147484,
+        9.610321,
+        4.147484,
+      ],
+      "yaw": 4.626522,
+    },
+    {
+      "id": "tree-17",
+      "kind": "tree",
+      "position": [
+        62.082867,
+        0,
+        33.221308,
+      ],
+      "size": [
+        5.351415,
+        9.850876,
+        5.351415,
+      ],
+      "yaw": 1.819333,
+    },
+    {
+      "id": "tree-18",
+      "kind": "tree",
+      "position": [
+        64.730754,
+        0,
+        22.823106,
+      ],
+      "size": [
+        5.098585,
+        8.938462,
+        5.098585,
+      ],
+      "yaw": 2.919884,
+    },
+    {
+      "id": "tree-19",
+      "kind": "tree",
+      "position": [
+        63.316842,
+        0,
+        24.220273,
+      ],
+      "size": [
+        4.021823,
+        7.589086,
+        4.021823,
+      ],
+      "yaw": 2.065078,
+    },
+    {
+      "id": "tree-20",
+      "kind": "tree",
+      "position": [
+        69.529509,
+        0,
+        54.842882,
+      ],
+      "size": [
+        5.52067,
+        12.965477,
+        5.52067,
+      ],
+      "yaw": 3.376876,
+    },
+    {
+      "id": "tree-21",
+      "kind": "tree",
+      "position": [
+        63.169537,
+        0,
+        49.157524,
+      ],
+      "size": [
+        5.17329,
+        11.520884,
+        5.17329,
+      ],
+      "yaw": 4.605752,
+    },
+    {
+      "id": "tree-22",
+      "kind": "tree",
+      "position": [
+        63.810838,
+        0,
+        48.056381,
+      ],
+      "size": [
+        4.337729,
+        7.616526,
+        4.337729,
+      ],
+      "yaw": 0.050821,
+    },
+    {
+      "id": "tree-23",
+      "kind": "tree",
+      "position": [
+        64.097442,
+        0,
+        48.430062,
+      ],
+      "size": [
+        3.630088,
+        8.32639,
+        3.630088,
+      ],
+      "yaw": 5.327265,
+    },
+    {
+      "id": "tree-24",
+      "kind": "tree",
+      "position": [
+        57.032168,
+        0,
+        46.746903,
+      ],
+      "size": [
+        3.462901,
+        6.947591,
+        3.462901,
+      ],
+      "yaw": 3.466736,
+    },
+    {
+      "id": "tree-25",
+      "kind": "tree",
+      "position": [
+        26.545757,
+        0,
+        50.845386,
+      ],
+      "size": [
+        4.021428,
+        8.872968,
+        4.021428,
+      ],
+      "yaw": 4.361618,
+    },
+    {
+      "id": "tree-26",
+      "kind": "tree",
+      "position": [
+        28.47298,
+        0,
+        59.836534,
+      ],
+      "size": [
+        6.229887,
+        12.838429,
+        6.229887,
+      ],
+      "yaw": 1.781705,
+    },
+    {
+      "id": "tree-27",
+      "kind": "tree",
+      "position": [
+        24.634887,
+        0,
+        51.847036,
+      ],
+      "size": [
+        6.378601,
+        12.585946,
+        6.378601,
+      ],
+      "yaw": 4.51171,
+    },
+    {
+      "id": "tree-28",
+      "kind": "tree",
+      "position": [
+        19.490367,
+        0,
+        61.937492,
+      ],
+      "size": [
+        4.810771,
+        8.952445,
+        4.810771,
+      ],
+      "yaw": 4.677333,
+    },
+    {
+      "id": "tree-29",
+      "kind": "tree",
+      "position": [
+        22.455021,
+        0,
+        54.448555,
+      ],
+      "size": [
+        4.441743,
+        8.510265,
+        4.441743,
+      ],
+      "yaw": 3.632351,
+    },
+    {
+      "id": "tree-30",
+      "kind": "tree",
+      "position": [
+        0.87665,
+        0,
+        81.41609,
+      ],
+      "size": [
+        5.393459,
+        12.444254,
+        5.393459,
+      ],
+      "yaw": 2.48311,
+    },
+    {
+      "id": "tree-31",
+      "kind": "tree",
+      "position": [
+        -4.968521,
+        0,
+        76.163125,
+      ],
+      "size": [
+        4.34396,
+        10.028522,
+        4.34396,
+      ],
+      "yaw": 2.016765,
+    },
+    {
+      "id": "tree-32",
+      "kind": "tree",
+      "position": [
+        -1.559563,
+        0,
+        74.678861,
+      ],
+      "size": [
+        4.039257,
+        7.099596,
+        4.039257,
+      ],
+      "yaw": 2.789084,
+    },
+    {
+      "id": "tree-33",
+      "kind": "tree",
+      "position": [
+        -3.283266,
+        0,
+        78.40121,
+      ],
+      "size": [
+        5.431739,
+        11.811545,
+        5.431739,
+      ],
+      "yaw": 0.875217,
+    },
+    {
+      "id": "tree-34",
+      "kind": "tree",
+      "position": [
+        -5.127686,
+        0,
+        84.818179,
+      ],
+      "size": [
+        5.28712,
+        12.146037,
+        5.28712,
+      ],
+      "yaw": 2.338341,
+    },
+    {
+      "id": "tree-35",
+      "kind": "tree",
+      "position": [
+        -22.772645,
+        0,
+        60.691612,
+      ],
+      "size": [
+        5.315082,
+        11.092466,
+        5.315082,
+      ],
+      "yaw": 2.064138,
+    },
+    {
+      "id": "tree-36",
+      "kind": "tree",
+      "position": [
+        -22.538458,
+        0,
+        56.525333,
+      ],
+      "size": [
+        4.187861,
+        9.539877,
+        4.187861,
+      ],
+      "yaw": 0.643123,
+    },
+    {
+      "id": "tree-37",
+      "kind": "tree",
+      "position": [
+        -15.350821,
+        0,
+        48.733109,
+      ],
+      "size": [
+        3.609683,
+        6.995341,
+        3.609683,
+      ],
+      "yaw": 2.457534,
+    },
+    {
+      "id": "tree-38",
+      "kind": "tree",
+      "position": [
+        -22.645244,
+        0,
+        61.791856,
+      ],
+      "size": [
+        3.258339,
+        6.543117,
+        3.258339,
+      ],
+      "yaw": 1.397878,
+    },
+    {
+      "id": "tree-39",
+      "kind": "tree",
+      "position": [
+        -44.499918,
+        0,
+        51.995686,
+      ],
+      "size": [
+        4.48759,
+        9.79553,
+        4.48759,
+      ],
+      "yaw": 1.358925,
+    },
+    {
+      "id": "tree-40",
+      "kind": "tree",
+      "position": [
+        -47.168275,
+        0,
+        50.668147,
+      ],
+      "size": [
+        5.781582,
+        11.319978,
+        5.781582,
+      ],
+      "yaw": 0.596349,
+    },
+    {
+      "id": "tree-41",
+      "kind": "tree",
+      "position": [
+        -70.882119,
+        0,
+        36.51294,
+      ],
+      "size": [
+        4.869815,
+        9.329246,
+        4.869815,
+      ],
+      "yaw": 3.954282,
+    },
+    {
+      "id": "tree-42",
+      "kind": "tree",
+      "position": [
+        -74.712921,
+        0,
+        35.229024,
+      ],
+      "size": [
+        3.89674,
+        8.476584,
+        3.89674,
+      ],
+      "yaw": 3.146257,
+    },
+    {
+      "id": "tree-43",
+      "kind": "tree",
+      "position": [
+        -84.79522,
+        0,
+        6.992753,
+      ],
+      "size": [
+        3.153635,
+        7.099515,
+        3.153635,
+      ],
+      "yaw": 0.472821,
+    },
+    {
+      "id": "tree-44",
+      "kind": "tree",
+      "position": [
+        -81.837003,
+        0,
+        5.684503,
+      ],
+      "size": [
+        5.415168,
+        11.825467,
+        5.415168,
+      ],
+      "yaw": 5.396977,
+    },
+    {
+      "id": "tree-45",
+      "kind": "tree",
+      "position": [
+        -77.917033,
+        0,
+        2.053452,
+      ],
+      "size": [
+        4.850425,
+        8.778916,
+        4.850425,
+      ],
+      "yaw": 4.126592,
+    },
+    {
+      "id": "tree-46",
+      "kind": "tree",
+      "position": [
+        -79.841222,
+        0,
+        5.378599,
+      ],
+      "size": [
+        5.295988,
+        10.547748,
+        5.295988,
+      ],
+      "yaw": 3.822389,
+    },
+    {
+      "id": "tree-47",
+      "kind": "tree",
+      "position": [
+        -82.598961,
+        0,
+        5.882631,
+      ],
+      "size": [
+        4.635306,
+        10.675669,
+        4.635306,
+      ],
+      "yaw": 6.258146,
+    },
+    {
+      "id": "tree-48",
+      "kind": "tree",
+      "position": [
+        -66.110984,
+        0,
+        -17.44626,
+      ],
+      "size": [
+        5.395312,
+        12.063221,
+        5.395312,
+      ],
+      "yaw": 1.550883,
+    },
+    {
+      "id": "tree-49",
+      "kind": "tree",
+      "position": [
+        -71.924934,
+        0,
+        -16.286508,
+      ],
+      "size": [
+        4.855196,
+        10.970456,
+        4.855196,
+      ],
+      "yaw": 4.625306,
+    },
+    {
+      "id": "tree-50",
+      "kind": "tree",
+      "position": [
+        -66.279618,
+        0,
+        -14.899257,
+      ],
+      "size": [
+        2.583944,
+        6.065106,
+        2.583944,
+      ],
+      "yaw": 5.541472,
+    },
+    {
+      "id": "tree-51",
+      "kind": "tree",
+      "position": [
+        -62.688252,
+        0,
+        -22.161142,
+      ],
+      "size": [
+        2.795187,
+        6.398211,
+        2.795187,
+      ],
+      "yaw": 5.617441,
+    },
+    {
+      "id": "tree-52",
+      "kind": "tree",
+      "position": [
+        -66.716319,
+        0,
+        -15.577003,
+      ],
+      "size": [
+        5.368018,
+        11.474113,
+        5.368018,
+      ],
+      "yaw": 1.08762,
+    },
+    {
+      "id": "tree-53",
+      "kind": "tree",
+      "position": [
+        -50.165285,
+        0,
+        -30.70219,
+      ],
+      "size": [
+        4.037082,
+        7.035965,
+        4.037082,
+      ],
+      "yaw": 4.293551,
+    },
+    {
+      "id": "tree-54",
+      "kind": "tree",
+      "position": [
+        -42.404795,
+        0,
+        -67.497988,
+      ],
+      "size": [
+        4.617632,
+        8.73218,
+        4.617632,
+      ],
+      "yaw": 0.865318,
+    },
+    {
+      "id": "tree-55",
+      "kind": "tree",
+      "position": [
+        -45.59921,
+        0,
+        -74.773919,
+      ],
+      "size": [
+        6.127781,
+        12.534167,
+        6.127781,
+      ],
+      "yaw": 4.69166,
+    },
+    {
+      "id": "tree-56",
+      "kind": "tree",
+      "position": [
+        -47.538763,
+        0,
+        -70.17362,
+      ],
+      "size": [
+        4.874259,
+        8.959608,
+        4.874259,
+      ],
+      "yaw": 5.908543,
+    },
+    {
+      "id": "tree-57",
+      "kind": "tree",
+      "position": [
+        -42.051542,
+        0,
+        -71.999975,
+      ],
+      "size": [
+        5.332306,
+        10.08732,
+        5.332306,
+      ],
+      "yaw": 0.904371,
+    },
+    {
+      "id": "tree-58",
+      "kind": "tree",
+      "position": [
+        -7.863916,
+        0,
+        -74.639862,
+      ],
+      "size": [
+        5.289362,
+        11.551366,
+        5.289362,
+      ],
+      "yaw": 1.771018,
+    },
+    {
+      "id": "tree-59",
+      "kind": "tree",
+      "position": [
+        -9.738977,
+        0,
+        -74.254787,
+      ],
+      "size": [
+        5.7383,
+        10.445652,
+        5.7383,
+      ],
+      "yaw": 3.569614,
+    },
+  ],
+  "rings": [
+    {
+      "direction": [
+        0,
+        0,
+        -1,
+      ],
+      "id": "ring-0",
+      "position": [
+        0,
+        3,
+        22,
+      ],
+      "radius": 1.25,
+      "tube": 0.1,
+    },
+    {
+      "direction": [
+        -0.707107,
+        0,
+        -0.707107,
+      ],
+      "id": "ring-1",
+      "position": [
+        14,
+        4,
+        8,
+      ],
+      "radius": 1.25,
+      "tube": 0.1,
+    },
+    {
+      "direction": [
+        0,
+        0,
+        1,
+      ],
+      "id": "ring-2",
+      "position": [
+        -4,
+        3,
+        28,
+      ],
+      "radius": 1.25,
+      "tube": 0.1,
+    },
+  ],
+  "room": null,
+  "spawn": {
+    "position": [
+      0,
+      0.06,
+      33,
+    ],
+    "yaw": 0,
+  },
+}
+`;

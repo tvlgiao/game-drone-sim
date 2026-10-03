@@ -217,10 +217,14 @@ export interface SkyDef {
   sunIntensity: number;
   /** hemisphere light: sky colour, ground colour */
   hemi: [number, number];
+  /** fog / haze colour where it differs from `horizon` (dusk: the horizon glows only towards the sun) */
+  haze?: number;
 }
 
 export interface EnvDef {
   sky: 'night-loft' | SkyDef;
+  /** generated outdoor levels: the sky preset `sky` came from (levels/skies.ts), so a time-of-day pick can swap it */
+  time?: 'dawn' | 'noon' | 'golden' | 'dusk' | 'afternoon' | 'alpine';
   /** distance of 1 % visibility; FogExp2 density = 2.15 / viewDistance */
   fog: { color: number; viewDistance: number };
   ambience: { kind: 'room' | 'wind'; gain: number };
@@ -249,6 +253,8 @@ export interface LevelBase {
   pilot: [number, number, number];
   /** XR deck height above ground (loft 2.4, outdoor 2.0) */
   pilotPlatform: number;
+  /** best-time storage key when it is not the level id (Infinite: one per world code) */
+  bestKey?: string;
 }
 
 export interface IndoorLevel extends LevelBase {
@@ -269,6 +275,11 @@ export interface OutdoorLevel extends LevelBase {
   props: PropDef[];
   /** extra colliders that belong to no prop */
   statics: Collider[];
+  /**
+   * Free-roaming levels: re-plant the LOS pilot behind the drone when it flies out of range or stays
+   * hidden behind terrain (outside VR). Fixed-route levels (Training, City) leave it off.
+   */
+  relocatePilot?: boolean;
 }
 
 export type LevelDef = IndoorLevel | OutdoorLevel;

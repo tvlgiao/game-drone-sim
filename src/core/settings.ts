@@ -16,6 +16,12 @@ export type MouseXAxis = 'roll' | 'yaw';
 export type MouseStickMode = 'auto' | 'hold' | 'spring';
 export type RatePreset = 'beginner' | 'freestyle' | 'race' | 'custom';
 export type RateAxis = keyof AxisRates;
+/** Outdoor sun position; 'auto' = the level's own (Infinite: picked from the seed). */
+export type TimeOfDay = 'auto' | 'dawn' | 'noon' | 'golden' | 'dusk';
+/** Outdoor terrain / fog distance; 'auto' = the quality tier's. */
+export type ViewDistance = 'auto' | 'short' | 'medium' | 'long';
+/** Lengths in metres (speed km/h) or feet (speed mph). */
+export type Units = 'm' | 'ft';
 export type RateField = keyof RateProfile;
 
 export interface ChannelFlags {
@@ -59,6 +65,10 @@ export interface Settings {
   showFps: boolean;
   /** arrow on the floor under the quad pointing where its nose faces (LOS / chase orientation aid) */
   headingArrow: boolean;
+  /** analog FPV video look in FPV (scanlines, noise, sync roll); tiers without post never show it */
+  analogVideo: boolean;
+  /** strength of the analog look, 0.1..1 */
+  analogStrength: number;
   deadzone: number;
   /** touch sticks: throttle springs back to centre (hover) instead of holding like a real gimbal */
   touchThrottleCentre: boolean;
@@ -74,6 +84,18 @@ export interface Settings {
   mouseExpo: number;
   /** radius around centre that reads as centred */
   mouseDeadzone: number;
+  timeOfDay: TimeOfDay;
+  viewDistance: ViewDistance;
+  /** outdoor HUD minimap; null = the device default (off on Quest / in VR, on elsewhere) — see `minimapOn` */
+  minimap: boolean | null;
+  units: Units;
+  /** soundtrack on / off and its level (0..1, under the master volume) */
+  musicOn: boolean;
+  musicVolume: number;
+  /** motors, impacts, chimes, callouts and menu sounds */
+  sfxVolume: number;
+  /** level ambience: wind, room tone, traffic, rivers, birds (replaces the old wind-only slider) */
+  ambienceVolume: number;
 }
 
 export const SETTINGS_KEY = 'drone-sim.settings';
@@ -103,6 +125,8 @@ export const DEFAULT_SETTINGS: Readonly<Settings> = Object.freeze({
   volume: 0.7,
   showFps: false,
   headingArrow: true,
+  analogVideo: true,
+  analogStrength: 0.35,
   deadzone: 0.05,
   touchThrottleCentre: true,
   touchSticksFixed: false,
@@ -112,6 +136,14 @@ export const DEFAULT_SETTINGS: Readonly<Settings> = Object.freeze({
   mouseStick: 'auto',
   mouseExpo: 0.2,
   mouseDeadzone: 0.03,
+  timeOfDay: 'auto',
+  viewDistance: 'auto',
+  minimap: null,
+  units: 'm',
+  musicOn: true,
+  musicVolume: 0.7,
+  sfxVolume: 0.9,
+  ambienceVolume: 0.8,
 });
 
 /** Allowed values / numeric ranges, shared with the settings screens. */
@@ -132,16 +164,40 @@ export const SETTINGS_OPTIONS = {
   cameraTiltDeg: { min: 0, max: 45, step: 5 },
   fovDeg: { min: 80, max: 130, step: 5 },
   volume: { min: 0, max: 1, step: 0.1 },
+  analogStrength: { min: 0.1, max: 1, step: 0.05 },
   deadzone: { min: 0, max: 0.25, step: 0.01 },
   mouseSensitivity: { min: 0.5, max: 3, step: 0.1 },
   mouseXAxis: ['roll', 'yaw'] as const,
   mouseStick: ['auto', 'hold', 'spring'] as const,
   mouseExpo: { min: 0, max: 1, step: 0.05 },
   mouseDeadzone: { min: 0, max: 0.2, step: 0.01 },
+  timeOfDay: ['auto', 'dawn', 'noon', 'golden', 'dusk'] as const,
+  viewDistance: ['auto', 'short', 'medium', 'long'] as const,
+  units: ['m', 'ft'] as const,
+  musicVolume: { min: 0, max: 1, step: 0.1 },
+  sfxVolume: { min: 0, max: 1, step: 0.1 },
+  ambienceVolume: { min: 0, max: 1, step: 0.1 },
 };
+
+/** The X1 wind slider's default: a stored value that differs from it was the pilot's own choice. */
+const OLD_WIND_DEFAULT = 0.6;
+
+/** Ambience level for a save: the stored one, else a pilot-set wind level from before the ambience bus, else the default. */
+export function migrateAmbience(r: Record<string, unknown>): unknown {
+  if (r.ambienceVolume !== undefined) return r.ambienceVolume;
+  if (typeof r.windVolume === 'number' && Number.isFinite(r.windVolume) && Math.abs(r.windVolume - OLD_WIND_DEFAULT) > 1e-9) return r.windVolume;
+  return undefined;
+}
 
 /** Old stored values → current ones. */
 const THROTTLE_SOURCE_MIGRATION: Record<string, ThrottleSource> = { 'left-stick': 'stick', 'right-trigger': 'trigger' };
+/** Unit spellings other builds / hand edits may have stored. */
+const UNITS_MIGRATION: Record<string, Units> = { metric: 'm', metre: 'm', meter: 'm', meters: 'm', metres: 'm', imperial: 'ft', feet: 'ft', foot: 'ft' };
+
+/** Whether the outdoor minimap shows: an explicit choice wins, otherwise off in a headset (Quest / VR), on elsewhere. */
+export function minimapOn(s: Pick<Settings, 'minimap'>, xr: boolean): boolean {
+  return s.minimap ?? !xr;
+}
 
 function pick<T extends string>(v: unknown, allowed: readonly T[], fallback: T): T {
   return typeof v === 'string' && (allowed as readonly string[]).includes(v) ? (v as T) : fallback;
@@ -252,6 +308,7 @@ export function validateSettings(raw: unknown): Settings {
   const base = axisRatesFrom(RATE_PRESETS[preset === 'custom' ? 'freestyle' : preset]);
   const rr = obj(r.rates);
   const rates: AxisRates = { roll: clampRate(rr.roll, base.roll), pitch: clampRate(rr.pitch, base.pitch), yaw: clampRate(rr.yaw, base.yaw) };
+  const units = typeof r.units === 'string' ? (UNITS_MIGRATION[r.units.toLowerCase()] ?? r.units) : undefined;
   const cr = r.customRates !== null && typeof r.customRates === 'object' && !Array.isArray(r.customRates) ? obj(r.customRates) : null;
   return {
     stickMode: mode === 1 || mode === 2 || mode === 3 || mode === 4 ? mode : d.stickMode,
@@ -289,6 +346,8 @@ export function validateSettings(raw: unknown): Settings {
     volume: num(r.volume, o.volume, d.volume),
     showFps: bool(r.showFps, d.showFps),
     headingArrow: bool(r.headingArrow, d.headingArrow),
+    analogVideo: bool(r.analogVideo, d.analogVideo),
+    analogStrength: num(r.analogStrength, o.analogStrength, d.analogStrength),
     deadzone: num(r.deadzone, o.deadzone, d.deadzone),
     touchThrottleCentre: bool(r.touchThrottleCentre, d.touchThrottleCentre),
     touchSticksFixed: bool(r.touchSticksFixed, d.touchSticksFixed),
@@ -298,6 +357,14 @@ export function validateSettings(raw: unknown): Settings {
     mouseStick: pick(r.mouseStick, o.mouseStick, d.mouseStick),
     mouseExpo: num(r.mouseExpo, o.mouseExpo, d.mouseExpo),
     mouseDeadzone: num(r.mouseDeadzone, o.mouseDeadzone, d.mouseDeadzone),
+    timeOfDay: pick(r.timeOfDay, o.timeOfDay, d.timeOfDay),
+    viewDistance: pick(r.viewDistance, o.viewDistance, d.viewDistance),
+    minimap: typeof r.minimap === 'boolean' ? r.minimap : null,
+    units: pick(units, o.units, d.units),
+    musicOn: bool(r.musicOn, d.musicOn),
+    musicVolume: num(r.musicVolume, o.musicVolume, d.musicVolume),
+    sfxVolume: num(r.sfxVolume, o.sfxVolume, d.sfxVolume),
+    ambienceVolume: num(migrateAmbience(r), o.ambienceVolume, d.ambienceVolume),
   };
 }
 
