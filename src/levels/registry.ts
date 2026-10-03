@@ -41,7 +41,7 @@ export const LEVELS: readonly LevelEntry[] = [
     id: 'city',
     name: 'City',
     kind: 'authored',
-    blurb: 'Downtown towers at golden hour: eighteen rings through street canyons, over roofs and under skybridges.',
+    blurb: 'Downtown towers at dusk: eighteen rings through street canyons, over roofs and under skybridges.',
     build: () => cityRuntime(),
   },
   {

@@ -70,9 +70,10 @@
   box-shadow: 0 0 calc(6 * var(--ds-u)) var(--ds-cyan);
 }
 
+/* markers ride on the tick band under the numerals (the heading box hangs over the top of the tape) */
 .ds-compass__mk {
   position: absolute;
-  top: calc(2 * var(--ds-u));
+  bottom: calc(1 * var(--ds-u));
   left: 0;
   width: calc(10 * var(--ds-u));
   height: calc(10 * var(--ds-u));
@@ -221,6 +222,13 @@
   top: calc(var(--ds-safe-t) + var(--ds-tbtn) + 10px);
   right: auto;
   left: var(--ds-safe-l);
+}
+
+/* the minimap sits where the left stick's label would be: the label moves beside the stick, towards the middle */
+.ds-ui.ds-map-on .ds-tstick[data-side='l'] .ds-tstick__lbl {
+  left: calc(100% + 8px);
+  bottom: 50%;
+  transform: translateY(50%);
 }
 
 @media (max-height: 460px) {

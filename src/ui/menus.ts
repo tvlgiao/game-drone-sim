@@ -391,7 +391,7 @@ ROW_DEFS.push(
   {
     id: 'timeOfDay',
     label: 'Time of day',
-    hint: 'Outdoor levels · Auto: the level’s own (Infinite: from the world seed)',
+    hint: 'City, Alpine and Infinite · Auto: each level’s own (dusk, golden hour, day)',
     kind: 'enum',
     options: SETTINGS_OPTIONS.timeOfDay.map((t) => ({ value: t, label: TIME_LABEL[t] })),
     get: (s) => s.timeOfDay,

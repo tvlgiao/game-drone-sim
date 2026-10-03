@@ -21,6 +21,7 @@ import { tutorialView } from './ui/tutorial-prompts';
 import { keyGlyph } from './ui/input-glyphs';
 import { Simulation } from './physics/simulation';
 import { GameView } from './render/game-view';
+import { VIEW_DISTANCE_SCALE } from './render/outdoor/outdoor-profile';
 import { stickRadius } from './input/touch';
 import { Hud, type UiAction } from './ui/hud';
 import { throttleDownHint } from './ui/mode-labels';
@@ -31,8 +32,12 @@ import { Capacitor } from '@capacitor/core';
 import { detectEdition, editionCaps, type EditionCaps } from './core/edition';
 import { checkThisDevice, type OwnershipResult } from './core/ownership';
 import { XR_APP_EXIT_HINT, XR_EXIT_HINT, xrHudContent, xrTutorialCard, xrTutorialPrompt } from './ui/xr-hud';
+import { lastPlayedText, parseWorldParam, playWorld, resumeOrNewWorld, stripWorldParam } from './ui/worlds-model';
+import { terrainMinimapSampler } from './ui/minimap';
+import type { OutdoorHud } from './ui/hud';
+import { worldField } from './levels/runtime';
 import { TouchControls } from './ui/touch-controls';
-import type { ButtonEvents, CameraMode, ControlInput, DroneState, GameEvent, InputFrame, LevelId, QualityTier } from './types';
+import type { ButtonEvents, CameraMode, ControlInput, DroneState, GameEvent, InputFrame, LevelId, QualityTier, RaceSnapshot } from './types';
 
 const PHYSICS_DT = 1 / 1000;
 const CAMERA_CYCLE: CameraMode[] = ['los', 'fpv', 'chase'];
@@ -208,10 +213,15 @@ function boot(caps: EditionCaps): void {
     }
     if (s.quality !== 'auto') view.setRenderScale(1);
     view.setAnalogVideo(s.analogVideo ? s.analogStrength : 0);
+    // generated outdoor levels: sun, sky, look and fog follow the pilot's time of day and view distance
+    view.setTimeOfDay(s.timeOfDay);
+    view.setViewDistance(VIEW_DISTANCE_SCALE[s.viewDistance]);
+    audio.setWindVolume(s.windVolume);
   }
   applySettings(settings);
   hud.setSettings(settings);
   publishLevels();
+  publishMinimap(level);
 
   const tutorial = new TutorialMachine({ storage });
   /** the tutorial owns the card / overlay: from Start until skip, quit or the completion card is answered */
@@ -266,10 +276,27 @@ function boot(caps: EditionCaps): void {
 
   /** Level cards for the picker: name, blurb and the stored best lap of each playable level. */
   function publishLevels(): void {
+    const last = lastPlayedWorld(loadWorlds(storage));
     hud.setLevels(
-      LEVELS.map((l) => ({ id: l.id, name: l.name, blurb: l.blurb, best: readBestTime(storage, l.id) })),
+      LEVELS.map((l) => ({
+        id: l.id,
+        name: l.name,
+        blurb: l.blurb,
+        kind: l.kind,
+        best: readBestTime(storage, l.id),
+        // Infinite: the world flown last stands in for the best lap
+        note: l.kind === 'seeded' && last ? `Last world ${last.code} · ${lastPlayedText(last.lastPlayed, Date.now())}` : undefined,
+      })),
       level.def.id,
     );
+  }
+
+  /** Outdoor HUD minimap: the loaded level's ground (City blocks as buildings); none indoors. */
+  function publishMinimap(rt: LevelRuntime): void {
+    const field = rt.def.kind === 'outdoor' ? worldField(rt) : null;
+    const b = rt.def.bounds;
+    const bounds = b.kind === 'rect' && b.min && b.max && b.max[0] - b.min[0] < 20_000 ? { minX: b.min[0], maxX: b.max[0], minZ: b.min[1], maxZ: b.max[1] } : undefined;
+    hud.setMinimapSampler(field ? terrainMinimapSampler(field, bounds) : null);
   }
 
   /** bumps on every switch request: a slower build that resolves after a newer request is dropped */
@@ -378,6 +405,7 @@ function boot(caps: EditionCaps): void {
     rememberWorld(next);
     toSpawn();
     publishLevels();
+    publishMinimap(next);
     loading.hide();
     menuRenders = 0; // the new scenery must show behind the menu
     levelEvents.emit({ type: 'loaded', level: activeLevel(next) });
@@ -397,6 +425,28 @@ function boot(caps: EditionCaps): void {
       rememberWorld(boot);
       levelEvents.emit({ type: 'loaded', level: activeLevel(boot) });
     });
+  }
+
+  /**
+   * `?world=CODE` (boot) or a Capacitor `appUrlOpen` URL: record the world as played, drop the parameter from the
+   * address bar (a reload must not re-open it) and fly it in Infinite free fly. A bad code only toasts.
+   */
+  function openWorldLink(src: string | { search: string }, boot: boolean): void {
+    const r = parseWorldParam(src);
+    if (r.kind === 'none') return;
+    if (boot) {
+      try {
+        history.replaceState(null, '', stripWorldParam(location.href));
+      } catch {
+        // sandboxed frames: the link just stays in the address bar
+      }
+    }
+    if (r.kind === 'error') {
+      toast(r.message);
+      return;
+    }
+    playWorld(storage, { seed: r.seed, gen: r.gen }, Date.now());
+    onAction({ type: 'level', id: 'infinite', mode: 'freefly', seed: r.seed, gen: r.gen });
   }
 
   /**
@@ -476,6 +526,24 @@ function boot(caps: EditionCaps): void {
     if (!events.some((e) => e.type === 'done')) return;
     hud.setTutorial(false);
     race.pause();
+  }
+
+  /**
+   * Outdoor HUD (compass, minimap, AGL) for this frame: the pilot's LOS spot (it moves when the pilot is
+   * re-planted), the next ring while racing. Null indoors.
+   */
+  function outdoorHud(p: Vector3, snap: RaceSnapshot): OutdoorHud | null {
+    if (level.def.kind !== 'outdoor') return null;
+    const pilot = view.pilotEye;
+    const racing = snap.status === 'racing' || snap.status === 'countdown' || snap.status === 'crashed';
+    const r = racing && snap.nextRing >= 0 ? level.def.rings[snap.nextRing] : undefined;
+    return { agl: aglOf(p), pilot: { x: pilot.x, z: pilot.z }, ring: r ? { x: r.position[0], z: r.position[2] } : null };
+  }
+
+  /** Code of the Infinite world flown now (XR cards), else undefined. */
+  function worldCode(): string | undefined {
+    const c = level.content;
+    return level.def.id === 'infinite' && c?.kind === 'terrain' ? c.code : undefined;
   }
 
   /** Height above the walkable surface under the drone (meadow, prop tops). */
@@ -636,7 +704,14 @@ function boot(caps: EditionCaps): void {
     if (status === 'menu') {
       if (b.a) onAction({ type: 'race' });
       else if (b.x) onAction({ type: 'freefly' });
-      else if (b.y) void startLevel(nextLevel(level.def.id));
+      else if (b.y) {
+        // the card cycles the levels; Infinite resumes the last world flown (or rolls a new one)
+        const id = nextLevel(level.def.id);
+        if (id === 'infinite') {
+          const w = resumeOrNewWorld(storage, Date.now());
+          void startLevel('infinite', { seed: w.seed, gen: w.gen });
+        } else void startLevel(id);
+      }
       else if (b.rStick) onAction({ type: 'tutorial' });
     } else if (status === 'paused') {
       if (b.a || b.y) onAction({ type: 'resume' });
@@ -970,6 +1045,7 @@ function boot(caps: EditionCaps): void {
       if (view.frames === 1) document.body.classList.add('is-ready');
     }
 
+    const outdoor = outdoorHud(drone.position, snap);
     if (inVr) {
       // the take-off prompt is stale as soon as the throttle leaves the latch
       if (xrToast && (performance.now() > xrToastUntil || (xrToast.startsWith('Armed') && !input.takeoffLatched))) xrToast = '';
@@ -995,6 +1071,9 @@ function boot(caps: EditionCaps): void {
             exitHint: questApp ? XR_APP_EXIT_HINT : XR_EXIT_HINT,
             level: levelEntry(level.def.id)?.name,
             tutorial: tutOn && tutorial.active,
+            world: worldCode(),
+            outdoor: outdoor ? { agl: outdoor.agl, pilotDistance: outdoor.pilot ? Math.hypot(outdoor.pilot.x - drone.position.x, outdoor.pilot.z - drone.position.z) : null } : undefined,
+            units: settings.units,
           }),
         );
       }
@@ -1011,6 +1090,7 @@ function boot(caps: EditionCaps): void {
       speed,
       tier,
       settings,
+      outdoor,
     });
     // the card hides behind menus (pause) and in a headset (the XR card shows it there)
     tutUi.render(tutOn && !inVr && hud.screen === 'none' ? tutorialView(tutorial, inp.source, settings, sim.fc.armed, inp.gamepadId) : null);
@@ -1034,6 +1114,14 @@ function boot(caps: EditionCaps): void {
   }
   // setAnimationLoop = requestAnimationFrame on a flat screen, the XR session's frame loop in a headset.
   view.renderer.setAnimationLoop(frame);
+
+  // a shared world link opens straight into that world (web: ?world=; native shells: the app URL)
+  openWorldLink(location, true);
+  if (device.native) {
+    void import('@capacitor/app')
+      .then(({ App }) => App.addListener('appUrlOpen', (e) => openWorldLink(e.url, false)))
+      .catch(() => undefined);
+  }
 
   // Debug / e2e / selftest hook.
   const hook = {
@@ -1071,6 +1159,10 @@ function boot(caps: EditionCaps): void {
       };
     },
     stats: () => view.stats(),
+    /** render internals for debugging and look tests (scene graph, materials) */
+    get view() {
+      return view;
+    },
     /** analog FPV feed level drawn last frame (0 outside FPV, without post or with the setting off) */
     get analog() {
       return view.analogLevel;

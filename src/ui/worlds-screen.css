@@ -350,7 +350,94 @@
   }
 
   .ds-worlds__head {
-    margin-top: calc(14 * var(--ds-u));
+    margin-top: 10px;
+  }
+
+  /* short screens: everything above the list on as few lines as it takes, so three saved worlds show at once */
+  .ds-screen:has(.ds-worlds__list) .ds-dialog__title {
+    margin-bottom: 8px;
+    font-size: 18px;
+  }
+
+  .ds-worlds__start {
+    gap: 8px;
+  }
+
+  .ds-worlds__new > span {
+    flex-direction: row;
+    gap: 8px;
+  }
+
+  .ds-worlds__die {
+    width: 1.2em;
+    height: 1.2em;
+  }
+
+  .ds-worlds__seed {
+    padding: 0;
+    border: 0;
+    background: none;
+  }
+
+  /* the placeholder already shows a code: the idle hint only costs a line */
+  .ds-worlds__status[data-tone='idle'] {
+    display: none;
+  }
+
+  .ds-worlds__cap {
+    margin-bottom: 6px;
+    padding: 4px 10px;
+    font-size: 0.74em;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .ds-worlds__list {
+    gap: 6px;
+  }
+
+  .ds-wrow {
+    padding: 4px 6px 4px 12px;
+  }
+
+  .ds-wrow__main {
+    gap: 2px;
+  }
+
+  .ds-wrow__acts .ds-btn {
+    min-height: 40px;
+  }
+
+  /* name, tag and code on two lines at most */
+  .ds-wrow__name {
+    flex-wrap: nowrap;
+    white-space: nowrap;
+  }
+}
+
+/* the shortest phones (iPhone SE landscape): a tighter dialog frame and smaller row buttons */
+@media (max-height: 400px) and (min-width: 540px) {
+  .ds-screen:has(.ds-worlds__list) > .ds-dialog {
+    --ds-dlg-pad: 14px;
+  }
+
+  .ds-screen:has(.ds-worlds__list) > .ds-dialog > .ds-dialog__actions:last-of-type {
+    padding-block: 8px;
+  }
+
+  .ds-worlds__new {
+    font-size: 0.86em;
+  }
+
+  .ds-worlds__head {
+    margin-top: 6px;
+  }
+
+  .ds-wrow__acts .ds-btn {
+    min-width: 0;
+    padding: 0 10px;
+    font-size: 0.7em;
   }
 }
 

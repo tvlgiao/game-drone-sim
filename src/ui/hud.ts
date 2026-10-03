@@ -597,6 +597,7 @@ export class Hud {
     if (map !== this.mapOn) {
       this.mapOn = map;
       r.map.hidden = !map;
+      this.root.classList.toggle('ds-map-on', map);
     }
     if (!o) return;
     const p = f.drone.position;

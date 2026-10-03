@@ -6,6 +6,7 @@
  */
 import { mkdirSync } from 'node:fs';
 import { expect, test, type Page } from '@playwright/test';
+import { GEN_VERSION } from '../../src/world/world';
 
 interface Hook {
   actions: { type: string; id?: string; mode?: string; seed?: number; gen?: number }[];
@@ -18,7 +19,7 @@ interface Hook {
 }
 interface Saved {
   last: string | null;
-  worlds: { id: string; name: string; seed: number }[];
+  worlds: { id: string; name: string; seed: number; gen: number }[];
 }
 
 const SHOTS = process.env.SHOTS_DIR;
@@ -88,7 +89,7 @@ test('level select: five cards with drawn thumbnails; Infinite offers Free Fly a
   await press(page, 'Free Fly · Infinite World', inf);
   const a = (await hook(page, (h) => h.actions)).at(-1)!;
   const w = (await saved(page)).worlds.find((x) => x.id === last)!;
-  expect(a).toEqual({ type: 'level', id: 'infinite', mode: 'freefly', seed: w.seed, gen: 1 });
+  expect(a).toEqual({ type: 'level', id: 'infinite', mode: 'freefly', seed: w.seed, gen: w.gen });
   expect(errors).toEqual([]);
 });
 
@@ -103,7 +104,7 @@ test('Worlds…: new random world plays and is saved; empty state first', async 
   await shot(page, 'worlds-empty');
   await press(page, /New random world/);
   const a = (await hook(page, (h) => h.actions)).at(-1)!;
-  expect(a).toMatchObject({ type: 'level', id: 'infinite', mode: 'freefly', gen: 1 });
+  expect(a).toMatchObject({ type: 'level', id: 'infinite', mode: 'freefly', gen: GEN_VERSION });
   const s = await saved(page);
   expect(s.worlds).toHaveLength(1);
   expect(s.worlds[0]!.seed).toBe(a.seed);
