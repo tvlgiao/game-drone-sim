@@ -16,7 +16,6 @@ import { rippleTexture, setWaterSky, waterMaterial } from '../../src/render/outd
 import { waterSurface } from '../../src/render/vfx/director';
 import { CHUNK_SIZE, type ChunkData } from '../../src/world/chunk-gen';
 import { SURFACE_STRIDE } from '../../src/world/chunk-gen-v2';
-import { GameAudio } from '../../src/audio/audio';
 import { cityRuntime } from '../../src/levels/city';
 import { createRuntime } from '../../src/levels/runtime';
 import { TRAINING_LEVEL } from '../../src/levels/training';
@@ -199,14 +198,3 @@ describe('time of day and view distance', () => {
   });
 });
 
-describe('wind volume', () => {
-  it('scales the wind voice; motors and the master volume are untouched', () => {
-    const a = new GameAudio();
-    a.setAmbience('wind', 0.6);
-    const full = a.windLevel(10, 3);
-    a.setWindVolume(0.25);
-    expect(a.windLevel(10, 3)).toBeCloseTo(full * 0.25);
-    a.setWindVolume(0);
-    expect(a.windLevel(30, 3)).toBe(0);
-  });
-});

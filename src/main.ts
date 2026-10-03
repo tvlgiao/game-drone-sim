@@ -122,7 +122,9 @@ function boot(caps: EditionCaps): void {
   const race = new RaceController(level, storage);
   const input = new InputManager(window, settings, device.touch);
   const audio = new GameAudio();
-  audio.setAmbience(level.def.env.ambience.kind, level.def.env.ambience.gain);
+  audio.configure({ tier, form: device.form, native: device.native });
+  audio.setLevel(level);
+  audio.attachUi(uiRoot);
   const loop = new FixedLoop(PHYSICS_DT, 250);
   const fpsMeter = new FpsMeter();
   const dynRes = new DynamicResolution(targetFps(device.form));
@@ -222,7 +224,7 @@ function boot(caps: EditionCaps): void {
     sim.fc.throttleLimit = s.throttleLimit;
     sim.fc.throttleMid = s.throttleMid ?? hoverThrottle(sim.world.params);
     input.updateSettings(s);
-    audio.setVolume(s.volume);
+    audio.applySettings(s);
     const next = resolveTier(s);
     if (next !== tier) {
       tier = next;
@@ -233,7 +235,7 @@ function boot(caps: EditionCaps): void {
     // generated outdoor levels: sun, sky, look and fog follow the pilot's time of day and view distance
     view.setTimeOfDay(s.timeOfDay);
     view.setViewDistance(VIEW_DISTANCE_SCALE[s.viewDistance]);
-    audio.setWindVolume(s.windVolume);
+    audio.configure({ tier, form: device.form });
   }
   applySettings(settings);
   hud.setSettings(settings);
@@ -480,7 +482,7 @@ function boot(caps: EditionCaps): void {
       sim.world.setLevel(next);
       race.setLevel(next);
       old.dispose?.();
-      audio.setAmbience(next.def.env.ambience.kind, next.def.env.ambience.gain);
+      audio.setLevel(next);
       saveLastLevel(storage, id);
       rememberWorld(next);
       toSpawn();
@@ -1276,7 +1278,8 @@ function boot(caps: EditionCaps): void {
       motorsMuted = mute;
       audio.setMotorsMuted(mute);
     }
-    audio.update(drone.motors, drone.armed, speed);
+    // the listener is the rendered eye: in a headset, the head pose (spatial audio turns with the head)
+    audio.frame(drone, snap, view.renderedCamera, view.presenting ? view.renderer.xr.getCamera() : view.camera);
   }
   // setAnimationLoop = requestAnimationFrame on a flat screen, the XR session's frame loop in a headset.
   view.renderer.setAnimationLoop(frame);
@@ -1401,6 +1404,10 @@ function boot(caps: EditionCaps): void {
     },
     get audio() {
       return audio.state;
+    },
+    /** bus gains, music state, live node count (audio e2e) */
+    get audioMix() {
+      return audio.debug();
     },
     get screen() {
       return hud.screen;
