@@ -5,13 +5,14 @@
  */
 import type { BaseTerrain, TerrainPreset } from './base-terrain';
 import { createWorldV1 } from './generators/v1';
+import { createWorldV2 } from './generators/v2';
 import type { RoadSource } from './roads';
 import type { House, Settlements, Village } from './settlements';
 import type { ComposedTerrainField } from './terrain-field';
 
 /** Generator version for new worlds. Older versions stay in generators/ so saved seeds reproduce forever. */
-export const GEN_VERSION = 1;
-export const SUPPORTED_GEN_VERSIONS: readonly number[] = [1];
+export const GEN_VERSION = 2;
+export const SUPPORTED_GEN_VERSIONS: readonly number[] = [1, 2];
 
 export interface WorldSpec {
   seed: number;
@@ -40,6 +41,8 @@ export function createWorld(spec: WorldSpec): World {
   switch (s.genVersion) {
     case 1:
       return createWorldV1(s);
+    case 2:
+      return createWorldV2(s);
     default:
       throw new Error(`Unsupported world generator version ${spec.genVersion}`);
   }

@@ -171,6 +171,6 @@ describe('saved worlds store', () => {
   });
 
   it('rejects generator versions this build does not ship', () => {
-    expect(() => recordPlayed(emptyWorlds(), 1, 2, 0)).toThrow(RangeError);
+    expect(() => recordPlayed(emptyWorlds(), 1, 3, 0)).toThrow(RangeError);
   });
 });

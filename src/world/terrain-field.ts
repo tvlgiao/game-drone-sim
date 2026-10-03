@@ -99,6 +99,11 @@ export interface FeatureCell {
 }
 
 export const FEATURE_CELL = 128;
+/** v2: the village blend ring is warped by noise up to this many metres, so plateaus are not discs */
+export const VILLAGE_WARP = 22;
+const VILLAGE_WARP_SCALE = 1 / 46;
+/** salt of the v2 village-edge noise (outside SALT: v1 streams stay untouched) */
+const SALT_VILLAGE_EDGE = 61;
 const ROAD_REACH = ROAD_HALF_WIDTH + ROAD_SHOULDER;
 
 export class ComposedTerrainField implements TerrainField {
@@ -110,6 +115,7 @@ export class ComposedTerrainField implements TerrainField {
   private readonly ts = terrainSample();
   private readonly climateOut: Climate = { moisture: 0, temperature: 0 };
   private readonly farmSeed: number;
+  private readonly edgeSeed: number;
 
   constructor(
     readonly base: BaseTerrain,
@@ -122,6 +128,7 @@ export class ComposedTerrainField implements TerrainField {
     this.maxHeight = base.maxHeight;
     this.minHeight = base.minHeight;
     this.farmSeed = subSeed(base.seed, SALT.farm);
+    this.edgeSeed = subSeed(base.seed, SALT_VILLAGE_EDGE);
   }
 
   /** Villages and roads around a 128 m cell (memoised). */
@@ -147,13 +154,18 @@ export class ComposedTerrainField implements TerrainField {
     o.base = h;
     let vm = 0;
     const fc = this.featureCell(Math.floor(x / FEATURE_CELL), Math.floor(z / FEATURE_CELL));
+    // v2: one warp value per point, shared by every village (the edge wobbles, but stays continuous)
+    const warp = this.genVersion >= 2 && fc.villages.length > 0 ? VILLAGE_WARP * noise(this.edgeSeed, x * VILLAGE_WARP_SCALE, z * VILLAGE_WARP_SCALE) : 0;
     for (const v of fc.villages) {
       const dx = x - v.x;
       const dz = z - v.z;
       const d2 = dx * dx + dz * dz;
       const outer = v.radius + VILLAGE_BLEND;
       if (d2 >= outer * outer) continue;
-      const t = smoothstep(v.radius, outer, Math.sqrt(d2));
+      // the warp only moves the inner edge: the outer edge (feature-cell bound) stays a circle
+      const d = Math.sqrt(d2);
+      const inner = v.radius - Math.abs(warp);
+      const t = warp === 0 ? smoothstep(v.radius, outer, d) : smoothstep(inner + warp, outer, d);
       h = v.plateau + (h - v.plateau) * t;
       bed = v.plateau + (bed - v.plateau) * t;
       if (1 - t > vm) vm = 1 - t;
@@ -204,21 +216,29 @@ export class ComposedTerrainField implements TerrainField {
     const gz = (this.heightAt(x, z + e) - this.heightAt(x, z - e)) / (2 * e);
     const s = this.sample(x, z, this.ts);
     const c = this.base.climate(x, z, s, this.climateOut);
-    return classify(this.base, s, Math.sqrt(gx * gx + gz * gz), c, this.farmAt(x, z), out);
+    return classify(this.base, s, Math.sqrt(gx * gx + gz * gz), c, this.farmAt(x, z), out, this.genVersion);
   }
 }
 
-/** 0..1 tree density from terrain, slope and climate (design 07 §2.2 `forestDensity`). */
-export function forestDensity(base: BaseTerrain, s: TerrainSample, slope: number, c: Climate): number {
+/** v2: trees reach slopes up to this, thinning out from FOREST_THIN_SLOPE */
+export const FOREST_MAX_SLOPE_V2 = 1.2;
+const FOREST_THIN_SLOPE_V2 = 0.55;
+
+/**
+ * 0..1 tree density from terrain, slope and climate (design 07 §2.2 `forestDensity`). Generator v1 stops at
+ * slope 0.9 (bare cliffs); v2 thins the forest out up to slope 1.2.
+ */
+export function forestDensity(base: BaseTerrain, s: TerrainSample, slope: number, c: Climate, genVersion = 1): number {
   if (s.water > s.h - 0.5 || s.village > 0 || s.roadD < ROAD_HALF_WIDTH + 4 || s.riverD < base.riverHalfWidth + 8) return 0;
-  if (slope > 0.9 || s.h > base.treeLine) return 0;
+  const v2 = genVersion >= 2;
+  if (slope > (v2 ? FOREST_MAX_SLOPE_V2 : 0.9) || s.h > base.treeLine) return 0;
   const wet = smoothstep(0.3, 0.75, c.moisture);
   const high = base.treeLine === Infinity ? 1 : 1 - smoothstep(base.treeLine - 60, base.treeLine, s.h);
-  return wet * high * (1 - smoothstep(0.6, 0.9, slope));
+  return wet * high * (1 - (v2 ? smoothstep(FOREST_THIN_SLOPE_V2, FOREST_MAX_SLOPE_V2, slope) : smoothstep(0.6, 0.9, slope)));
 }
 
 /** Biome classification shared by `biomeAt` and the chunk colours. */
-export function classify(base: BaseTerrain, s: TerrainSample, slope: number, c: Climate, farm: number, out: BiomeSample): BiomeSample {
+export function classify(base: BaseTerrain, s: TerrainSample, slope: number, c: Climate, farm: number, out: BiomeSample, genVersion = 1): BiomeSample {
   const h = s.h;
   const wet = s.water > h;
   out.height = h;
@@ -226,7 +246,14 @@ export function classify(base: BaseTerrain, s: TerrainSample, slope: number, c: 
   out.slope = slope;
   out.moisture = c.moisture;
   out.temperature = c.temperature;
-  out.forest = forestDensity(base, s, slope, c);
+  out.forest = forestDensity(base, s, slope, c, genVersion);
+  if (genVersion >= 2 && out.forest === 0 && s.village > 0 && s.village < 0.5) {
+    // v2: the ground keeps the surrounding biome through the plateau's blend ring (no halo of bare meadow)
+    const v = s.village;
+    s.village = 0;
+    out.forest = forestDensity(base, s, slope, c, genVersion) * (1 - 2 * v);
+    s.village = v;
+  }
   out.road = 1 - smoothstep(ROAD_HALF_WIDTH, ROAD_HALF_WIDTH + 2, s.roadD);
   out.village = s.village;
   out.river = base.riverHalfWidth > 0 ? 1 - smoothstep(base.riverHalfWidth, base.riverHalfWidth + 6, s.riverD) : 0;

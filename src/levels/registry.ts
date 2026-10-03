@@ -17,7 +17,8 @@ export interface LevelEntry {
   name: string;
   kind: 'authored' | 'seeded';
   blurb: string;
-  build(arg?: { seed?: number }): LevelRuntime;
+  /** `genVersion`: generator of a saved world (default: the current one) */
+  build(arg?: { seed?: number; genVersion?: number }): LevelRuntime;
 }
 
 /** Menu order: the beginner field first. */
@@ -55,7 +56,7 @@ export const LEVELS: readonly LevelEntry[] = [
     name: 'Infinite World',
     kind: 'seeded',
     blurb: 'Endless countryside from a seed: hills, rivers, villages and roads. Share the code, fly it again.',
-    build: (arg) => infiniteRuntime(arg?.seed ?? randomSeed()),
+    build: (arg) => infiniteRuntime(arg?.seed ?? randomSeed(), { genVersion: arg?.genVersion }),
   },
 ];
 
@@ -72,10 +73,10 @@ export function isPlayableLevel(id: unknown): id is LevelId {
 }
 
 /** Throws for a level that is not in LEVELS (callers validate ids from storage / UI first). */
-export function buildLevel(id: LevelId, seed?: number): LevelRuntime {
+export function buildLevel(id: LevelId, seed?: number, genVersion?: number): LevelRuntime {
   const entry = levelEntry(id);
   if (!entry) throw new Error(`Unknown level: ${id}`);
-  return entry.build(seed === undefined ? undefined : { seed });
+  return entry.build(seed === undefined ? undefined : { seed, genVersion });
 }
 
 export function loadLastLevel(storage: Storage | null): LevelId {

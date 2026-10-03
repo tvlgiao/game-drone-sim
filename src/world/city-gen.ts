@@ -186,13 +186,24 @@ export function generateCity(seed: number): City {
         if (sp === 'sky') h = Math.max(h, 110);
         h = Math.floor(h);
         const id = `bld-${nb++}`;
-        buildings.push(lot.x, 0, lot.z, w, h, d, hk & 0xffffff, 0);
-        addBox(id, lot.x, 0, lot.z, w, h, d);
+        // podium + setback tower on most big lots (not the skybridge towers: the bridges span their facades)
+        let tw = w;
+        let td = d;
+        if (!sp && cls !== 'low' && h >= 45 && w >= 26 && d >= 26 && u01(rehash(hk, 40)) < 0.65) {
+          const inset = 3 + 3 * u01(rehash(hk, 41));
+          const hp = Math.floor(Math.min(h * 0.4, 9 + 9 * u01(rehash(hk, 42))));
+          tw = w - 2 * inset;
+          td = d - 2 * inset;
+          buildings.push(lot.x, 0, lot.z, w, hp, d, rehash(hk, 43) & 0xffffff, 0);
+          addBox(`${id}-podium`, lot.x, 0, lot.z, w, hp, d);
+        }
+        buildings.push(lot.x, 0, lot.z, tw, h, td, hk & 0xffffff, 0);
+        addBox(id, lot.x, 0, lot.z, tw, h, td);
         if (h > blockTop) {
           blockTop = h;
-          blockBox = { x: lot.x, z: lot.z, w, d };
+          blockBox = { x: lot.x, z: lot.z, w: tw, d: td };
         }
-        roofPropsFor(id, lot.x, h, lot.z, w, d, cls, hk, roof, colliders);
+        roofPropsFor(id, lot.x, h, lot.z, tw, td, cls, hk, roof, colliders);
       });
       tops.set(`${i},${j}`, { top: blockTop, box: blockBox });
     }

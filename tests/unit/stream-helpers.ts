@@ -39,6 +39,7 @@ export function fakeChunk(req: ChunkRequest, y = 10): ChunkData {
     positions,
     normals,
     colors: new Uint8Array(nv * 3).fill(120),
+    surface: new Uint8Array(0),
     minY: y - 6,
     maxY: y,
     water: { positions: new Float32Array(0), colors: new Uint8Array(0), indices: new Uint16Array(0) },

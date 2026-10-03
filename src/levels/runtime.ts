@@ -6,6 +6,7 @@ import { ColliderGrid } from '../physics/collider-grid';
 import { FLAT_GROUND, type HeightField } from '../physics/terrain';
 import type { City } from '../world/city-gen';
 import type { Outskirts } from './city-outskirts';
+import type { CityFurniture } from './city-furniture';
 import type { World } from '../world/world';
 import type { ChunkStreamer } from './chunk-streamer';
 
@@ -15,7 +16,7 @@ import type { ChunkStreamer } from './chunk-streamer';
  */
 export type WorldContent =
   | { readonly kind: 'terrain'; readonly world: World; readonly stream: ChunkStreamer; readonly seed: number; readonly code: string }
-  | { readonly kind: 'city'; readonly city: City; readonly outskirts: Outskirts; readonly seed: number };
+  | { readonly kind: 'city'; readonly city: City; readonly outskirts: Outskirts; readonly furniture: CityFurniture; readonly seed: number };
 
 /** Grid owner of a level's authored colliders (streamed chunks use their chunk keys). */
 export const LEVEL_OWNER = 'level';
