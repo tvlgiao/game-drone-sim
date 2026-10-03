@@ -14,6 +14,10 @@ export interface OutdoorProfile {
   farRadius: number;
   /** 1 % visibility distance cap (m); the level's own fog may be shorter */
   fog: number;
+  /**
+   * detailed trees near the drone (the Training models: ≈ 1.4–2.3 k triangles each on ultra / high, the opaque
+   * masses on medium), nearest chunks first
+   */
   treesLod0: number;
   treesLod1: number;
   /** rocks and boulders drawn (Quest: off, one draw saved per eye) */
@@ -40,17 +44,17 @@ export const OUTDOOR_PROFILES: Readonly<Record<QualityTier, OutdoorProfile>> = {
   ultra: {
     stream: { radius: 5, lod0: 1.5, lod1: 2.5, maxInFlight: 6 },
     farRadius: 26,
-    fog: 4200, treesLod0: 1500, treesLod1: 14000, rocks: true, furnitureRange: Infinity, kerbs: true, uploads: 2, sunShadows: true, facadeDetail: true, waterDetail: true, outskirts: 1,
+    fog: 4200, treesLod0: 180, treesLod1: 14000, rocks: true, furnitureRange: Infinity, kerbs: true, uploads: 2, sunShadows: true, facadeDetail: true, waterDetail: true, outskirts: 1,
   },
   high: {
     stream: { radius: 4, lod0: 1.5, lod1: 2.5, maxInFlight: 5 },
     farRadius: 20,
-    fog: 3200, treesLod0: 1100, treesLod1: 10000, rocks: true, furnitureRange: 450, kerbs: true, uploads: 2, sunShadows: true, facadeDetail: true, waterDetail: true, outskirts: 1,
+    fog: 3200, treesLod0: 70, treesLod1: 10000, rocks: true, furnitureRange: 450, kerbs: true, uploads: 2, sunShadows: true, facadeDetail: true, waterDetail: true, outskirts: 1,
   },
   medium: {
     stream: { radius: 3, lod0: 0.75, lod1: 1.5, maxInFlight: 4 },
     farRadius: 10,
-    fog: 1400, treesLod0: 400, treesLod1: 5000, rocks: true, furnitureRange: 320, kerbs: false, uploads: 1, sunShadows: false, facadeDetail: true, waterDetail: true, outskirts: 0.6,
+    fog: 1400, treesLod0: 90, treesLod1: 5000, rocks: true, furnitureRange: 320, kerbs: false, uploads: 1, sunShadows: false, facadeDetail: true, waterDetail: true, outskirts: 0.6,
   },
   low: {
     // only the chunk under the drone at LOD1 (landing matches the physics ground); the rest is one LOD2 batch

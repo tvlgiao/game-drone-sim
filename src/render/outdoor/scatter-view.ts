@@ -14,6 +14,7 @@ import type { ShownChunk } from './terrain-view';
 import { instancedMaterials, type InstanceUniforms } from './terrain-materials';
 import { billboardModel, birchLod0, bridgeModel, broadleafLod0, coniferLod0, houseModel, rockModel, scrubModel, treeBillboardAtlas } from './scatter-models';
 import type { WorldOrigin } from './world-origin';
+import type { WorldTrees } from './world-trees';
 
 /** One instanced draw: a model plus growable packed attributes. */
 export class InstanceLayer {
@@ -187,7 +188,7 @@ if ( isWall > 0.5 && ${cols}.0 > 0.0 ) {
 }`;
 
 /** absolute (City) trees within this distance of the drone get the detailed models, m */
-export const ABSOLUTE_DETAIL = 160;
+export const ABSOLUTE_DETAIL = 80;
 
 export interface ScatterCaps {
   /** detailed trees near the drone */
@@ -211,14 +212,21 @@ export class ScatterView {
   private readonly duskUniform = { value: 0 };
   private readonly order: ShownChunk[] = [];
   caps: ScatterCaps;
+  private readonly billboardMat: THREE.MeshStandardMaterial;
 
+  /**
+   * `near`: the Training tree models for the near trees (generated worlds); without it the near trees use the
+   * low-poly species models below.
+   */
   constructor(
     private readonly origin: WorldOrigin,
     shared: InstanceUniforms,
     caps: ScatterCaps,
+    private readonly near: WorldTrees | null = null,
   ) {
     this.group.name = 'scatter';
     this.caps = caps;
+    if (near) this.group.add(near.group);
     const mk = (model: THREE.BufferGeometry, key: string, opts: { sway?: number; roughness?: number; shadow?: boolean; tree?: boolean } = {}): InstanceLayer => {
       const { material, depth } = instancedMaterials(
         // crowns take most of their shade-side light from the sky: a full share of the captured environment
@@ -240,6 +248,7 @@ export class ScatterView {
     const atlas = treeBillboardAtlas();
     const bb = instancedMaterials({ key: 'billboards', roughness: 0.95, envMapIntensity: 1, vertex: BILLBOARD_UV, fragment: TREE_JITTER }, shared);
     bb.material.map = atlas;
+    this.billboardMat = bb.material;
     bb.material.alphaTest = 0.5;
     bb.material.side = THREE.DoubleSide;
     const bbModel = billboardModel();
@@ -286,6 +295,7 @@ export class ScatterView {
   counts(): Record<string, number> {
     const out: Record<string, number> = {};
     for (const l of this.layers) out[l.mesh.name] = l.count;
+    if (this.near) Object.assign(out, this.near.counts());
     return out;
   }
 
@@ -295,8 +305,18 @@ export class ScatterView {
     return n;
   }
 
+  /** Impostor atlas baked from the near models (world-trees.ts); the procedural one stays as the fallback. */
+  setImpostorAtlas(t: THREE.Texture): void {
+    this.billboardMat.map = t;
+    this.billboardMat.needsUpdate = true;
+  }
+
   /** One tree: the detailed model of its species, or its impostor (sized to the crown, species in the tint). */
   private pushTree(near: boolean, x: number, y: number, z: number, yaw: number, scale: number, species: number, tint: number): void {
+    if (near && this.near) {
+      this.near.push(species, x, y, z, yaw, scale, tint);
+      return;
+    }
     if (near) {
       this.trees[species]!.push(x, y, z, yaw, scale, scale, scale, tint);
       return;
@@ -313,6 +333,7 @@ export class ScatterView {
   rebuild(chunks: ReadonlyMap<number, ShownChunk>, extraTrees?: Float32Array, focus?: { x: number; z: number }, range = Infinity): void {
     this.group.position.set(this.origin.x, 0, this.origin.z);
     for (const l of this.layers) l.begin();
+    this.near?.begin();
     const order = this.order;
     order.length = 0;
     for (const c of chunks.values()) order.push(c);
@@ -358,6 +379,7 @@ export class ScatterView {
     if (extraTrees) this.pushAbsoluteTrees(extraTrees, focus, range);
     order.length = 0;
     for (const l of this.layers) l.end();
+    this.near?.end();
   }
 
   /**
@@ -383,9 +405,11 @@ export class ScatterView {
   /** Sets the shadow casting of the detailed layers (sun-follow shadows on high tiers only). */
   setShadows(on: boolean): void {
     for (const l of this.layers) if (l.mesh.customDepthMaterial) l.mesh.castShadow = on;
+    this.near?.setShadows(on);
   }
 
   dispose(): void {
+    this.near?.dispose();
     for (const l of this.layers) l.dispose();
     for (const d of this.owned) d.dispose();
     this.group.removeFromParent();

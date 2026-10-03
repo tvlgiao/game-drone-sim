@@ -15,6 +15,12 @@ import { carModel, LAMP_HEX, streetLightModel, unitBox, unitCylinder } from './s
 import { CAR_STRIDE, KERB_STRIDE, LIGHT_STRIDE, type CityFurniture } from '../../levels/city-furniture';
 import type { MaterialSource } from '../materials/library';
 
+/** roof detail (parapets, vents, skylights): within this distance of the drone, on roofs up to this height, m */
+const ROOF_DETAIL_RANGE = 150;
+const ROOF_DETAIL_MAX_H = 45;
+const PARAPET_H = 0.9;
+const PARAPET_T = 0.35;
+
 /** packed instance code: kind in the high bits, the building seed below (exact in float32) */
 const KIND_SHIFT = 1048576;
 export const BUILDING_KIND = { building: 0, slab: 1, skybridge: 2, outskirts: 3 } as const;
@@ -26,6 +32,8 @@ uniform sampler2D uDetail;
 uniform sampler2D uBrick;
 uniform sampler2D uConcrete;
 uniform vec2 uWallScale;
+uniform sampler2D uGravel;
+uniform float uGravelScale;
 varying vec3 vFLocal;
 varying vec3 vFN;
 varying vec3 vFSize;
@@ -76,6 +84,19 @@ if ( n.y > 0.5 ) {
   float edge = 1.0 - step( 0.6, min( e.x, e.y ) );
   float blot = texture2D( uDetail, vFLocal.xz * S.xz * 0.031 ).b;
   vec3 roof = srgb( 0.3, 0.3, 0.29 ) * ( 0.75 + 0.35 * texture2D( uDetail, vFLocal.xz * S.xz * 0.15 ).r ) * ( 0.85 + 0.3 * blot );
+  // gravel ballast (the library's gravel set) on the roofs near the drone
+  float roofNear = 1.0 - smoothstep( 40.0, 160.0, length( vViewPosition ) );
+  if ( roofNear > 0.0 ) {
+    vec3 gv = texture2D( uGravel, vFLocal.xz * S.xz * uGravelScale ).rgb / max( texture2D( uGravel, vec2( 0.5 ), 16.0 ).rgb, vec3( 0.03 ) );
+    // close up the tar reads as pale ballast stones over it (a flat dark slab otherwise)
+    float gl = pow( max( dot( gv, vec3( 0.2126, 0.7152, 0.0722 ) ), 0.0 ), 1.6 );
+    vec3 ballast = srgb( 0.5, 0.49, 0.46 ) * mix( vec3( gl ), gv, 0.3 );
+    // membrane panels between the ballast fields: 6 m seams, a darker strip, and wet-looking patches by the blot
+    vec2 pm = abs( fract( vFLocal.xz * S.xz / 6.0 ) - 0.5 );
+    float seam = smoothstep( 0.47, 0.5, max( pm.x, pm.y ) );
+    ballast *= ( 1.0 - 0.35 * seam ) * ( 0.7 + 0.5 * blot );
+    roof = mix( roof, ballast, roofNear * ( style == 0.0 ? 0.5 : 0.9 ) );
+  }
   col = mix( roof * ( style == 0.0 ? 0.75 : 1.0 ), mix( wallCol, vec3( 0.6 ), 0.3 ), edge );
 } else if ( n.y < -0.5 ) {
   col = srgb( 0.4, 0.4, 0.39 );
@@ -300,7 +321,17 @@ export class CityView {
     this.outskirts = outskirts;
     this.furniture = furniture;
     const box = unitBox(0xffffff);
-    const walls = { uBrick: { value: null as THREE.Texture | null }, uConcrete: { value: null as THREE.Texture | null }, uWallScale: { value: new THREE.Vector2(1, 1) } };
+    const walls = {
+      uBrick: { value: null as THREE.Texture | null },
+      uConcrete: { value: null as THREE.Texture | null },
+      uWallScale: { value: new THREE.Vector2(1, 1) },
+      uGravel: { value: null as THREE.Texture | null },
+      uGravelScale: { value: 1 },
+    };
+    lib.watchSet('gravel', (set, tile) => {
+      walls.uGravel.value = set.albedo;
+      walls.uGravelScale.value = 1 / tile;
+    });
     lib.watchSet('brick', (set, tile) => {
       walls.uBrick.value = set.albedo;
       walls.uWallScale.value.x = 1 / tile;
@@ -343,6 +374,8 @@ export class CityView {
       mkProps(streetLightModel(), 'street-lights', { fragmentPars: 'uniform float uDusk;', fragment: LAMP_GLOW }),
       mkProps(carModel(), 'cars', { fragment: CAR_PAINT }),
       mkProps(unitBox(0xb4ada0), 'kerbs', { shadow: false }),
+      mkProps(unitBox(0xa29d94), 'roof-parapets'),
+      mkProps(unitBox(0x8e9196), 'roof-vents'),
     ];
     for (const l of this.props) l.begin();
     const rp = city.roofProps;
@@ -397,6 +430,58 @@ export class CityView {
     for (let k = 0; k < f.cars.length; k += CAR_STRIDE) if (near(f.cars[k]!, f.cars[k + 2]!)) cars.push(f.cars[k]!, f.cars[k + 1]!, f.cars[k + 2]!, f.cars[k + 3]!, 1, 1, 1, f.cars[k + 4]!);
     if (kerbsOn) for (let k = 0; k < f.kerbs.length; k += KERB_STRIDE) if (near(f.kerbs[k]!, f.kerbs[k + 1]!)) kerbs.push(f.kerbs[k]!, 0, f.kerbs[k + 1]!, f.kerbs[k + 3]!, 0.3, 0.15, f.kerbs[k + 2]!, 0);
     for (const l of [lights, cars, kerbs]) l.end();
+  }
+
+  /**
+   * Roof detail within ROOF_DETAIL_RANGE of the drone or the camera (the LOS pilot stands on a roof) on low and
+   * mid-rise roofs (ultra / high only): a parapet along every edge, vents and skylights placed by the building's
+   * seed. Off: both layers empty (no draws).
+   */
+  setRoofDetail(on: boolean, x: number, z: number, cx = x, cz = z): void {
+    const parapets = this.props[6]!;
+    const vents = this.props[7]!;
+    parapets.begin();
+    vents.begin();
+    if (on) {
+      const b = this.city.buildings;
+      const r2 = ROOF_DETAIL_RANGE * ROOF_DETAIL_RANGE;
+      for (let k = 0; k < b.length; k += BUILDING_STRIDE) {
+        const bx = b[k]!;
+        const bz = b[k + 2]!;
+        const w = b[k + 3]!;
+        const h = b[k + 4]!;
+        const d = b[k + 5]!;
+        if (h > ROOF_DETAIL_MAX_H || b[k + 7]! === 1) continue;
+        const dx = Math.max(0, Math.abs(bx - x) - w / 2);
+        const dz = Math.max(0, Math.abs(bz - z) - d / 2);
+        const ex = Math.max(0, Math.abs(bx - cx) - w / 2);
+        const ez = Math.max(0, Math.abs(bz - cz) - d / 2);
+        if (dx * dx + dz * dz > r2 && ex * ex + ez * ez > r2) continue;
+        const top = b[k + 1]! + h;
+        const t = PARAPET_T;
+        parapets.push(bx, top, bz - d / 2 + t / 2, 0, w, PARAPET_H, t, 0);
+        parapets.push(bx, top, bz + d / 2 - t / 2, 0, w, PARAPET_H, t, 0);
+        parapets.push(bx - w / 2 + t / 2, top, bz, 0, t, PARAPET_H, d - 2 * t, 0);
+        parapets.push(bx + w / 2 - t / 2, top, bz, 0, t, PARAPET_H, d - 2 * t, 0);
+        // a few vents and a skylight per roof, by the building's seed
+        let s = (b[k + 6]! | 0) >>> 0;
+        const rnd = (): number => {
+          s = (Math.imul(s ^ (s >>> 15), 0x2c1b3c6d) + 0x6d2b79f5) >>> 0;
+          return s / 4294967296;
+        };
+        const n = 2 + Math.floor(rnd() * 3);
+        for (let i = 0; i < n; i++) {
+          const sky = i === 0 && w > 10 && d > 10;
+          const sx = sky ? 2.4 : 0.9 + rnd() * 0.8;
+          const sz = sky ? 3.6 : 0.9 + rnd() * 0.8;
+          const px = bx + (rnd() - 0.5) * Math.max(0, w - 2 * t - sx - 1.5);
+          const pz = bz + (rnd() - 0.5) * Math.max(0, d - 2 * t - sz - 1.5);
+          vents.push(px, top, pz, rnd() < 0.5 ? 0 : Math.PI / 2, sx, sky ? 0.35 : 0.6 + rnd() * 0.7, sz, 0);
+        }
+      }
+    }
+    parapets.end();
+    vents.end();
   }
 
   /** Quest: no lit windows (07 §7), and no roof units or tanks (a Quest frame cannot spare their triangles). */

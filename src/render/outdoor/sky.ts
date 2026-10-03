@@ -102,12 +102,19 @@ export class SkyDome {
     this.setSky(sky, ground);
   }
 
+  /**
+   * Below the horizon, the dome shows exactly this colour instead of a lit ground of `ground` albedo: a level whose
+   * terrain fades into fog of that colour (generated worlds) then has no seam where its ground ends.
+   */
+  fogGround: THREE.Color | null = null;
+
   /** New sun position (time of day): the scattering, the sun disc and the lit ground below the horizon follow. */
   setSky(sky: SkyDef, ground: THREE.ColorRepresentation): void {
     const u = this.mesh.material.uniforms;
     // Preetham wants the sun far away: 450 000 is the horizon fade length its vertex shader assumes
     (u.sunPosition!.value as THREE.Vector3).set(...sky.sunDir).normalize().multiplyScalar(450_000);
-    groundRadiance(sky, ground, u.skyGround!.value as THREE.Color);
+    if (this.fogGround) (u.skyGround!.value as THREE.Color).copy(this.fogGround.set(ground));
+    else groundRadiance(sky, ground, u.skyGround!.value as THREE.Color);
   }
 
   /** The dome rides with the camera: it is infinitely far away. */

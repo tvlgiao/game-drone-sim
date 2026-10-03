@@ -29,6 +29,8 @@ import { roadMaterial, terrainDetailTexture, type InstanceUniforms } from './ter
 import { TerrainView } from './terrain-view';
 import { rippleTexture, setWaterDetail, setWaterSky, setWaterTime, waterMaterial } from './water';
 import { WorldOrigin } from './world-origin';
+import { bakeImpostorAtlas, WorldTrees } from './world-trees';
+import { applyEnvPatch, type WindUniforms } from '../materials/patches';
 
 /** sky fill: low enough that slopes facing away from a low sun stay dark */
 const HEMI = 0.62;
@@ -91,6 +93,9 @@ export class WorldLevelView implements LevelView {
   private readonly roadMat: THREE.MeshStandardMaterial;
   private readonly waterMat: THREE.MeshStandardMaterial;
   private readonly scatter: ScatterView;
+  private readonly trees: WorldTrees;
+  private readonly impostors: THREE.WebGLRenderTarget | null;
+  private readonly wind: WindUniforms;
   private terrain: TerrainView | null = null;
   private far: FarTerrain | null = null;
   private city: CityView | null = null;
@@ -105,6 +110,10 @@ export class WorldLevelView implements LevelView {
   private scatterTerrainVersion = -1;
   private scatterOrigin = -1;
   private followShadow = false;
+  /** City roof parapets / vents near the drone (ultra / high) */
+  private roofDetail = false;
+  /** camera position of the last roof-detail rebuild */
+  private readonly roofCam = new THREE.Vector3();
   private cityTrees: Float32Array | null = null;
   /** drone position of the last City tree rebuild (detail follows the drone) */
   private readonly cityTreesAt = new THREE.Vector3();
@@ -136,6 +145,9 @@ export class WorldLevelView implements LevelView {
 
     // below the horizon the dome shows the fog colour: past the last terrain the ground melts into the haze
     this.dome = new SkyDome(sky, haze);
+    // past the last ground the dome is the fog itself: no lit-ground band, no seam at the world's edge
+    this.dome.fogGround = new THREE.Color();
+    this.dome.setSky(sky, haze);
     this.group.add(this.dome.mesh);
     this.envTarget = skyEnvironment(renderer, sky, haze);
 
@@ -176,7 +188,28 @@ export class WorldLevelView implements LevelView {
     this.roadMat = roadMaterial(this.detail);
     this.waterMat = waterMaterial(sky, this.ripple, this.profile.waterDetail);
     const dusk = duskAmount(sky);
-    this.scatter = new ScatterView(this.origin, this.shared, { treesLod0: this.profile.treesLod0, treesLod1: this.profile.treesLod1 });
+    // near trees: the Training field's oak / birch / pine models, swaying downwind of the sun like there
+    const windYaw = Math.atan2(this.sunDir.z, -this.sunDir.x);
+    this.wind = { uTime: { value: 0 }, uWind: { value: new THREE.Vector2(Math.cos(windYaw), -Math.sin(windYaw)) } };
+    const sway = { wind: { uniforms: this.wind, flutter: false } };
+    const flutter = { wind: { uniforms: this.wind, flutter: true } };
+    const lib = this.scope;
+    this.trees = new WorldTrees({
+      bark: lib.material('bark', { uvMeters: 1, vertexColors: true, albedo: 0x8a7a6a, roughness: 0.95, envMapIntensity: 0.8, patch: sway }),
+      cards: lib.material('foliage', { vertexColors: true, roughness: 0.8, envMapIntensity: 0.8, patch: flutter }),
+      needles: lib.material('needles', { vertexColors: true, roughness: 0.85, envMapIntensity: 0.8, patch: flutter }),
+      lod: lib.custom('world:tree-lod', () => applyEnvPatch(new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.85, metalness: 0, envMapIntensity: 0.8 }), sway)),
+    });
+    this.scatter = new ScatterView(this.origin, this.shared, { treesLod0: this.profile.treesLod0, treesLod1: this.profile.treesLod1 }, this.trees);
+    // far impostors baked from the same models: a tree keeps its colour and outline when it swaps LOD
+    let atlas: THREE.WebGLRenderTarget | null = null;
+    try {
+      atlas = bakeImpostorAtlas(renderer, lib.textures('foliage').albedo, lib.textures('needles').albedo);
+      this.scatter.setImpostorAtlas(atlas.texture);
+    } catch {
+      // no render-target support: the painted atlas stays
+    }
+    this.impostors = atlas;
     this.scatter.setDusk(dusk);
 
     const field = worldField(rt);
@@ -270,6 +303,7 @@ export class WorldLevelView implements LevelView {
 
   update(f: LevelFrame): void {
     this.shared.uTime.value = f.time;
+    this.wind.uTime.value = f.time;
     setWaterTime(this.waterMat, f.time);
     this.dome.follow(f.camera);
     const d = f.drone;
@@ -287,6 +321,12 @@ export class WorldLevelView implements LevelView {
       this.cityTreesAt.set(d.x, 0, d.z);
       this.scatter.rebuild(new Map(), this.cityTrees, this.cityTreesAt, this.profile.furnitureRange);
       this.city?.setFurniture(this.profile.furnitureRange, d.x, d.z, this.profile.kerbs);
+      this.city?.setRoofDetail(this.roofDetail, d.x, d.z, f.camera.x, f.camera.z);
+      this.roofCam.copy(f.camera);
+    } else if (this.city && this.roofDetail && (f.camera.x - this.roofCam.x) ** 2 + (f.camera.z - this.roofCam.z) ** 2 > CITY_TREE_REBUILD * CITY_TREE_REBUILD) {
+      // the LOS pilot moved (re-planted) or the camera swung far from the drone
+      this.roofCam.copy(f.camera);
+      this.city.setRoofDetail(true, this.cityTreesAt.x, this.cityTreesAt.z, f.camera.x, f.camera.z);
     }
     if (this.followShadow) this.placeSun(this.shadowCentre(f.camera, d));
   }
@@ -370,6 +410,10 @@ export class WorldLevelView implements LevelView {
     if (!q) return;
     // casters for whichever sun shadow runs: the GameView's cascades (ultra / high) or the follow box below
     const casters = q.shadows && (prof.sunShadows || q.sunCascades);
+    const detailed = q.tier === 'ultra' || q.tier === 'high';
+    this.trees.setDetailed(detailed);
+    this.roofDetail = detailed;
+    this.city?.setRoofDetail(detailed, this.cityTreesAt.x, this.cityTreesAt.z, this.roofCam.x, this.roofCam.z);
     this.scatter.setShadows(casters);
     if (this.city) this.city.buildings.mesh.castShadow = casters;
     const follow = q.shadows && prof.sunShadows && !q.sunCascades;
@@ -434,6 +478,7 @@ export class WorldLevelView implements LevelView {
     this.city?.dispose();
     this.river?.geometry.dispose();
     this.scatter.dispose();
+    this.impostors?.dispose();
     this.dome.dispose();
     this.envTarget.dispose();
     this.sun.shadow.map?.dispose();

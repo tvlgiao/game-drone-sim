@@ -74,7 +74,8 @@ export function shadeV2(b: BiomeSample, seed: number, wx: number, wz: number, wa
       parcelAt(seed, SALT_FIELDS, FIELD_CELL, wx, wz, P);
       let crop = CROP_COLOURS[cropOf(P.id)]!;
       const ang = PI * u01(rehash(P.id, 9));
-      const furrow = 1 + rows * (Math.floor((wx * dcos(ang) + wz * dsin(ang)) / 5) % 2 === 0 ? -0.08 : 0.06);
+      // furrows along the field's own direction; a light touch (at 2 m a vertex grid draws them as soft bands)
+      const furrow = 1 + rows * (Math.floor((wx * dcos(ang) + wz * dsin(ang)) / 5) % 2 === 0 ? -0.04 : 0.03);
       // the seam between two fields is a light grass verge (exposing the ground below drew dark straight lines)
       const verge = (1 - smoothstep(0.3, 1.4, P.edge)) * 0.55;
       const fc = [mix(crop[0]! * furrow, VERGE[0]!, verge), mix(crop[1]! * furrow, VERGE[1]!, verge), mix(crop[2]! * furrow, VERGE[2]!, verge)];
