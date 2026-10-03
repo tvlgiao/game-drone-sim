@@ -3,7 +3,9 @@
  * Shared by the contact shadow and checkpoint respawns, which set the drone down on the surface
  * below the checkpoint instead of leaving it disarmed in mid-air.
  */
-import type { PropDef, TerrainField } from '../types';
+import type { PropDef } from '../types';
+import { boxTopAt, type ColliderGrid, type GridCollider } from '../physics/collider-grid';
+import type { HeightField } from '../physics/terrain';
 
 export interface TopSurface {
   cx: number;
@@ -23,10 +25,10 @@ export interface SurfaceProvider {
 /** Flat decals the drone can sit on: their size y is the surface height. */
 const FLAT_DECALS: ReadonlySet<PropDef['kind']> = new Set(['rug', 'pad']);
 
-export function buildSurfaces(level: { props: readonly PropDef[] }): TopSurface[] {
+export function buildSurfaces(level: { props: readonly PropDef[] }, decalsOnly = false): TopSurface[] {
   const out: TopSurface[] = [];
   for (const p of level.props) {
-    for (const c of p.colliders) {
+    for (const c of decalsOnly ? [] : p.colliders) {
       if (c.shape.kind !== 'box' || c.dynamic) continue;
       if (p.kind === 'bulb-hanging' || p.kind === 'beam' || p.kind === 'duct') continue;
       const s = c.shape;
@@ -53,10 +55,23 @@ export function surfaceBelow(surfaces: readonly TopSurface[], x: number, y: numb
   return top;
 }
 
-/** Surface provider over prop tops on the ground (y = 0) or on a terrain height field. */
-export function createSurfaces(props: readonly PropDef[], terrain: TerrainField | null = null): SurfaceProvider {
-  const tops = buildSurfaces({ props });
+/**
+ * Surface provider: the ground (y = 0, or the height field) raised to decal and box tops. With a
+ * collider grid (outdoors) the box tops come from the grid, so streamed rooftops count too.
+ */
+export function createSurfaces(props: readonly PropDef[], terrain: HeightField | null = null, grid: ColliderGrid | null = null): SurfaceProvider {
+  const tops = buildSurfaces({ props }, grid !== null);
+  const found: GridCollider[] = [];
   return {
-    topBelow: (x, y, z) => surfaceBelow(tops, x, y, z, terrain ? terrain.heightAt(x, z) : 0),
+    topBelow: (x, y, z) => {
+      let top = surfaceBelow(tops, x, y, z, terrain ? terrain.heightAt(x, z) : 0);
+      if (!grid) return top;
+      const n = grid.query(x, -Infinity, z, x, y, z, found);
+      for (let i = 0; i < n; i++) {
+        const t = boxTopAt(found[i]!.shape, x, z);
+        if (t <= y && t > top) top = t;
+      }
+      return top;
+    },
   };
 }

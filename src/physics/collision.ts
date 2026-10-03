@@ -1,6 +1,7 @@
 /** Narrow-phase sphere tests against level collider shapes and infinite planes. Allocation-free. */
 import { Vector3 } from 'three';
 import type { ColliderShape } from '../types';
+import type { HeightField } from './terrain';
 
 export interface SphereHit {
   /** unit normal from the obstacle towards the sphere centre */
@@ -16,6 +17,9 @@ export function createSphereHit(): SphereHit {
 }
 
 const EPS = 1e-9;
+
+export const DEFAULT_RESTITUTION = 0.25;
+export const DEFAULT_FRICTION = 0.5;
 
 /** Sphere vs box (optionally yawed about +Y, same convention as Object3D.rotation.y). */
 function sphereVsBox(
@@ -207,6 +211,36 @@ export function sphereVsPlane(
   out.normal.set(nx, ny, nz);
   out.depth = radius - dist;
   out.point.set(center.x - nx * dist, center.y - ny * dist, center.z - nz * dist);
+  return true;
+}
+
+/** Central-difference half step (m) for the terrain normal. */
+export const TERRAIN_NORMAL_EPS = 0.25;
+/** A sphere whose bottom is more than this above the ground under its centre is not tested further. */
+export const TERRAIN_EARLY_OUT = 1;
+
+/**
+ * Sphere vs height field. The distance is measured along the local normal (not straight down), so a
+ * sphere pressed against a steep slope is pushed out of the face instead of up through it.
+ */
+export function sphereVsTerrain(center: Vector3, radius: number, field: HeightField, out: SphereHit): boolean {
+  const x = center.x;
+  const z = center.z;
+  const h = field.heightAt(x, z);
+  if (center.y - radius > h + TERRAIN_EARLY_OUT) return false;
+  const e = TERRAIN_NORMAL_EPS;
+  let nx = field.heightAt(x - e, z) - field.heightAt(x + e, z);
+  let ny = 2 * e;
+  let nz = field.heightAt(x, z - e) - field.heightAt(x, z + e);
+  const inv = 1 / Math.sqrt(nx * nx + ny * ny + nz * nz);
+  nx *= inv;
+  ny *= inv;
+  nz *= inv;
+  const d = (center.y - h) * ny;
+  if (d >= radius) return false;
+  out.normal.set(nx, ny, nz);
+  out.depth = radius - d;
+  out.point.set(x - nx * d, center.y - ny * d, z - nz * d);
   return true;
 }
 
