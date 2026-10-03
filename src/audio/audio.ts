@@ -90,6 +90,8 @@ const CELL_CRIT = 3.3;
 const COMBO_WINDOW = 2.6;
 /** pentatonic climb of the ring chime with the combo */
 const COMBO_STEPS = [0, 2, 4, 7, 9, 12, 14, 16, 19, 21, 24];
+/** matrixWorld entries the listener uses: up (4–6), back (8–10), position (12–14) */
+const EYE_INDICES = [4, 5, 6, 8, 9, 10, 12, 13, 14] as const;
 
 export class GameAudio {
   private ctx: BaseAudioContext | null = null;
@@ -144,6 +146,7 @@ export class GameAudio {
   private readonly af: AmbienceFrame = { lx: 0, ly: 0, lz: 0, agl: 0, speed: 0, rushWeight: 1, now: 0, dt: 0 };
   private readonly mi: MusicInputs = { status: 'menu', nextRing: 0, totalRings: 0, time: 0, bestTime: null };
   private readonly dronePos = { x: 0, y: 0, z: 0 };
+  private readonly lastEye = new Float64Array(16).fill(Number.NaN);
 
   constructor(opts: AudioOptions = {}) {
     this.createContext = opts.createContext;
@@ -500,7 +503,14 @@ export class GameAudio {
     const lx = e[12]!;
     const ly = e[13]!;
     const lz = e[14]!;
-    placeListener(ctx.listener, lx, ly, lz, -e[8]!, -e[9]!, -e[10]!, e[4]!, e[5]!, e[6]!);
+    // param writes cross to the audio thread: skip them while the eye holds still (menus, LOS hover)
+    const le = this.lastEye;
+    let moved = false;
+    for (const i of EYE_INDICES) if (!(Math.abs(le[i]! - e[i]!) <= 1e-4)) moved = true;
+    if (moved) {
+      for (const i of EYE_INDICES) le[i] = e[i]!;
+      placeListener(ctx.listener, lx, ly, lz, -e[8]!, -e[9]!, -e[10]!, e[4]!, e[5]!, e[6]!);
+    }
 
     const fpv = camera === 'fpv';
     const p = drone.position;
