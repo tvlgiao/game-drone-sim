@@ -135,8 +135,11 @@ test.describe('desktop', () => {
     await boot(page);
     await hook(page, (d) => d.action({ type: 'level', id: 'training', mode: 'freefly' }));
     await expect.poll(() => hook(page, (d) => d.race.status)).toBe('freefly');
+    // the first frames of a freshly built level compile its shaders: fly out only once it is rendering
+    const r0 = await hook(page, (d) => d.renders);
+    await expect.poll(() => hook(page, (d) => d.renders), { timeout: 15_000 }).toBeGreaterThan(r0 + 10);
     await hook(page, (d) => d.teleport(55, 0.2, 0));
-    await expect(page.locator('.ds-center__big')).toHaveText('OUT OF BOUNDS');
+    await expect(page.locator('.ds-center__big')).toHaveText('OUT OF BOUNDS', { timeout: 10_000 });
     await expect(page.locator('.ds-center__sub')).toContainText(/respawn in [1-5] s/);
     await expect.poll(() => hook(page, (d) => Math.round(d.state.position.z)), { timeout: 9_000 }).toBe(33);
     expect(await hook(page, (d) => Math.round(d.state.position.x))).toBe(0);
