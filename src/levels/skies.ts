@@ -20,9 +20,9 @@ export const SKIES: Readonly<Record<SkyPreset, SkyDef>> = {
   alpine: { top: 0x3a69b0, horizon: 0xc9d1d8, sunDir: unit(-0.82, 0.26, -0.34), sunColor: 0xffcd94, sunIntensity: 5.8, hemi: [0xafc2df, 0x4b4a3e] },
   afternoon: { top: 0x3274c6, horizon: 0xcfd9df, sunDir: unit(-0.72, 0.44, -0.36), sunColor: 0xffe0b8, sunIntensity: 6.2, hemi: [0xc3d6f2, 0x5e5a50] },
   dawn: { top: 0x4f7fbf, horizon: 0xf1cfb4, sunDir: unit(0.82, 0.16, -0.4), sunColor: 0xffcf9e, sunIntensity: 4.6, hemi: [0xb9c6e6, 0x4d4b3c] },
-  noon: { top: 0x2f72cf, horizon: 0xc6dbea, sunDir: unit(-0.38, 0.82, 0.42), sunColor: 0xfff2df, sunIntensity: 6.4, hemi: [0xcfe0fb, 0x5b6a3c] },
+  noon: { top: 0x2f72cf, horizon: 0xc6dbea, sunDir: unit(-0.42, 0.74, 0.46), sunColor: 0xfff2df, sunIntensity: 5.2, hemi: [0xcfe0fb, 0x5b6a3c] },
   golden: { top: 0x3f6fb2, horizon: 0xe6cdac, sunDir: unit(-0.86, 0.22, -0.3), sunColor: 0xffc283, sunIntensity: 5.6, hemi: [0xb3c4e2, 0x56483a] },
-  dusk: { top: 0x24386a, horizon: 0xdc8f67, sunDir: unit(-0.78, 0.07, 0.6), sunColor: 0xff9257, sunIntensity: 3.2, hemi: [0x7787b8, 0x3a3232] },
+  dusk: { top: 0x2b4174, horizon: 0xdc9670, sunDir: unit(-0.78, 0.11, 0.6), sunColor: 0xff9a5e, sunIntensity: 4, hemi: [0x8d9cc8, 0x3e3836] },
 };
 
 /** Environment for an outdoor level at `time`, fog reaching 1 % visibility at `viewDistance` metres. */

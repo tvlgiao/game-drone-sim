@@ -50,6 +50,20 @@ const COLOR_VERTEX_SRGB = /* glsl */ `
   vColor.rgb = pow( vColor.rgb, vec3( 2.2 ) );
 #endif`;
 
+/**
+ * The world engine paints village plateaus one flat khaki (0x8d9858 ± 6 %), which reads as a bare disc from
+ * the air: those vertices become lawn green, matched by hue ratio so the per-vertex jitter does not matter.
+ */
+const VILLAGE_LAWN = /* glsl */ `
+#if defined( USE_COLOR )
+{
+  vec3 s = pow( vColor.rgb, vec3( 1.0 / 2.2 ) );
+  vec2 ratio = s.rb / max( s.g, 1e-3 );
+  float village = 1.0 - smoothstep( 0.012, 0.03, length( ratio - vec2( 0.9276, 0.5789 ) ) );
+  vColor.rgb = mix( vColor.rgb, pow( vec3( 0.37, 0.52, 0.23 ), vec3( 2.2 ) ), village );
+}
+#endif`;
+
 const TERRAIN_VARYINGS = /* glsl */ `
 varying vec3 vTerrainPos;
 varying vec3 vTerrainN;`;
@@ -93,7 +107,7 @@ export function terrainMaterial(detail: THREE.Texture): THREE.MeshStandardMateri
     s.uniforms.uDetail = { value: detail };
     s.vertexShader = s.vertexShader
       .replace('#include <common>', `#include <common>\n${TERRAIN_VARYINGS}`)
-      .replace('#include <color_vertex>', COLOR_VERTEX_SRGB)
+      .replace('#include <color_vertex>', `${COLOR_VERTEX_SRGB}\n${VILLAGE_LAWN}`)
       .replace(
         '#include <project_vertex>',
         `#include <project_vertex>
@@ -116,7 +130,9 @@ export function terrainMaterial(detail: THREE.Texture): THREE.MeshStandardMateri
   float gully = texture2D( uDetail, vec2( dot( vTerrainPos.xz, vec2( 0.0071, 0.0049 ) ), vTerrainPos.y * 0.0012 ) ).g;
   float band = texture2D( uDetail, vec2( vTerrainPos.y * 0.011, 0.37 ) ).r;
   vec3 rockTint = mix( vec3( 0.74, 0.77, 0.82 ), vec3( 1.02, 0.98, 0.9 ), band );
-  diffuseColor.rgb = mix( diffuseColor.rgb, diffuseColor.rgb * rockTint * ( 0.62 + 0.62 * gully ), steep * ( 1.0 - snow ) );`,
+  diffuseColor.rgb = mix( diffuseColor.rgb, diffuseColor.rgb * rockTint * ( 0.62 + 0.62 * gully ), steep * ( 1.0 - snow ) );
+  // a touch less saturation: aerial greens are olive, not toy green
+  diffuseColor.rgb = mix( vec3( dot( diffuseColor.rgb, vec3( 0.2126, 0.7152, 0.0722 ) ) ), diffuseColor.rgb, 0.78 ) * 0.92;`,
       )
       .replace(
         '#include <roughnessmap_fragment>',
@@ -130,7 +146,7 @@ export function terrainMaterial(detail: THREE.Texture): THREE.MeshStandardMateri
   normal = terrainBump( -vViewPosition, normal, ( d - 0.5 ) * mix( 0.12, 0.9, steep ) * ( 1.0 - snow * 0.6 ) );`,
       );
   };
-  m.customProgramCacheKey = () => 'terrain-v3';
+  m.customProgramCacheKey = () => 'terrain-v4';
   return m;
 }
 

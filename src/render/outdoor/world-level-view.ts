@@ -82,7 +82,8 @@ export class WorldLevelView implements LevelView {
     this.fog = new THREE.FogExp2(this.level.env.fog.color, 2.15 / this.fogDistance());
     this.cameraFar = this.farPlane();
 
-    const haze = this.content.kind === 'city' ? 0x6c6a64 : 0x58653f;
+    // below the horizon the dome shows the fog colour: past the last terrain the ground melts into the haze
+    const haze = sky.horizon;
     this.dome = new SkyDome(sky, haze);
     this.group.add(this.dome.mesh);
     this.envTarget = skyEnvironment(renderer, sky, haze);

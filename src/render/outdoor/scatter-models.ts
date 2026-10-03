@@ -148,23 +148,17 @@ export function broadleafLod0(): Geo {
   return mergeParts([trunk(H * d.crownBase + 1.2, d.trunkRadius, 5), crownC]);
 }
 
-/**
- * Broadleaf LOD1: an octahedron whose lower tip reaches the ground (8 triangles), so the crown never floats; the
- * tip is trunk-coloured.
- */
+/** Broadleaf LOD1: a squat octahedron crown on a 3-sided trunk (14 triangles), the silhouette of LOD0. */
 export function broadleafLod1(): Geo {
   const d = TREE_DIMENSIONS[1]!;
   const H = d.height;
   const crownH = H * (1 - d.crownBase);
-  const mid = H - crownH * 0.55;
-  const g = new THREE.OctahedronGeometry(1, 0);
-  const p = g.getAttribute('position');
-  for (let i = 0; i < p.count; i++) {
-    const y = p.getY(i);
-    p.setXYZ(i, p.getX(i) * d.crownRadius, y > 0.5 ? H : y < -0.5 ? 0 : mid, p.getZ(i) * d.crownRadius);
-  }
-  g.computeVertexNormals();
-  return mergeParts([colorize(g, (_x, y) => (y < 0.5 ? TRUNK : shadeHex(BROADLEAF, 0.62 + 0.38 * (y / H))))]);
+  const crown = new THREE.OctahedronGeometry(1, 0);
+  crown.rotateY(Math.PI / 4);
+  crown.scale(d.crownRadius * 1.05, crownH / 2, d.crownRadius * 1.05);
+  crown.translate(0, H - crownH / 2, 0);
+  const crownC = colorize(crown, (_x, y, _z, _nx, ny) => shadeHex(BROADLEAF, (0.6 + 0.4 * ((y - (H - crownH)) / crownH)) * (ny < 0 ? 0.75 : 1)));
+  return mergeParts([trunk(H * d.crownBase + 1, d.trunkRadius * 1.3, 3), crownC]);
 }
 
 /** Scrub: a low lumpy bush (LOD0 20 triangles, LOD1 8). */
