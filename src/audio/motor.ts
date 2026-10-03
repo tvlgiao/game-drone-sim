@@ -234,7 +234,7 @@ export class MotorSound {
     glide(this.hiss.gain, 0.012 * link * (f.armed ? 1 : 0.4), now, 0.1);
 
     if (!f.fpv) {
-      placePanner(this.panner, f.px, f.py, f.pz, now);
+      placePanner(this.panner, f.px, f.py, f.pz);
       glide(this.air.frequency, airCutoff(dist), now, 0.1);
     }
     this.last.wash = wash;

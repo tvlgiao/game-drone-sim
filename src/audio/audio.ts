@@ -352,11 +352,17 @@ export class GameAudio {
     glide(fade.gain, 1, ctx.currentTime, 0.5);
     this.levelFade.set(scope, fade);
     // the level's space: convolution reverb on the effects (motor, impacts, one-shots)
-    const [l, r] = impulseResponse(profile.reverb, ctx.sampleRate, this.tier.lite ? 0.6 : 1);
-    const ir = ctx.createBuffer(2, l.length, ctx.sampleRate);
+    // lite: a shorter mono room (one convolution instead of two, ~⅓ of the cost)
+    const lite = this.tier.lite;
+    const [l, r] = impulseResponse(profile.reverb, ctx.sampleRate, lite ? 0.6 : 1);
+    const ir = ctx.createBuffer(lite ? 1 : 2, l.length, ctx.sampleRate);
     ir.copyToChannel(l, 0);
-    ir.copyToChannel(r, 1);
+    if (!lite) ir.copyToChannel(r, 1);
     const conv = scope.convolver(ir);
+    if (lite) {
+      conv.channelCount = 1;
+      conv.channelCountMode = 'explicit';
+    }
     this.reverbIn!.connect(conv);
     conv.connect(this.reverbOut!);
     glide(this.reverbOut!.gain, profile.reverbMix, ctx.currentTime, 0.2);
@@ -494,7 +500,7 @@ export class GameAudio {
     const lx = e[12]!;
     const ly = e[13]!;
     const lz = e[14]!;
-    placeListener(ctx.listener, lx, ly, lz, -e[8]!, -e[9]!, -e[10]!, e[4]!, e[5]!, e[6]!, now);
+    placeListener(ctx.listener, lx, ly, lz, -e[8]!, -e[9]!, -e[10]!, e[4]!, e[5]!, e[6]!);
 
     const fpv = camera === 'fpv';
     const p = drone.position;

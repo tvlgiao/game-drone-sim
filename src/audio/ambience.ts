@@ -58,6 +58,7 @@ export class Ambience {
   private readonly nextEvent: number[];
   private readonly water: Spot = { x: 0, y: 0, z: 0, near: 0 };
   private readonly village: Spot = { x: 0, y: 0, z: 0, near: 0 };
+  private readonly riverAt: Spot = { x: 0, y: 0, z: 0, near: 0 };
   private probeAt = -Infinity;
   private readonly random: () => number;
   /** last levels for tests / diagnostics */
@@ -108,7 +109,7 @@ export class Ambience {
   private emitter(e: EmitterDef): void {
     const s = this.d.scope;
     const p = s.panner(this.d.model, e.ref, 1.2, 500);
-    placePanner(p, e.position[0], e.position[1], e.position[2], 0, 0.001);
+    placePanner(p, e.position[0], e.position[1], e.position[2]);
     const g = s.gain(e.gain);
     g.connect(p).connect(this.d.out);
     switch (e.kind) {
@@ -198,7 +199,15 @@ export class Ambience {
     if (this.riverGain && this.riverPanner) {
       const near = this.water.near;
       glide(this.riverGain.gain, near > 0 ? 0.4 * near : 0, now, 0.6);
-      if (near > 0) placePanner(this.riverPanner, this.water.x, this.water.y, this.water.z, now, 0.5);
+      if (near > 0) {
+        // the probe jumps between sample points: glide the river's position in JS (panners take plain writes)
+        const k = this.riverAt.near > 0 ? Math.min(1, f.dt * 1.5) : 1;
+        this.riverAt.x += (this.water.x - this.riverAt.x) * k;
+        this.riverAt.y += (this.water.y - this.riverAt.y) * k;
+        this.riverAt.z += (this.water.z - this.riverAt.z) * k;
+        this.riverAt.near = near;
+        placePanner(this.riverPanner, this.riverAt.x, this.riverAt.y, this.riverAt.z);
+      } else this.riverAt.near = 0;
       this.last.river = near;
     }
 

@@ -148,42 +148,35 @@ export function glide(p: AudioParam, value: number, now: number, tc: number): vo
   if (Number.isFinite(value)) p.setTargetAtTime(value, now, tc);
 }
 
-/** Moves a PannerNode to (x, y, z), smoothed; falls back to setPosition on engines without position params. */
-export function placePanner(p: PannerNode, x: number, y: number, z: number, now: number, tc = 0.03): void {
+/**
+ * Moves a PannerNode to (x, y, z). Plain value writes, never ramps: an automated panner position (or
+ * listener) switches Chrome's panner to per-sample spatialisation for good — about 8× the cost. Positions
+ * update at the frame rate, which is smooth at a 128-sample render quantum.
+ */
+export function placePanner(p: PannerNode, x: number, y: number, z: number): void {
+  if (!Number.isFinite(x) || !Number.isFinite(y) || !Number.isFinite(z)) return;
   if (p.positionX) {
-    glide(p.positionX, x, now, tc);
-    glide(p.positionY, y, now, tc);
-    glide(p.positionZ, z, now, tc);
+    p.positionX.value = x;
+    p.positionY.value = y;
+    p.positionZ.value = z;
   } else {
     (p as unknown as { setPosition(x: number, y: number, z: number): void }).setPosition(x, y, z);
   }
 }
 
-/** Puts the listener at (x, y, z) facing f with up u; legacy setPosition / setOrientation fallback. */
-export function placeListener(
-  l: AudioListener,
-  x: number,
-  y: number,
-  z: number,
-  fx: number,
-  fy: number,
-  fz: number,
-  ux: number,
-  uy: number,
-  uz: number,
-  now: number,
-): void {
+/** Puts the listener at (x, y, z) facing f with up u (plain writes, see placePanner); legacy fallback. */
+export function placeListener(l: AudioListener, x: number, y: number, z: number, fx: number, fy: number, fz: number, ux: number, uy: number, uz: number): void {
+  if (![x, y, z, fx, fy, fz, ux, uy, uz].every(Number.isFinite)) return;
   if (l.positionX) {
-    const tc = 0.02;
-    glide(l.positionX, x, now, tc);
-    glide(l.positionY, y, now, tc);
-    glide(l.positionZ, z, now, tc);
-    glide(l.forwardX, fx, now, tc);
-    glide(l.forwardY, fy, now, tc);
-    glide(l.forwardZ, fz, now, tc);
-    glide(l.upX, ux, now, tc);
-    glide(l.upY, uy, now, tc);
-    glide(l.upZ, uz, now, tc);
+    l.positionX.value = x;
+    l.positionY.value = y;
+    l.positionZ.value = z;
+    l.forwardX.value = fx;
+    l.forwardY.value = fy;
+    l.forwardZ.value = fz;
+    l.upX.value = ux;
+    l.upY.value = uy;
+    l.upZ.value = uz;
   } else {
     const legacy = l as unknown as { setPosition(x: number, y: number, z: number): void; setOrientation(a: number, b: number, c: number, d: number, e: number, f: number): void };
     legacy.setPosition(x, y, z);

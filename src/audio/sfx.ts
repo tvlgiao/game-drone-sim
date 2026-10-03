@@ -65,7 +65,7 @@ export class VoicePool {
     src.playbackRate.value = rate;
     v.gain.gain.cancelScheduledValues(now);
     v.gain.gain.setValueAtTime(gain, Math.max(now, when));
-    if (v.panner && x !== undefined) placePanner(v.panner, x, y ?? 0, z ?? 0, now, 0.001);
+    if (v.panner && x !== undefined) placePanner(v.panner, x, y ?? 0, z ?? 0);
     src.connect(v.gain);
     v.src = src;
     v.started = now;
