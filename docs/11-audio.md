@@ -97,6 +97,27 @@ Rendered once, mono, by an OfflineAudioContext at start (core set, ~0.3 s on a d
 - **Convolution reverbs** are generated (`dsp.impulseResponse`): taps + damped noise tail, normalised to
   unit energy. Lite: 60 % length, mono.
 
+### 4.1 Living world (`life-sounds.ts`)
+
+A level whose runtime has a life hub (docs/12) gets `LifeSounds` with its level scope (so it fades and is disposed
+with the level, on the ambience bus):
+
+- **Cars**: a fixed pool of voices (12 full, 6 lite / Quest / phones), each a sawtooth engine hum (fundamental
+  by speed and vehicle type, low-passed) plus pink tyre noise (louder with speed, a little more when braking)
+  through an equal-power panner. Every audio update `hub.getTrafficEmitters` gives the nearest cars and
+  `SlotAssigner` keeps each car on its voice (matched by position moved on by its velocity), gives new cars
+  the free voices (fade in) and silences voices whose car is gone. Doppler by hand (`dopplerFactor` on the
+  car's radial speed relative to the moving listener) on the hum frequency and the noise playback rate.
+- **Turbines and the tractor**: loop voices (4 full, 2 lite) from `hub.emitters`: a low broad swish pulsing at
+  the blade-pass rate, a narrow diesel growl with a fast chug. The profile's fixed Training tractor is dropped
+  on full tiers (the life's tractor plays instead).
+- **Herds**: cowbells (cows) or a bleat (sheep) from somewhere in the nearest herd within 80 m every 1.5–5 s.
+- **Events**: `horn` → a car horn at the car, `flock-scatter` → a burst of wing claps (new bank sounds `wings`,
+  `bleat`).
+- No node or object per update (pool built once; tested), and the hub's listeners are dropped on a level
+  switch. Main-thread cost of the update 0.04–0.08 ms (City high, 12 voices; `audioMix.life.ms`); the graph is
+  ~360 nodes in a City flight on high, ~280 on low.
+
 ## 5. Music (`music/`)
 
 Option A (procedural): five original themes, one per level, written as data (`songs.ts`) and rendered

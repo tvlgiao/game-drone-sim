@@ -152,7 +152,7 @@ ultra triangles (the grass tufts), Training on Quest (143 k), iPhone Alpine (251
 - No allocation per frame (tested like the VFX pools: 1000 frames, no new three.js objects) — City, Infinite
   and the loft.
 
-## 7. Audio hooks (for `src/audio`, not wired yet)
+## 7. Audio hooks (wired: `src/audio/life-sounds.ts`, docs/11 §4.1)
 
 ```ts
 const hub = runtime.life;                                   // LevelRuntime.life (every level has one)
