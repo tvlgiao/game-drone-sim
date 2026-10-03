@@ -145,6 +145,25 @@ test.describe('phone (medium budget)', () => {
     expect(s.triangles).toBeLessThanOrEqual(PHONE_TRIS);
     expect(errors).toEqual([]);
   });
+
+  test('Alpine Valley in chase over the take-off keeps a margin under the triangle budget (≤ 245k)', async ({ page }) => {
+    await boot(page);
+    await fly(page, 'alpine', 'freefly');
+    await page.evaluate(() => {
+      const d = (window as unknown as { __drone: Hook & { setCamera: (m: string) => void; state: { position: { x: number; y: number; z: number } } } }).__drone;
+      const p = d.state.position;
+      d.teleport(p.x, p.y + 3, p.z - 6, -0.2);
+      d.hold(true);
+      d.setCamera('chase');
+    });
+    // streaming settles
+    await page.waitForTimeout(4_000);
+    const s = await hook(page, (d) => d.stats());
+    test.info().annotations.push({ type: 'budget', description: `${s.calls} draws, ${s.triangles} tris` });
+    expect(s.calls).toBeLessThanOrEqual(PHONE_DRAWS);
+    expect(s.triangles).toBeLessThanOrEqual(245_000);
+    expect(errors).toEqual([]);
+  });
 });
 
 test.describe('desktop', () => {

@@ -67,10 +67,16 @@ export const OUTDOOR_PROFILES: Readonly<Record<QualityTier, OutdoorProfile>> = {
 /** View distance setting → scale of the tier's fog / streaming reach ('auto' = the tier's own). */
 export const VIEW_DISTANCE_SCALE: Readonly<Record<'auto' | 'short' | 'medium' | 'long', number>> = { auto: 1, short: 0.5, medium: 0.75, long: 1.3 };
 
-/** Phones run the medium budget at most (07 §7: iPhone / tablet row); desktop takes the tier as is. */
+/**
+ * Phones: the medium budget, with the batched far backdrop one chunk ring shorter (9 × 128 m, still past where
+ * the medium fog leaves ~5 % of the ground): Alpine in chase was at 254 k triangles of the 250 k budget, and the
+ * backdrop is the largest single draw (≈ 51 k → 41 k).
+ */
+export const PHONE_OUTDOOR_PROFILE: Readonly<OutdoorProfile> = { ...OUTDOOR_PROFILES.medium, farRadius: 9 };
 
+/** Phones run the phone budget at most (07 §7: iPhone row); tablets and desktop take the tier as is. */
 export function outdoorProfile(tier: QualityTier, form: FormFactor = 'desktop'): OutdoorProfile {
-  if (form === 'phone' && (tier === 'ultra' || tier === 'high')) return OUTDOOR_PROFILES.medium;
+  if (form === 'phone' && tier !== 'low') return PHONE_OUTDOOR_PROFILE;
   return OUTDOOR_PROFILES[tier];
 }
 
