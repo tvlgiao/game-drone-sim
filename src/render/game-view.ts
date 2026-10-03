@@ -265,6 +265,25 @@ export class GameView {
     return this.rig.camera;
   }
 
+  /**
+   * Compiles the level's materials now — in parallel where the browser has KHR_parallel_shader_compile — so the
+   * first frames of a freshly built level do not stall on shader compilation (the loading overlay is still up).
+   * Resolves within `maxMs` whatever happens; anything left compiles on its first frame as before.
+   */
+  async precompile(maxMs = 8000): Promise<void> {
+    const r = this.renderer;
+    this.scene.updateMatrixWorld(true);
+    const cam = r.xr.isPresenting ? this.xrCam : this.rig.camera;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    try {
+      await Promise.race([r.compileAsync(this.scene, cam), new Promise<void>((res) => (timer = setTimeout(res, maxMs)))]);
+    } catch {
+      // a context loss or an exotic material: the frames compile instead
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+
   /** LOS pilot's eye (outdoors it moves when the pilot is re-planted): the HUD's pilot marker. */
   get pilotEye(): THREE.Vector3 {
     return this.rig.pilotEye;

@@ -303,6 +303,8 @@ function boot(caps: EditionCaps): void {
   let levelSeq = 0;
   /** the loaded level's `ready` has resolved */
   let levelReadyFlag = false;
+  /** the view is compiling the new level's shaders: no frames meanwhile (a frame would compile them synchronously) */
+  let compiling = false;
 
   function activeLevel(rt: LevelRuntime): ActiveLevel {
     const c = rt.content;
@@ -406,6 +408,13 @@ function boot(caps: EditionCaps): void {
     toSpawn();
     publishLevels();
     publishMinimap(next);
+    // shaders compile behind the overlay / level picker, not in the first frames of the flight (a headset must get
+    // a frame every refresh: there the first frames compile as before)
+    if (!view.presenting) {
+      compiling = true;
+      await view.precompile();
+      compiling = false;
+    }
     loading.hide();
     menuRenders = 0; // the new scenery must show behind the menu
     levelEvents.emit({ type: 'loaded', level: activeLevel(next) });
@@ -417,8 +426,14 @@ function boot(caps: EditionCaps): void {
     const boot = level;
     const seq = levelSeq;
     const name = levelEntry(boot.def.id)?.name ?? boot.def.name;
-    void waitReady(boot, seq, `Building ${name}`).then((ok) => {
+    void waitReady(boot, seq, `Building ${name}`).then(async (ok) => {
       if (!ok || level !== boot) return;
+      if (!view.presenting) {
+        compiling = true;
+        await view.precompile();
+        compiling = false;
+      }
+      if (level !== boot) return;
       levelReadyFlag = true;
       loading.hide();
       menuRenders = 0;
@@ -1024,7 +1039,7 @@ function boot(caps: EditionCaps): void {
     // Resize before drawing: resizing the canvas clears it, and after the draw the cleared buffer would be shown.
     if (settings.quality === 'auto' && !inVr && !overlay) view.setRenderScale(dynRes.update(fpsMeter.frameMs));
     // a streaming level keeps uploading its chunks behind a menu (still frames, the camera does not move)
-    const renderNow = !overlay || menuRenders < MENU_SETTLE_FRAMES || view.levelBusy;
+    const renderNow = !compiling && (!overlay || menuRenders < MENU_SETTLE_FRAMES || view.levelBusy);
     if (renderNow) {
       if (overlay) menuRenders++;
       view.frame({
