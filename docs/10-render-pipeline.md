@@ -322,7 +322,7 @@ an immersive session at the low tier, **per frame, both eyes**. Includes the dro
 | --- | --- | --- | --- | --- |
 | City | 84 / 645 k | 84 / 516 k | 54 / 171 k | **30 / 105 k** |
 | Alpine Valley | 98 / 572 k | 98 / 537 k | 62 / 236 k | **34 / 91 k** |
-| Infinite | 94 / 512 k | 93 / 445 k | 53 / 187 k | **32 / 92 k** |
+| Infinite | 94 / 512 k | 93 / 445 k | 53 / 201 k | **32 / 92 k** |
 | Night Loft (Quest target: unchanged) | — | — | — | 68 / 109 k (feat/visual 72 / 110 k) |
 | Training (Quest target: unchanged) | — | — | — | 38 / 143 k (feat/visual 40 / 143 k) |
 
