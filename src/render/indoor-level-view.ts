@@ -12,9 +12,9 @@ import type { IndoorLevel } from '../types';
 import { StaticBatcher } from './batcher';
 import type { LevelFrame, LevelProbe, LevelView } from './level-view';
 import { Lights, MOON_DIR } from './lights';
-import { buildCity, type CityBackdrop } from './loft/city';
+import { buildCity, prewarmCity, type CityBackdrop } from './loft/city';
 import { Halos } from './loft/halos';
-import { LoftMaterials } from './loft/materials';
+import { LoftMaterials, type LoftMaterialOptions } from './loft/materials';
 import { MoonPools } from './loft/moon-pools';
 import type { MaterialLibrary, MaterialScope } from './materials/library';
 import { DETAIL_SUFFIX, buildProps, type LiveProps } from './props';
@@ -36,7 +36,28 @@ const RENDER_ORDER: Record<string, number> = { decals: 1, spill: 4, neon: 4, bul
 /** Lights' moon intensity with shadows (its constructor value) */
 const MOON_INTENSITY = 2.6;
 
+/** phones, tablets and the Quest (mobile GPU + CPU: generation time and memory) get half-size maps */
+function loftTextureCap(form: FormFactor): number {
+  const quest = typeof navigator !== 'undefined' && isQuestBrowser(navigator.userAgent);
+  return form === 'desktop' && !quest ? 2048 : MOBILE_MAX_TEXTURE / 2;
+}
+
+function loftOptions(level: IndoorLevel, renderer: THREE.WebGLRenderer, maxTexture: number): LoftMaterialOptions {
+  return { anisotropy: renderer.capabilities.getMaxAnisotropy(), maxTexture, room: level.room.size, puddles: PUDDLES };
+}
+
 export class IndoorLevelView implements LevelView {
+  /**
+   * Generates the loft's art (materials into `scope`, the city backdrop maps) one piece per task ahead of the
+   * constructor, so building the room on the loading screen is not one long frozen frame.
+   */
+  static async prewarm(level: IndoorLevel, renderer: THREE.WebGLRenderer, scope: MaterialScope, form: FormFactor, pause: () => Promise<void>): Promise<void> {
+    const maxTexture = loftTextureCap(form);
+    await LoftMaterials.prewarm(scope, loftOptions(level, renderer, maxTexture), pause);
+    await pause();
+    await prewarmCity(MOON_DIR, maxTexture, pause);
+  }
+
   readonly group = new THREE.Group();
   readonly background = new THREE.Color(0x04060b);
   readonly fog: THREE.FogExp2;
@@ -62,10 +83,9 @@ export class IndoorLevelView implements LevelView {
     this.group.name = 'world';
     this.fog = new THREE.FogExp2(level.env.fog.color, 2.15 / level.env.fog.viewDistance);
     // phones, tablets and the Quest (mobile GPU + CPU: generation time and memory) get half-size maps
-    const quest = typeof navigator !== 'undefined' && isQuestBrowser(navigator.userAgent);
-    const maxTexture = form === 'desktop' && !quest ? 2048 : MOBILE_MAX_TEXTURE / 2;
+    const maxTexture = loftTextureCap(form);
     this.scope = library.scope(level.id);
-    this.mats = new LoftMaterials(this.scope, { anisotropy: renderer.capabilities.getMaxAnisotropy(), maxTexture, room: level.room.size, puddles: PUDDLES });
+    this.mats = new LoftMaterials(this.scope, loftOptions(level, renderer, maxTexture));
     const batch = new StaticBatcher();
     const windows = buildRoom(level.room, this.mats, batch);
     this.live = buildProps(level.props, this.mats, batch, this.group);

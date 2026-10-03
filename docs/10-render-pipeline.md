@@ -335,3 +335,54 @@ only inside the shadow passes (the cards in the cascades took Alpine ultra to 2.
 (City high 682 k → 556 k, iPhone Alpine 264 k → 241 k). Ultra has no target. X1's
 earlier Quest numbers (old drone, old rings) no longer apply. Measured with the scratchpad `shots.mjs`
 (teleport + `__drone.stats()` after the streamer settles); the Quest card is up in every frame.
+
+## 12. Loading a level (`main.ts` `startLevel`, `ui/loading-screen.ts`, `GameView.prepare`)
+
+Picking a level hands the screen to the loading screen in the same task as the click (pressed state on
+`pointerdown`, the loading screen before any heavy work: it is painted, `afterPaint()`, before the load
+starts). Full-bleed level art, mode, name, the Infinite world code, a rotating pilot tip, a weighted-stage bar
+with the stage's name (`aria-live`), Back / Esc / pad B to cancel, and on failure the reason with Retry and
+Back. A level that is already loaded behind the menu still goes through it (the first flight frame draws
+behind it). In a headset the DOM screen is replaced by `XrLoadingPanel` (`render/xr-loading.ts`): a dark
+room, a progress ring and the level name 1.4 m in front of the head, drawn every XR frame of the load.
+
+| stage (`ui/load-progress.ts`) | what runs | how it stays responsive |
+| --- | --- | --- |
+| code | a generated world's renderer chunk (`loadWorldViews()`: `world-level-view-*.js`, not in the main bundle; prefetched when idle, precached by the SW) | dynamic import |
+| generate / Building city | the level runtime; terrain and city chunks | world workers (a spare pool is started when idle) |
+| textures | CC0 scans (decoded off-thread: `createImageBitmap`), the procedural sets (`texture-worker.ts`), the loft's own art (`GameView.prepareArt` → `IndoorLevelView.prewarm`, one generator per task; backdrop maps cached by size) | workers, one piece per task |
+| scene | the level view (`loadLevel(…, { deferred: true })`: no capture, no post warm-up yet) | the heavy parts were made in the previous stage |
+| shaders | `compileSliced`: `compileAsync` per object a few ms at a time, against a render target (the variants the composer and the capture use), again with only the scenery visible (the capture's light set: other light counts are other programs), then the post materials, then every program's first use (`linkPrograms`, for drivers without `KHR_parallel_shader_compile`) | 8 ms slices (`core/yield.ts`), parallel compile |
+| lighting | one scrap render (shadow maps, depth programs), then the environment capture on ready programs | one task each |
+| warm | post warm-up | — |
+
+The bar (`LoadProgress`) is the weighted sum of the stages' own fractions, never goes back, creeps inside a
+silent stage (never past 85 % of it) so it is never still, and ends at exactly 100 %. The hand-off: the bar
+fills, Free Fly says "Ready" (650 ms), the screen fades (400 ms; none with `prefers-reduced-motion`) over the
+already rendering scene; physics are held and arming is refused until it is gone, and a Race counts down
+3-2-1-GO with the drone disarmed. Dynamic resolution ignores the load and the 1.5 s after it.
+
+Boot: the splash bar follows the boot (bundle → "Building level" → "Opening menu", the last one painted before
+the first, compiling frame); the boot level's flight programs are compiled behind the menu (`warmPrograms`).
+
+### 12.1 Measured (2026-10-03, Apple-silicon Mac under load; before = 4c7479b)
+
+Click on a level card → first visual change / first flyable frame (ms) and the longest main-thread task during
+the load (iPhone: WebKit has no Long Tasks API, the longest gap between animation frames instead). Cold = first
+load of the level in the page, warm = again after another level. The Free Fly hand-off ("Ready" + fade,
+~1.05 s) follows the flyable frame. Full table and scripts: scratchpad `wi/loading/`.
+
+| level | device | visual | flyable | longest task |
+| --- | --- | --- | --- | --- |
+| Night Loft cold | desktop | 2371 → 25 | 2862 → 1383 | 2341 → 173 |
+| City cold | desktop | 1619 → 33 | 1937 → 779 | 1617 → 143 |
+| Alpine cold | desktop | 81 → 29 | 1384 → 827 | 857 → 113 |
+| Infinite cold | desktop | 76 → 28 | 1476 → 853 | 916 → 103 |
+| Night Loft cold | iPhone | 1646 → 10 | 2143 → 1362 | (gap) 297 → 114 |
+| Alpine cold | iPhone | 70 → 8 | 1893 → 1273 | (gap) 1088 → 149 |
+| Night Loft cold | Quest UA | 2081 → 24 | 2378 → 1097 | 2060 → 100 |
+| City cold | Quest UA | 1242 → 26 | 1500 → 608 | 1232 → 84 |
+
+Desktop: no task over 200 ms in any load (was up to 2.3 s); the main bundle is 1.46 MB → 1.17 MB + a
+three.js core chunk (251 kB, shared with the worker) and the 69 kB world renderer chunk. The boot itself
+still builds its level in one task (~1.4 s on desktop) behind the splash.

@@ -92,6 +92,11 @@ export function drawThumbs(root: HTMLElement): void {
   });
 }
 
+/** A level's card art at any size (the loading screen draws it full-bleed). */
+export function drawLevelArt(ctx: CanvasRenderingContext2D, id: string, w: number, h: number): void {
+  (THUMBS[id] ?? drawBlank)(ctx, w, h);
+}
+
 function ring(ctx: CanvasRenderingContext2D, x: number, y: number, rx: number, ry: number, color: string, w: number): void {
   ctx.save();
   ctx.shadowColor = color;

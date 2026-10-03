@@ -185,7 +185,8 @@ test('sound stops when the window is hidden and when quitting the game', async (
     document.dispatchEvent(new Event('visibilitychange'));
   });
   await page.waitForFunction(() => window.__drone.audio === 'suspended');
-  expect(await page.evaluate(() => window.__drone.race.status)).toBe('paused');
+  // hidden during the loading screen's hand-off: the flight starts paused
+  await expect.poll(() => page.evaluate(() => window.__drone.race.status)).toBe('paused');
   await page.evaluate(() => {
     Object.defineProperty(document, 'hidden', { configurable: true, get: () => false });
     document.dispatchEvent(new Event('visibilitychange'));

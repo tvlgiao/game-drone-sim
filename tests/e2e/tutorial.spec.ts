@@ -12,6 +12,7 @@ interface Hook {
   camera: string;
   armed: boolean;
   race: { status: string };
+  loading: { visible: boolean };
   state: { position: { x: number; y: number; z: number } };
   tutorial: { on: boolean; phase: string; step: string; index: number; progress: number; dialog: string | null };
   droneNdc: { x: number; y: number; z: number };
@@ -212,7 +213,8 @@ test('Training LOS keeps the drone inside the frame while it climbs off the pad 
   await page.addInitScript((k) => localStorage.setItem(k, JSON.stringify({ done: true, skipped: true, step: 1, at: 1 })), TUTORIAL_KEY);
   await boot(page);
   await hook(page, (d) => d.action({ type: 'level', id: 'training', mode: 'freefly' }));
-  await expect.poll(() => hook(page, (d) => d.race.status)).toBe('freefly');
+  // the drone arms once the loading screen has handed over
+  await expect.poll(() => hook(page, (d) => [d.race.status, d.loading.visible]), { timeout: 15_000 }).toEqual(['freefly', false]);
   expect(await hook(page, (d) => d.camera)).toBe('los');
   await hook(page, (d) => d.press('arm'));
   await expect.poll(() => hook(page, (d) => d.armed)).toBe(true);

@@ -16,6 +16,8 @@ export interface LevelEntry {
   id: LevelId;
   name: string;
   kind: 'authored' | 'seeded';
+  /** a generated world (terrain / city content): its renderer is a chunk loaded before the level is built */
+  world?: true;
   blurb: string;
   /** `genVersion`: generator of a saved world (default: the current one) */
   build(arg?: { seed?: number; genVersion?: number }): LevelRuntime;
@@ -41,6 +43,7 @@ export const LEVELS: readonly LevelEntry[] = [
     id: 'city',
     name: 'City',
     kind: 'authored',
+    world: true,
     blurb: 'Downtown towers at dusk: eighteen rings through street canyons, over roofs and under skybridges.',
     build: () => cityRuntime(),
   },
@@ -48,6 +51,7 @@ export const LEVELS: readonly LevelEntry[] = [
     id: 'alpine',
     name: 'Alpine Valley',
     kind: 'authored',
+    world: true,
     blurb: 'Mountains, pine forest and a glacial lake: sixteen rings up the valley and along the ridge.',
     build: () => alpineRuntime(),
   },
@@ -55,6 +59,7 @@ export const LEVELS: readonly LevelEntry[] = [
     id: 'infinite',
     name: 'Infinite World',
     kind: 'seeded',
+    world: true,
     blurb: 'Endless countryside from a seed: hills, rivers, villages and roads. Share the code, fly it again.',
     build: (arg) => infiniteRuntime(arg?.seed ?? randomSeed(), { genVersion: arg?.genVersion }),
   },
@@ -66,6 +71,11 @@ export const LAST_LEVEL_KEY = 'drone-sim.level';
 
 export function levelEntry(id: LevelId): LevelEntry | undefined {
   return LEVELS.find((l) => l.id === id);
+}
+
+/** True for a generated world (City, Alpine, Infinite): see `LevelEntry.world`. */
+export function isWorldLevel(id: LevelId): boolean {
+  return levelEntry(id)?.world === true;
 }
 
 export function isPlayableLevel(id: unknown): id is LevelId {

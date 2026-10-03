@@ -21,8 +21,31 @@ function canvas(w: number, h = w): [HTMLCanvasElement, CanvasRenderingContext2D]
   return [c, ctx];
 }
 
-/** Tileable fbm value noise in [0,1], `size`² samples. */
+/** fbm fields already computed (same arguments → same field): level switches and the texture prewarm reuse them */
+const FBM_CACHE = new Map<string, Float32Array>();
+/** memory cap of the cache (floats): 16 MB */
+const FBM_CACHE_FLOATS = 4 * 1024 * 1024;
+let fbmCached = 0;
+
+/** Tileable fbm value noise in [0,1], `size`² samples (memoised: the caller gets its own copy). */
 export function fbmField(size: number, basePeriod: number, octaves: number, seed: number, gain = 0.5): Float32Array {
+  const key = `${size}|${basePeriod}|${octaves}|${seed}|${gain}`;
+  const hit = FBM_CACHE.get(key);
+  if (hit) return hit.slice();
+  const out = fbmFieldRaw(size, basePeriod, octaves, seed, gain);
+  if (out.length <= FBM_CACHE_FLOATS / 4) {
+    while (fbmCached + out.length > FBM_CACHE_FLOATS && FBM_CACHE.size > 0) {
+      const [k, v] = FBM_CACHE.entries().next().value!;
+      FBM_CACHE.delete(k);
+      fbmCached -= v.length;
+    }
+    FBM_CACHE.set(key, out);
+    fbmCached += out.length;
+  }
+  return out.slice();
+}
+
+function fbmFieldRaw(size: number, basePeriod: number, octaves: number, seed: number, gain = 0.5): Float32Array {
   const out = new Float32Array(size * size);
   const rnd = mulberry32(seed);
   let amp = 1;

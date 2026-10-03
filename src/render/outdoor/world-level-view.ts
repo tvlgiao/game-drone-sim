@@ -89,7 +89,8 @@ export class WorldLevelView implements LevelView {
   private readonly detail: THREE.DataTexture;
   private readonly ripple: THREE.DataTexture;
   private readonly shared: InstanceUniforms = { uTime: { value: 0 } };
-  private readonly terrainMat: THREE.MeshStandardMaterial;
+  /** streamed terrain only (the City has its own street ground) */
+  private readonly terrainMat: THREE.MeshStandardMaterial | null;
   private readonly roadMat: THREE.MeshStandardMaterial;
   private readonly waterMat: THREE.MeshStandardMaterial;
   private readonly scatter: ScatterView;
@@ -163,7 +164,7 @@ export class WorldLevelView implements LevelView {
     this.ripple = rippleTexture(lowTier ? 64 : 256);
     // ground: vertex-colour palette (the generator's biomes, fields, banks) over the grass set as detail, rock by
     // the per-vertex weight (and on any steep slope, so the far backdrop's cliffs match), wet banks, soil
-    this.terrainMat = this.scope.terrain({
+    this.terrainMat = rt.content.kind !== 'terrain' ? null : this.scope.terrain({
       base: 'grass',
       uvMeters: 1,
       rockAttribute: 'aRock',
@@ -218,7 +219,7 @@ export class WorldLevelView implements LevelView {
     const c = this.content;
     const s = this.level.spawn.position;
     if (c.kind === 'terrain') {
-      this.terrain = new TerrainView(c.stream, this.origin, { terrain: this.terrainMat, road: this.roadMat, water: this.waterMat }, { uploads: this.profile.uploads });
+      this.terrain = new TerrainView(c.stream, this.origin, { terrain: this.terrainMat!, road: this.roadMat, water: this.waterMat }, { uploads: this.profile.uploads });
       this.group.add(this.terrain.group, this.scatter.group);
       this.origin.set(Math.floor(s[0] / 128) * 128, Math.floor(s[2] / 128) * 128);
       // everything the streamer already built goes up now: the environment capture sees the land around the spawn
@@ -394,7 +395,7 @@ export class WorldLevelView implements LevelView {
       this.scatterTerrainVersion = -1;
       if (prof.farRadius > 0) {
         if (!this.far) {
-          this.far = new FarTerrain(c.world.spec, c.stream.chunkBuilder, this.origin, this.terrainMat, this.waterMat, prof.farRadius, this.level.bounds.kind === 'rect' && this.level.bounds.max![0] < 10_000 ? this.level.bounds.max![0] + 1280 : undefined);
+          this.far = new FarTerrain(c.world.spec, c.stream.chunkBuilder, this.origin, this.terrainMat!, this.waterMat, prof.farRadius, this.level.bounds.kind === 'rect' && this.level.bounds.max![0] < 10_000 ? this.level.bounds.max![0] + 1280 : undefined);
           this.group.add(this.far.group);
         } else this.far.setRadius(prof.farRadius);
       } else if (this.far) {

@@ -25,6 +25,45 @@ export interface CityBackdrop {
   dispose(): void;
 }
 
+/**
+ * Generated backdrop maps by size: each build hands out a clone (same pixels, own texture object), so a reload of
+ * the loft or a prewarm during the loading screen does not regenerate them on the main thread.
+ */
+const MAPS = new Map<string, THREE.DataTexture>();
+
+function cachedMap(key: string, make: () => THREE.DataTexture): THREE.DataTexture {
+  let tex = MAPS.get(key);
+  if (!tex) {
+    tex = make();
+    MAPS.set(key, tex);
+  }
+  return tex.clone();
+}
+
+function moonAzimuth(moonDir: THREE.Vector3): number {
+  const toMoon = moonDir.clone().negate();
+  const moonTheta = Math.atan2(toMoon.x, toMoon.z);
+  return (((moonTheta / (Math.PI * 2)) % 1) + 1) % 1;
+}
+
+function skyMap(maxTexture: number, moon: number): THREE.DataTexture {
+  const w = texSize(2048, maxTexture * 2);
+  const h = texSize(512, maxTexture / 2);
+  return cachedMap(`sky|${w}|${h}|${moon.toFixed(4)}`, () => skyTexture(w, h, moon));
+}
+
+function facadeMap(maxTexture: number): THREE.DataTexture {
+  const size = texSize(1024, Math.max(512, maxTexture));
+  return cachedMap(`facade|${size}`, () => facadeTexture(size));
+}
+
+/** Generates the backdrop's sky and façade maps ahead of `buildCity`, one per task. */
+export async function prewarmCity(moonDir: THREE.Vector3, maxTexture: number, pause: () => Promise<void>): Promise<void> {
+  skyMap(maxTexture, moonAzimuth(moonDir)).dispose();
+  await pause();
+  facadeMap(maxTexture).dispose();
+}
+
 /** Sky band: u = azimuth (CylinderGeometry: θ = atan2(x, z)), v = height from SKY_Y0 to SKY_Y1. */
 function skyTexture(w: number, h: number, moonU: number): THREE.DataTexture {
   const horizon = (3 - SKY_Y0) / (SKY_Y1 - SKY_Y0);
@@ -207,10 +246,7 @@ export function buildCity(windows: readonly WindowInfo[], room: readonly [number
   const [sx, , sz] = room;
   const disposables: { dispose(): void }[] = [];
   const toMoon = moonDir.clone().negate();
-  const moonTheta = Math.atan2(toMoon.x, toMoon.z);
-  const moonU = (((moonTheta / (Math.PI * 2)) % 1) + 1) % 1;
-
-  const skyTex = skyTexture(texSize(2048, maxTexture * 2), texSize(512, maxTexture / 2), moonU);
+  const skyTex = skyMap(maxTexture, moonAzimuth(moonDir));
   const skyMat = new THREE.MeshBasicMaterial({ map: skyTex, side: THREE.BackSide, fog: false, depthWrite: false });
   const skyGeo = new THREE.CylinderGeometry(SKY_R, SKY_R, SKY_Y1 - SKY_Y0, 48, 1, true);
   skyGeo.translate(0, (SKY_Y0 + SKY_Y1) / 2, 0);
@@ -221,7 +257,7 @@ export function buildCity(windows: readonly WindowInfo[], room: readonly [number
   disposables.push(skyTex, skyMat, skyGeo);
 
   const walls = new Set(windows.map((w) => w.wall));
-  const facadeTex = facadeTexture(texSize(1024, Math.max(512, maxTexture)));
+  const facadeTex = facadeMap(maxTexture);
   const facadeMat = new THREE.MeshBasicMaterial({ map: facadeTex, vertexColors: true, color: new THREE.Color(1.5, 1.5, 1.5) });
   disposables.push(facadeTex, facadeMat);
   const city = new StaticBatcher();

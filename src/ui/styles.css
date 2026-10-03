@@ -1392,8 +1392,10 @@ a.ds-btn { text-decoration: none; }
   animation: ds-sweep 0.7s ease-out;
 }
 
-.ds-btn:active {
-  transform: scale(0.985);
+.ds-btn:active,
+.ds-btn.is-pressed {
+  transform: scale(0.97);
+  filter: brightness(1.2);
 }
 
 .ds-foot {

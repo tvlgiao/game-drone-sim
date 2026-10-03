@@ -11,18 +11,22 @@ import { IndoorLevelView } from './indoor-level-view';
 import type { LevelView } from './level-view';
 import { Materials } from './materials';
 import { OutdoorLevelView } from './outdoor/outdoor-level-view';
-import { WorldLevelView } from './outdoor/world-level-view';
 import { PostFX } from './post';
 import { NEXT_COLOR, RingsView } from './rings-view';
 import { ContactShadow } from './vfx/contact-shadow';
 import { VfxDirector, waterSurface, type WaterProbe } from './vfx/director';
 import { XrPanel } from './xr-panel';
 import { HeadingArrow } from './heading-arrow';
-import { captureEnvironment, captureLightProbe } from './ibl';
+import { captureEnvironment, captureLightProbe, showSceneryOnly } from './ibl';
 import { levelLook, type LevelLook, type ToneMapper, type WorldTime } from './looks';
 import { levelTime } from '../levels/skies';
-import { MaterialLibrary } from './materials/library';
+import { MaterialLibrary, type MaterialScope } from './materials/library';
 import { findSun, SunCascades } from './shadows';
+import { nextFrame, Slicer, yieldToMain } from '../core/yield';
+import { XrLoadingPanel } from './xr-loading';
+
+/** steps of GameView.prepare() */
+export type PrepareStep = 'textures' | 'shaders' | 'lighting' | 'warm';
 
 export interface ViewFrame {
   dt: number;
@@ -74,6 +78,37 @@ export interface GameViewOptions {
   antialias?: boolean;
 }
 
+type WorldViews = typeof import('./outdoor/world-level-view');
+let worldViews: WorldViews | null = null;
+let worldViewsLoad: Promise<void> | null = null;
+
+/**
+ * Loads the generated worlds' renderer (terrain, city, scatter, water, trees: a chunk of its own, not in the main
+ * bundle). A level with world content needs it before `loadLevel`; a failed load (offline) can be retried.
+ */
+export function loadWorldViews(): Promise<void> {
+  // A failed dynamic import stays failed for its URL (the browser's module map keeps the error), so a retry after a
+  // network failure asks for the same chunk under a new query: a fresh fetch.
+  const retry = failedChunk ? `${failedChunk}?retry=${++chunkRetries}` : null;
+  worldViewsLoad ??= (retry ? (import(/* @vite-ignore */ retry) as Promise<WorldViews>) : import('./outdoor/world-level-view')).then(
+    (m) => {
+      worldViews = m;
+      failedChunk = null;
+    },
+    (err: unknown) => {
+      worldViewsLoad = null;
+      // Chromium / Firefox name the chunk in the message; elsewhere the plain import is tried again
+      const url = /(https?:\/\/[^\s?]+\.js)/.exec(err instanceof Error ? err.message : String(err))?.[1];
+      if (url) failedChunk = url;
+      throw err;
+    },
+  );
+  return worldViewsLoad;
+}
+
+let failedChunk: string | null = null;
+let chunkRetries = 0;
+
 export class GameView {
   readonly renderer: THREE.WebGLRenderer;
   readonly scene = new THREE.Scene();
@@ -104,6 +139,9 @@ export class GameView {
   private width = 1;
   private height = 1;
   private pendingRespawn = false;
+  private xrLoad: XrLoadingPanel | null = null;
+  /** loadLevel(…, { deferred }) ran and prepare() has not finished yet */
+  private deferred = false;
   /** water surface of the level under the drone (installed by the level view or setWaterProbe) */
   private waterProbe: WaterProbe | null = null;
   /** pilot's Time of day / View distance for generated outdoor levels */
@@ -122,6 +160,8 @@ export class GameView {
   private viewScaled = false;
 
   private readonly form: FormFactor;
+  /** owner of the art `prepareArt` generated until the level view takes its own share */
+  private artScope: MaterialScope | null = null;
 
   /** XR: the headset camera rides in this dolly; the game moves the dolly, the player moves their head. */
   private readonly xrDolly = new THREE.Group();
@@ -186,10 +226,12 @@ export class GameView {
     scene.add(this.xrDolly);
 
     this.level = level.def;
-    this.level = level.def;
     this.look = levelLook(level.def, this.worldTime(level.def));
     void this.library.preload(level.def.id);
     this.levelView = this.buildLevelView(level);
+    // the view holds its own share of what the prewarm generated
+    this.artScope?.dispose();
+    this.artScope = null;
     this.rings = new RingsView(level.def.rings);
     this.attachLevel(level);
 
@@ -202,7 +244,7 @@ export class GameView {
    * shadow maps), the new ones built, and the camera rig re-targeted. Shared resources (drone,
    * materials, FX pools, post FX) stay.
    */
-  loadLevel(level: LevelRuntime): void {
+  loadLevel(level: LevelRuntime, opts: { deferred?: boolean } = {}): void {
     this.cascades.detach();
     this.setWaterProbe(null);
     this.dropCapture();
@@ -210,19 +252,46 @@ export class GameView {
     this.rings.group.removeFromParent();
     this.rings.dispose();
     this.level = level.def;
-    this.level = level.def;
     this.look = levelLook(level.def, this.worldTime(level.def));
     void this.library.preload(level.def.id);
     this.levelView = this.buildLevelView(level);
+    // the view holds its own share of what the prewarm generated
+    this.artScope?.dispose();
+    this.artScope = null;
     this.rings = new RingsView(level.def.rings);
     this.attachLevel(level);
-    this.applyQuality();
+    this.applyQuality(opts.deferred === true);
+  }
+
+  /**
+   * Generates the next level's own art (the loft's atlases, rug, backdrop maps) one piece per task while the
+   * loading screen is up; `loadLevel` then finds it cached. Levels without such art return at once.
+   */
+  async prepareArt(def: LevelDef, onProgress?: (f: number) => void): Promise<void> {
+    this.artScope?.dispose();
+    this.artScope = null;
+    if (def.kind !== 'indoor') {
+      onProgress?.(1);
+      return;
+    }
+    const scope = this.library.scope(`${def.id}:prewarm`);
+    this.artScope = scope;
+    let n = 0;
+    await IndoorLevelView.prewarm(def, this.renderer, scope, this.form, async () => {
+      onProgress?.(Math.min(0.95, ++n / 16));
+      await yieldToMain();
+    });
+    onProgress?.(1);
   }
 
   private buildLevelView(level: LevelRuntime): LevelView {
     const def = level.def;
     if (def.kind === 'indoor') return new IndoorLevelView(def, this.renderer, this.library, this.form);
-    if (level.content) return new WorldLevelView(level, this.renderer, this.library, this.form, { time: this.worldTime(def), viewDistance: this.viewDistance });
+    if (level.content) {
+      // the generated worlds' renderer is its own chunk: loadWorldViews() before a world level is built
+      if (!worldViews) throw new Error('World renderer not loaded');
+      return new worldViews.WorldLevelView(level, this.renderer, this.library, this.form, { time: this.worldTime(def), viewDistance: this.viewDistance });
+    }
     return new OutdoorLevelView(def, this.renderer, this.library);
   }
 
@@ -266,22 +335,227 @@ export class GameView {
   }
 
   /**
-   * Compiles the level's materials now — in parallel where the browser has KHR_parallel_shader_compile — so the
-   * first frames of a freshly built level do not stall on shader compilation (the loading overlay is still up).
-   * Resolves within `maxMs` whatever happens; anything left compiles on its first frame as before.
+   * Readies a level built with `loadLevel(…, { deferred: true })`, in steps that each give the main thread back (a
+   * loading screen keeps animating, a headset keeps getting frames):
+   *
+   * 1. `textures` — uploads every texture of the scene to the GPU, a few per slice;
+   * 2. `shaders` — compiles the scene's programs against a blank environment of the final size, and the post
+   *    passes, in parallel where the browser has KHR_parallel_shader_compile (`compileAsync`);
+   * 3. `lighting` — the environment capture (PMREM, or the SH probe on tiers without envMap), now on ready programs;
+   * 4. `warm` — the post warm-up and one frame drawn behind the overlay, so the first visible frame does not hitch.
+   *
+   * `onStep(step, fraction)` reports progress; `cancelled()` aborts between steps. Without a deferred load (or
+   * when cancelled) it only returns.
    */
-  async precompile(maxMs = 8000): Promise<void> {
+  async prepare(onStep: (step: PrepareStep, f: number) => void = () => {}, cancelled: () => boolean = () => false): Promise<void> {
+    if (!this.deferred) return;
     const r = this.renderer;
-    this.scene.updateMatrixWorld(true);
+    const p = this.profile;
+    const look = this.currentLook;
     const cam = r.xr.isPresenting ? this.xrCam : this.rig.camera;
+    this.scene.updateMatrixWorld(true);
+    // 1. textures
+    const textures = new Set<THREE.Texture>();
+    this.scene.traverse((o) => {
+      const mat = (o as THREE.Mesh).material as THREE.Material | THREE.Material[] | undefined;
+      if (!mat) return;
+      for (const m of Array.isArray(mat) ? mat : [mat]) {
+        for (const v of Object.values(m)) if ((v as THREE.Texture | null)?.isTexture) textures.add(v as THREE.Texture);
+        const u = (m as THREE.ShaderMaterial).uniforms ?? (m.userData.envUniforms as Record<string, THREE.IUniform> | undefined);
+        if (u) for (const x of Object.values(u)) if ((x?.value as THREE.Texture | null)?.isTexture) textures.add(x.value as THREE.Texture);
+      }
+    });
+    const list = [...textures];
+    const slicer = new Slicer();
+    for (let i = 0; i < list.length; i++) {
+      if (cancelled()) return;
+      try {
+        r.initTexture(list[i]!);
+      } catch {
+        // a texture whose image is not there yet uploads on first use
+      }
+      onStep('textures', (i + 1) / list.length);
+      if (slicer.due()) await slicer.yield();
+    }
+    onStep('textures', 1);
+    await yieldToMain();
+    if (cancelled()) return;
+    // 2. shaders: the capture and the frame use programs with an environment map of the capture's size
+    const probe = this.levelView.probe;
+    const envSize = Math.max(p.envSize, probe.minSize);
+    let stand: THREE.WebGLRenderTarget | null = null;
+    const pmrem = new THREE.PMREMGenerator(r);
+    try {
+      if (p.envMap || probe.always) {
+        stand = pmrem.fromScene(new THREE.Scene(), 0, 0.1, 1, { size: envSize });
+        if (p.envMap) this.scene.environment = stand.texture;
+        if (probe.always) this.levelView.setEnvironment(stand.texture);
+      }
+      // programs differ by target: a frame drawn into the composer (post) and the environment capture both draw
+      // into render targets (linear output); without post the frame goes straight to the screen
+      const rt = new THREE.WebGLRenderTarget(4, 4);
+      const prev = r.getRenderTarget();
+      try {
+        r.setRenderTarget(rt);
+        await this.compileSliced(cam, (f) => onStep('shaders', 0.5 * f));
+        // the capture sees the scenery alone (the drone's and the rig's lights hidden: other light counts, other
+        // programs); the SH probe of a tier without envMap is taken under the high tier's light rig
+        const restore = showSceneryOnly(this.scene, [this.levelView.group]);
+        try {
+          if (!p.envMap) this.levelView.setQuality(REFERENCE_LIGHTING);
+          await this.compileSliced(cam, (f) => onStep('shaders', 0.5 + 0.2 * f));
+        } finally {
+          if (!p.envMap) this.levelView.setQuality(p);
+          restore();
+        }
+      } finally {
+        r.setRenderTarget(prev);
+        rt.dispose();
+      }
+      if (!this.post) await this.compileSliced(cam, (f) => onStep('shaders', 0.7 + 0.2 * f));
+      if (this.post) await this.post.precompile();
+      await this.linkPrograms((f) => onStep('shaders', 0.9 + 0.1 * f));
+    } catch {
+      // context loss or an exotic material: whatever is left compiles on first use
+    } finally {
+      pmrem.dispose();
+    }
+    onStep('shaders', 1);
+    await nextFrame();
+    if (cancelled()) {
+      stand?.dispose();
+      return;
+    }
+    // 3. lighting: the scene once into a scrap target first (shadow maps and their depth programs), then the capture
+    try {
+      const scrap = new THREE.WebGLRenderTarget(4, 4);
+      const prev = r.getRenderTarget();
+      r.setRenderTarget(scrap);
+      r.render(this.scene, cam);
+      r.setRenderTarget(prev);
+      scrap.dispose();
+    } catch {
+      // the capture renders them instead
+    }
+    onStep('lighting', 0.4);
+    await nextFrame();
+    if (cancelled()) {
+      stand?.dispose();
+      return;
+    }
+    this.applyEnvironment(p, look);
+    stand?.dispose();
+    onStep('lighting', 1);
+    await nextFrame();
+    if (cancelled()) return;
+    // 4. warm: the composer's passes and one frame of the level, behind the loading screen
+    this.post?.warm();
+    this.deferred = false;
+    onStep('warm', 1);
+  }
+
+  /**
+   * compileAsync over the scene in slices: the synchronous part (program set-up and the compile calls) runs a few
+   * objects at a time with the main thread given back in between; the driver compiles in parallel meanwhile and
+   * this resolves once every program is ready (or after a cap). Lights come from the whole scene.
+   */
+  private async compileSliced(cam: THREE.Camera, onProgress: (f: number) => void, maxMs = 8000): Promise<void> {
+    const r = this.renderer;
+    const units: THREE.Object3D[] = [];
+    const collect = (o: THREE.Object3D, depth: number): void => {
+      if (!o.visible) return;
+      // big groups split into their children; meshes and small groups compile as one unit
+      if (depth < 3 && o.children.length > 0 && !(o as THREE.Mesh).isMesh) {
+        for (const c of o.children) collect(c, depth + 1);
+        return;
+      }
+      units.push(o);
+    };
+    collect(this.scene, 0);
+    const pending: Promise<unknown>[] = [];
+    const slicer = new Slicer();
+    let target = r.getRenderTarget();
+    for (let i = 0; i < units.length; i++) {
+      pending.push(r.compileAsync(units[i]!, cam, this.scene));
+      onProgress((0.6 * (i + 1)) / units.length);
+      if (slicer.due()) {
+        await slicer.yield();
+        // keep compiling against the same target (another frame may have changed it while yielding)
+        if (r.getRenderTarget() !== target) r.setRenderTarget(target);
+      }
+    }
+    target = null;
     let timer: ReturnType<typeof setTimeout> | undefined;
     try {
-      await Promise.race([r.compileAsync(this.scene, cam), new Promise<void>((res) => (timer = setTimeout(res, maxMs)))]);
-    } catch {
-      // a context loss or an exotic material: the frames compile instead
+      await Promise.race([Promise.all(pending), new Promise<void>((res) => (timer = setTimeout(res, maxMs)))]);
     } finally {
       clearTimeout(timer);
     }
+    onProgress(1);
+  }
+
+  /**
+   * The boot level's programs, compiled in slices behind the menu (the boot builds its level without a loading
+   * screen): the first flight frame after the menu then draws without compiling. Frames into the composer use
+   * the render-target variants, so those are compiled when post is on.
+   */
+  async warmPrograms(): Promise<void> {
+    const r = this.renderer;
+    if (r.xr.isPresenting) return;
+    this.scene.updateMatrixWorld(true);
+    const rt = this.post ? new THREE.WebGLRenderTarget(4, 4) : null;
+    const prev = r.getRenderTarget();
+    try {
+      if (rt) r.setRenderTarget(rt);
+      await this.compileSliced(this.rig.camera, () => undefined);
+    } catch {
+      // context loss or an exotic material: the frames compile instead
+    } finally {
+      r.setRenderTarget(prev);
+      rt?.dispose();
+    }
+    try {
+      await this.post?.precompile();
+      await this.linkPrograms(() => undefined);
+    } catch {
+      // as above
+    }
+  }
+
+  /**
+   * Finishes every program's first use (link status, info logs, uniform tables) a few at a time. Where the driver
+   * has no parallel compile (KHR_parallel_shader_compile) compileAsync resolves at once and the whole compile would
+   * otherwise land on the first frame that draws with the program: one long frozen frame.
+   */
+  private async linkPrograms(onProgress: (f: number) => void): Promise<void> {
+    const programs = (this.renderer.info.programs ?? []) as unknown as { getUniforms(): unknown }[];
+    const slicer = new Slicer();
+    for (let i = 0; i < programs.length; i++) {
+      programs[i]!.getUniforms();
+      onProgress((i + 1) / programs.length);
+      if (slicer.due()) await slicer.yield();
+    }
+  }
+
+  /**
+   * XR level switch: a frame of the loading environment instead of the level (dark surroundings, a progress ring and
+   * the level name in front of the pilot's head), so the headset keeps getting frames while the level loads.
+   */
+  renderXrLoading(name: string, progress: number): void {
+    const l = (this.xrLoad ??= new XrLoadingPanel());
+    l.update(name, progress, this.xrDolly, this.xrCam);
+    this.renderer.render(l.scene, this.xrCam);
+    this.frames++;
+  }
+
+  /** a deferred load still waits for prepare() */
+  get preparing(): boolean {
+    return this.deferred;
+  }
+
+  /** the level's material library (load stages prepare its texture sets) */
+  get materials(): MaterialLibrary {
+    return this.library;
   }
 
   /** LOS pilot's eye (outdoors it moves when the pilot is re-planted): the HUD's pilot marker. */
@@ -597,7 +871,12 @@ export class GameView {
     this.resize(this.width, this.height);
   }
 
-  private applyQuality(): void {
+  /**
+   * `deferred` (a level just built behind the loading screen): the environment capture and the post warm-up wait
+   * for `prepare()`, which compiles the shaders first so neither of them blocks on compilation.
+   */
+  private applyQuality(deferred = false): void {
+    this.deferred = deferred;
     const p = this.profile;
     const r = this.renderer;
     const look = this.toneOverride ? { ...this.look, toneMapping: this.toneOverride } : this.look;
@@ -612,12 +891,13 @@ export class GameView {
     this.applyCameraFar();
     const sun = findSun(this.levelView.group);
     if (sun) this.sunDir.setFromMatrixPosition(sun.matrixWorld).sub(_v.setFromMatrixPosition(sun.target.matrixWorld)).normalize();
-    this.applyEnvironment(p, look);
+    if (deferred) this.scene.environment = null;
+    else this.applyEnvironment(p, look);
     if (p.post) {
       if (!this.post) this.post = new PostFX(r, this.scene, this.rig.camera);
       this.post.setBloomThreshold(Math.max(this.levelView.bloomThreshold, look.bloom.threshold));
       this.post.setSunDirection(this.sunDir);
-      this.post.configure(p, look);
+      this.post.configure(p, look, !deferred);
       this.post.setSize(this.width, this.height);
       r.toneMapping = THREE.NoToneMapping;
       r.toneMappingExposure = 1;
@@ -776,6 +1056,7 @@ export class GameView {
   }
 
   dispose(): void {
+    this.xrLoad?.dispose();
     this.post?.dispose();
     this.post = null;
     this.cascades.detach();

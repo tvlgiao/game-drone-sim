@@ -45,6 +45,24 @@ export class GameAudio {
   private failed = false;
   private wantRunning = false;
 
+  /**
+   * Builds the context and its voices ahead of time (idle menu time): creating an AudioContext and synthesising its
+   * noise beds costs a few hundred ms on the main thread, which then no longer lands on the first click. The context
+   * stays suspended until `resume()` runs in a user gesture.
+   */
+  prepare(): void {
+    if (this.ctx || this.failed) return;
+    const Ctor = audioCtor();
+    if (!Ctor) return;
+    try {
+      this.ctx = new Ctor({ latencyHint: 'interactive' });
+      this.build(this.ctx);
+      if (!this.wantRunning && this.ctx.state === 'running') void this.ctx.suspend();
+    } catch {
+      this.ctx = null;
+    }
+  }
+
   /** Creates (first call) and resumes the AudioContext. Call from a user gesture. */
   async resume(): Promise<void> {
     if (this.failed) return;

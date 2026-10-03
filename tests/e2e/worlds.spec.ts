@@ -71,7 +71,7 @@ for (const id of ['city', 'alpine', 'infinite'] as const) {
     await boot(page);
     await fly(page, id, 'freefly', id === 'infinite' ? 4242 : undefined);
     await expect.poll(() => hook(page, (d) => d.race.status), { timeout: 10_000 }).toBe('freefly');
-    await expect(page.locator('.ds-loading')).toBeHidden();
+    await expect(page.locator('.ds-load')).toBeHidden();
     // the drone rests on the ground of the level, not on y = 0
     const agl = await hook(page, (d) => d.state.position.y - d.heightAt(d.state.position.x, d.state.position.z));
     expect(agl).toBeGreaterThan(-0.05);

@@ -51,6 +51,80 @@ export const WOOD = { oak: 0xd9a46c, walnut: 0x7d5238, pine: 0xf0cf98, deck: 0x5
 /** UV metres the room builders map each surface with (batcher `uvTile`): the library scales the set to it. */
 export const LOFT_UV = { floor: 4, brick: 1.2, plaster: 1.4, concrete: 1.5, wood: 1 } as const;
 
+type Track = <T extends { dispose(): void }>(d: T) => T;
+type Factory<M extends THREE.Material> = (track: Track) => M;
+
+interface ArtSizes {
+  big: number;
+  mid: number;
+  small: number;
+  an: number;
+  maxTexture: number;
+}
+
+function sizes(o: LoftMaterialOptions): ArtSizes {
+  return { big: texSize(1024, o.maxTexture), mid: texSize(512, o.maxTexture), small: texSize(256, o.maxTexture), an: Math.min(o.anisotropy, 8), maxTexture: o.maxTexture };
+}
+
+function roomBox(sx: number, sy: number, sz: number): BoxProjection {
+  return { min: new THREE.Vector3(-sx / 2, 0, -sz / 2), max: new THREE.Vector3(sx / 2, sy, sz / 2), probe: new THREE.Vector3(0, 2.2, 0) };
+}
+
+/** The loft's one-off materials by library key (factories: run once, then cached by the library). */
+function loftArt(s: ArtSizes, box: BoxProjection, grunge: THREE.Texture) {
+  const { big, mid, small, an } = s;
+  return {
+    'loft:props': (() =>
+      applyEnvPatch(new THREE.MeshStandardMaterial({ vertexColors: true, roughnessMap: grunge, roughness: 1, metalness: 1, envMapIntensity: 1 }), { vertexRM: true })) as Factory<THREE.MeshStandardMaterial>,
+    'loft:leather': ((track) => {
+      const lth = leatherSet(small, an);
+      return new THREE.MeshPhysicalMaterial({
+        color: 0x7c3a1e,
+        normalMap: track(lth.normalMap),
+        roughnessMap: track(lth.orm),
+        roughness: 1,
+        clearcoat: 0.3,
+        clearcoatRoughness: 0.45,
+        sheen: 0.25,
+        sheenColor: new THREE.Color(0xc98a62),
+        sheenRoughness: 0.6,
+        envMapIntensity: 0.9,
+      });
+    }) as Factory<THREE.MeshPhysicalMaterial>,
+    'loft:fabric': ((track) =>
+      new THREE.MeshPhysicalMaterial({ color: 0x1d5a64, roughness: 0.9, normalMap: track(weaveNormal(small, an)), normalScale: new THREE.Vector2(0.5, 0.5), sheen: 1, sheenColor: new THREE.Color(0x7fd6e0), sheenRoughness: 0.45 })) as Factory<THREE.MeshPhysicalMaterial>,
+    'loft:leaf': ((track) => new THREE.MeshStandardMaterial({ map: track(leafMap(small)), roughness: 0.48, side: THREE.DoubleSide, envMapIntensity: 0.6 })) as Factory<THREE.MeshStandardMaterial>,
+    'loft:rug': ((track) => {
+      const rug = rugMap(big, an);
+      return new THREE.MeshStandardMaterial({ map: track(rug.map), normalMap: track(rug.normalMap), normalScale: new THREE.Vector2(0.8, 0.8), roughness: 1, envMapIntensity: 0.2 });
+    }) as Factory<THREE.MeshStandardMaterial>,
+    'loft:glass': ((track) =>
+      applyEnvPatch(
+        new THREE.MeshStandardMaterial({ map: track(glassDirt(mid)), color: 0xc4d0d8, roughness: 0.04, metalness: 0, transparent: true, depthWrite: false, side: THREE.DoubleSide, envMapIntensity: 1.3 }),
+        { box, glass: { clearAlpha: 0.035, dirtRoughness: 0.55 } },
+      )) as Factory<THREE.MeshStandardMaterial>,
+    'loft:glow': (() => new THREE.MeshBasicMaterial({ vertexColors: true, fog: false })) as Factory<THREE.MeshBasicMaterial>,
+    'loft:bulb-shell': (() =>
+      new THREE.MeshBasicMaterial({ color: new THREE.Color(0.45, 0.28, 0.14), transparent: true, blending: THREE.AdditiveBlending, depthWrite: false, fog: false })) as Factory<THREE.MeshBasicMaterial>,
+    'loft:neon': ((track) =>
+      new THREE.MeshBasicMaterial({ map: track(neonAtlas(texSize(1024, s.maxTexture))), vertexColors: true, transparent: true, blending: THREE.AdditiveBlending, depthWrite: false, fog: false })) as Factory<THREE.MeshBasicMaterial>,
+    'loft:spill': ((track) =>
+      new THREE.MeshBasicMaterial({ map: track(radialTexture(128)), vertexColors: true, transparent: true, blending: THREE.AdditiveBlending, depthWrite: false })) as Factory<THREE.MeshBasicMaterial>,
+    'loft:decals': ((track) =>
+      new THREE.MeshStandardMaterial({
+        map: track(decalAtlas(texSize(2048, Math.max(1024, s.maxTexture)))),
+        transparent: true,
+        depthWrite: false,
+        polygonOffset: true,
+        polygonOffsetFactor: -4,
+        polygonOffsetUnits: -4,
+        roughness: 0.78,
+        metalness: 0,
+        envMapIntensity: 0.35,
+      })) as Factory<THREE.MeshStandardMaterial>,
+  };
+}
+
 export class LoftMaterials {
   readonly floor: THREE.MeshStandardMaterial;
   readonly brick: THREE.MeshStandardMaterial;
@@ -81,16 +155,9 @@ export class LoftMaterials {
 
   constructor(lib: MaterialSource, o: LoftMaterialOptions) {
     const [sx, sy, sz] = o.room;
-    const big = texSize(1024, o.maxTexture);
-    const mid = texSize(512, o.maxTexture);
-    const small = texSize(256, o.maxTexture);
-    const an = Math.min(o.anisotropy, 8);
+    const { mid } = sizes(o);
 
-    this.box = {
-      min: new THREE.Vector3(-sx / 2, 0, -sz / 2),
-      max: new THREE.Vector3(sx / 2, sy, sz / 2),
-      probe: new THREE.Vector3(0, 2.2, 0),
-    };
+    this.box = roomBox(sx, sy, sz);
 
     const grunge = lib.grunge();
     const macro = lib.texture('loft:floor-macro', () => floorMacro(sx, sz, mid, o.puddles));
@@ -107,65 +174,39 @@ export class LoftMaterials {
     this.concrete = lib.material('concrete', { uvMeters: LOFT_UV.concrete, albedo: 0x8c877f, envMapIntensity: 0.5, patch: wallPatch });
     this.wood = lib.material('wood', { uvMeters: LOFT_UV.wood, vertexColors: true, normalScale: 0.7, envMapIntensity: 0.7 });
 
-    this.props = lib.custom('loft:props', () =>
-      applyEnvPatch(new THREE.MeshStandardMaterial({ vertexColors: true, roughnessMap: grunge, roughness: 1, metalness: 1, envMapIntensity: 1 }), { vertexRM: true }),
-    );
-    this.leather = lib.custom('loft:leather', (track) => {
-      const lth = leatherSet(small, an);
-      return new THREE.MeshPhysicalMaterial({
-        color: 0x7c3a1e,
-        normalMap: track(lth.normalMap),
-        roughnessMap: track(lth.orm),
-        roughness: 1,
-        clearcoat: 0.3,
-        clearcoatRoughness: 0.45,
-        sheen: 0.25,
-        sheenColor: new THREE.Color(0xc98a62),
-        sheenRoughness: 0.6,
-        envMapIntensity: 0.9,
-      });
-    });
-    this.fabric = lib.custom(
-      'loft:fabric',
-      (track) =>
-        new THREE.MeshPhysicalMaterial({ color: 0x1d5a64, roughness: 0.9, normalMap: track(weaveNormal(small, an)), normalScale: new THREE.Vector2(0.5, 0.5), sheen: 1, sheenColor: new THREE.Color(0x7fd6e0), sheenRoughness: 0.45 }),
-    );
-    this.leaf = lib.custom('loft:leaf', (track) => new THREE.MeshStandardMaterial({ map: track(leafMap(small)), roughness: 0.48, side: THREE.DoubleSide, envMapIntensity: 0.6 }));
-    this.rug = lib.custom('loft:rug', (track) => {
-      const rug = rugMap(big, an);
-      return new THREE.MeshStandardMaterial({ map: track(rug.map), normalMap: track(rug.normalMap), normalScale: new THREE.Vector2(0.8, 0.8), roughness: 1, envMapIntensity: 0.2 });
-    });
-    this.glass = lib.custom('loft:glass', (track) =>
-      applyEnvPatch(
-        new THREE.MeshStandardMaterial({ map: track(glassDirt(mid)), color: 0xc4d0d8, roughness: 0.04, metalness: 0, transparent: true, depthWrite: false, side: THREE.DoubleSide, envMapIntensity: 1.3 }),
-        { box: this.box, glass: { clearAlpha: 0.035, dirtRoughness: 0.55 } },
-      ),
-    );
-
-    this.glow = lib.custom('loft:glow', () => new THREE.MeshBasicMaterial({ vertexColors: true, fog: false }));
-    this.bulbShell = lib.custom('loft:bulb-shell', () => new THREE.MeshBasicMaterial({ color: new THREE.Color(0.45, 0.28, 0.14), transparent: true, blending: THREE.AdditiveBlending, depthWrite: false, fog: false }));
-    this.neon = lib.custom(
-      'loft:neon',
-      (track) => new THREE.MeshBasicMaterial({ map: track(neonAtlas(texSize(1024, o.maxTexture))), vertexColors: true, transparent: true, blending: THREE.AdditiveBlending, depthWrite: false, fog: false }),
-    );
-    this.spill = lib.custom('loft:spill', (track) => new THREE.MeshBasicMaterial({ map: track(radialTexture(128)), vertexColors: true, transparent: true, blending: THREE.AdditiveBlending, depthWrite: false }));
+    const art = loftArt(sizes(o), this.box, grunge);
+    this.props = lib.custom('loft:props', art['loft:props']);
+    this.leather = lib.custom('loft:leather', art['loft:leather']);
+    this.fabric = lib.custom('loft:fabric', art['loft:fabric']);
+    this.leaf = lib.custom('loft:leaf', art['loft:leaf']);
+    this.rug = lib.custom('loft:rug', art['loft:rug']);
+    this.glass = lib.custom('loft:glass', art['loft:glass']);
+    this.glow = lib.custom('loft:glow', art['loft:glow']);
+    this.bulbShell = lib.custom('loft:bulb-shell', art['loft:bulb-shell']);
+    this.neon = lib.custom('loft:neon', art['loft:neon']);
+    this.spill = lib.custom('loft:spill', art['loft:spill']);
     this.radial = this.spill.map!;
-    this.decals = lib.custom(
-      'loft:decals',
-      (track) =>
-        new THREE.MeshStandardMaterial({
-          map: track(decalAtlas(texSize(2048, Math.max(1024, o.maxTexture)))),
-          transparent: true,
-          depthWrite: false,
-          polygonOffset: true,
-          polygonOffsetFactor: -4,
-          polygonOffsetUnits: -4,
-          roughness: 0.78,
-          metalness: 0,
-          envMapIntensity: 0.35,
-        }),
-    );
-    this.cookie = lib.texture('loft:cookie', () => cookieMap(small));
+    this.decals = lib.custom('loft:decals', art['loft:decals']);
+    this.cookie = lib.texture('loft:cookie', () => cookieMap(sizes(o).small));
+  }
+
+  /**
+   * Generates the loft's own art (atlases, rug, leather, ...) into the library one piece per task, `pause()` between
+   * them: the constructor then finds everything cached and builds the room without a long frozen frame.
+   */
+  static async prewarm(lib: MaterialSource, o: LoftMaterialOptions, pause: () => Promise<void>): Promise<void> {
+    const [sx, sy, sz] = o.room;
+    const s = sizes(o);
+    const grunge = lib.grunge();
+    await pause();
+    lib.texture('loft:floor-macro', () => floorMacro(sx, sz, s.mid, o.puddles));
+    await pause();
+    const art = loftArt(s, roomBox(sx, sy, sz), grunge);
+    for (const key of Object.keys(art) as (keyof typeof art)[]) {
+      lib.custom(key, art[key] as Factory<THREE.Material>);
+      await pause();
+    }
+    lib.texture('loft:cookie', () => cookieMap(s.small));
   }
 
   /** Point floor and glass at the room probe (on every tier: one box-projected lookup is cheap). */

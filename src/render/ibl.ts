@@ -31,8 +31,11 @@ export interface CaptureOptions {
   sceneStandIn?: boolean;
 }
 
-/** Renders `keep` with every other top-level child of `scene` hidden (points and sprites inside `keep` too). */
-function withScenery<T>(scene: THREE.Scene, keep: readonly THREE.Object3D[], env: THREE.Texture | null, fn: () => T): T {
+/**
+ * Hides every top-level child of `scene` but `keep` (and points and sprites inside `keep`), as a capture sees it;
+ * returns the undo. A loading screen compiles the capture's programs under the same view (its light set differs).
+ */
+export function showSceneryOnly(scene: THREE.Scene, keep: readonly THREE.Object3D[]): () => void {
   const hidden: THREE.Object3D[] = [];
   const hide = (o: THREE.Object3D): void => {
     if (o.visible) {
@@ -46,13 +49,21 @@ function withScenery<T>(scene: THREE.Scene, keep: readonly THREE.Object3D[], env
       if ((o as THREE.Points).isPoints || (o as THREE.Sprite).isSprite) hide(o);
     });
   }
+  return () => {
+    for (const o of hidden) o.visible = true;
+  };
+}
+
+/** Renders `keep` with every other top-level child of `scene` hidden (points and sprites inside `keep` too). */
+function withScenery<T>(scene: THREE.Scene, keep: readonly THREE.Object3D[], env: THREE.Texture | null, fn: () => T): T {
+  const restore = showSceneryOnly(scene, keep);
   const before = scene.environment;
   scene.environment = env;
   try {
     return fn();
   } finally {
     scene.environment = before;
-    for (const o of hidden) o.visible = true;
+    restore();
   }
 }
 

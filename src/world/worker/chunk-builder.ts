@@ -173,8 +173,35 @@ export interface WorkerOptions {
   fallback?: () => ChunkBuilder;
 }
 
-function defaultWorker(): WorkerLike {
+/** Started but idle world workers: a level's builder takes them instead of cold-starting its own. */
+const spare: WorkerLike[] = [];
+/** at most this many idle workers are kept */
+const SPARE_MAX = 2;
+
+function spawnWorker(): WorkerLike {
   return new Worker(new URL('./world-worker.ts', import.meta.url), { type: 'module' }) as unknown as WorkerLike;
+}
+
+function defaultWorker(): WorkerLike {
+  return spare.pop() ?? spawnWorker();
+}
+
+/**
+ * Starts the world workers now (boot / idle menu time), so the first generated level does not wait for their
+ * script to load and compile. Safe to call more than once; no-op without module workers.
+ */
+export function prewarmWorldWorkers(n = defaultWorkerCount()): void {
+  if (typeof Worker === 'undefined') return;
+  try {
+    while (spare.length < Math.min(n, SPARE_MAX)) spare.push(spawnWorker());
+  } catch {
+    // no module workers here: the builder falls back to the inline one
+  }
+}
+
+/** idle pre-started workers (tests) */
+export function spareWorldWorkers(): number {
+  return spare.length;
 }
 
 function defaultWorkerCount(): number {
@@ -195,10 +222,13 @@ export class WorkerChunkBuilder implements ChunkBuilder {
   private fallback: ChunkBuilder | null = null;
   private nextId = 1;
   private disposed = false;
+  /** the workers are the default ones: an idle one goes back to the spare pool on dispose */
+  private readonly reuse: boolean;
 
   constructor(opts: WorkerOptions = {}) {
     const n = Math.max(1, Math.min(2, opts.workers ?? defaultWorkerCount()));
     const create = opts.createWorker ?? defaultWorker;
+    this.reuse = opts.createWorker === undefined;
     this.makeFallback = opts.fallback ?? (() => new InlineChunkBuilder());
     for (let i = 0; i < n; i++) {
       let worker: WorkerLike;
@@ -242,9 +272,15 @@ export class WorkerChunkBuilder implements ChunkBuilder {
     this.disposed = true;
     this.queue.cancel();
     for (const s of this.slots) {
+      const busy = s.job !== null;
       if (s.job) s.job.reject(new ChunkCancelledError(s.job.req));
       s.job = null;
-      s.worker.terminate();
+      s.worker.onmessage = null;
+      s.worker.onerror = null;
+      // an idle default worker stays warm for the next level; one still building (its reply would reach the next
+      // owner) or a test fake is ended
+      if (!busy && this.reuse && spare.length < SPARE_MAX) spare.push(s.worker);
+      else s.worker.terminate();
     }
     this.slots.length = 0;
     this.fallback?.dispose();

@@ -20,6 +20,7 @@ interface Track {
 interface Hook {
   state: { position: { x: number; y: number; z: number }; velocity: { y: number } };
   race: { status: string };
+  loading: { visible: boolean };
   fps: number;
   tier: string;
   armed: boolean;
@@ -91,7 +92,11 @@ async function knob(page: Page, side: 'l' | 'r'): Promise<{ x: number; y: number
 async function startFreeFly(page: Page): Promise<void> {
   await page.getByRole('button', { name: 'Free Fly' }).tap();
   await page.getByRole('button', { name: 'Free Fly · Night Loft' }).tap(); // level picker
-  await page.waitForFunction(() => (window as unknown as { __drone: Hook }).__drone.touchVisible, null, { timeout: 5000 });
+  // flyable once the loading screen has handed over (the drone does not arm under it)
+  await page.waitForFunction(() => {
+    const d = (window as unknown as { __drone: Hook }).__drone;
+    return d.touchVisible && !d.loading.visible;
+  }, null, { timeout: 8000 });
 }
 
 test.describe('desktop (no touch)', () => {

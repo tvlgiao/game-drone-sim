@@ -35,6 +35,8 @@ export const APP_VERSION = __APP_VERSION__;
 export const SUPPORT_EMAIL = 'support@coworkgamestudio.com';
 /** The bundled copy inside the iOS / Android shells cannot open in the system browser: link the hosted one there. */
 const SITE_URL = 'https://dronesim.coworkgamestudio.com/';
+/** a pressed button keeps its pressed look this long after release (ms): visible even on a quick tap */
+const PRESS_HOLD_MS = 160;
 
 export type ScreenName =
   | 'main'
@@ -1437,6 +1439,18 @@ export class Menus {
       this.items[idx]?.activate?.();
     });
     el.addEventListener('pointerdown', (e) => {
+      // pressed state on the down event: painted before the click's work starts (a level load, a screen change)
+      const pressed = (e.target as HTMLElement).closest<HTMLElement>('.ds-btn');
+      if (pressed) {
+        pressed.classList.add('is-pressed');
+        const release = (): void => {
+          window.removeEventListener('pointerup', release);
+          window.removeEventListener('pointercancel', release);
+          window.setTimeout(() => pressed.classList.remove('is-pressed'), PRESS_HOLD_MS);
+        };
+        window.addEventListener('pointerup', release);
+        window.addEventListener('pointercancel', release);
+      }
       const dirBtn = (e.target as HTMLElement).closest<HTMLElement>('[data-dir]');
       const navEl = dirBtn?.closest<HTMLElement>('[data-nav]');
       if (!dirBtn || !navEl) return;

@@ -26,7 +26,8 @@
     <div id="splash" role="status" aria-live="polite">
       <p class="sp-title" aria-hidden="true">DRONE SIM</p>
       <p class="sp-sub" aria-hidden="true">FPV Racing · Night Loft</p>
-      <div class="sp-bar" aria-hidden="true"></div>
+      <div class="sp-bar" aria-hidden="true"><div class="sp-fill"></div></div>
+      <p class="sp-stage" aria-hidden="true">Loading game</p>
       <span class="sp-sr">Loading Drone Sim…</span>
     </div>
     <script>
@@ -35,7 +36,25 @@
       (function () {
         var b = document.body;
         var t0 = Date.now();
+        // boot progress (main.ts calls __bootProgress at its stages): the bar eases toward the reported value and
+        // creeps a little past it while a stage runs, never backwards
+        var fill = document.querySelector('#splash .sp-fill');
+        var stage = document.querySelector('#splash .sp-stage');
+        var shown = 0, target = 0.06, cap = 0.4;
+        window.__bootProgress = function (f, text) {
+          if (f > target) target = f;
+          cap = Math.min(0.98, Math.max(cap, f + 0.12));
+          if (text && stage) stage.textContent = text;
+        };
+        (function bar() {
+          if (b.classList.contains('is-ready')) return;
+          if (target < cap) target = Math.min(cap, target + 0.0015);
+          shown += (target - shown) * 0.12;
+          if (fill) fill.style.transform = 'scaleX(' + shown.toFixed(4) + ')';
+          requestAnimationFrame(bar);
+        })();
         function done() {
+          if (fill) fill.style.transform = 'scaleX(1)';
           b.classList.add('is-ready');
           setTimeout(function () {
             var el = document.getElementById('splash');

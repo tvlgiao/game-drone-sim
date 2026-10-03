@@ -25,14 +25,13 @@ import * as THREE from 'three';
 import type { QualityProfile } from '../../core/quality';
 import type { LevelId } from '../../types';
 import { CC0_SETS, LEVEL_TEXTURE_SETS, cc0Url, type Cc0SetId, type PbrMapName } from './assets';
-import { BRICK_TILE_M, FLOOR_TILE_M, brickSet, concreteSet, gravelSet, grungeOrm, woodSet, type PbrSet } from './generators';
+import { grungeOrm } from './generators';
 import { applyEnvPatch, isEmptyPatch, type EnvPatch } from './patches';
-import { generatePbr, type PixelMap, type ProceduralKind } from './procedural';
+import { GENERATED, setPixels, setTextures, type SurfaceKind } from './set-pixels';
+import { TextureWorkerClient } from './texture-client';
 import { texSize } from './texgen';
 
-/** Field-based sets from generators.ts (the rest come from procedural.ts). */
-type GeneratedKind = 'brick' | 'slab' | 'concrete' | 'wood' | 'gravel';
-export type SurfaceKind = ProceduralKind | GeneratedKind;
+export type { SurfaceKind } from './set-pixels';
 
 export type PresetName =
   | 'carbonFibre'
@@ -151,13 +150,6 @@ interface PresetDef {
   paint?: { color: number; coverage: number; roughness: number };
 }
 
-const GENERATED: Readonly<Record<GeneratedKind, { tileMeters: number; minSize: number; make: (size: number, anisotropy: number) => PbrSet }>> = {
-  brick: { tileMeters: BRICK_TILE_M, minSize: 512, make: (s, a) => brickSet(s, a) },
-  slab: { tileMeters: FLOOR_TILE_M, minSize: 512, make: (s, a) => concreteSet(s, a) },
-  concrete: { tileMeters: 2, minSize: 256, make: (s, a) => concreteSet(s, a, { seed: 8, joints: false, rough: 0.78 }) },
-  wood: { tileMeters: 1, minSize: 256, make: (s, a) => woodSet(s, a) },
-  gravel: { tileMeters: 1.2, minSize: 256, make: (s, a) => gravelSet(s, a) },
-};
 
 const PRESETS: Readonly<Record<PresetName, PresetDef>> = {
   carbonFibre: { kind: 'carbonFibre', cc0: null, tileMeters: 0.05, physical: true, params: { clearcoat: 1, clearcoatRoughness: 0.08, envMapIntensity: 1.2 } },
@@ -212,20 +204,36 @@ interface SetWatcher {
   cb: (set: TextureSet, tileMeters: number) => void;
 }
 
-const defaultFetcher: TextureFetcher = (url) => new THREE.TextureLoader().loadAsync(url);
+/**
+ * Scans decode off the main thread where the browser can (`createImageBitmap`, flipped at decode: WebGL cannot
+ * flip an ImageBitmap on upload); elsewhere the image element path.
+ */
+const defaultFetcher: TextureFetcher = async (url) => {
+  if (typeof createImageBitmap === 'function' && typeof fetch === 'function') {
+    try {
+      const blob = await (await fetch(url)).blob();
+      const bmp = await createImageBitmap(blob, { imageOrientation: 'flipY', premultiplyAlpha: 'none', colorSpaceConversion: 'none' });
+      const t = new THREE.Texture(bmp);
+      t.flipY = false;
+      t.needsUpdate = true;
+      return t;
+    } catch {
+      // fall through to the image element
+    }
+  }
+  return new THREE.TextureLoader().loadAsync(url);
+};
 
-function dataTexture(px: PixelMap, srgb: boolean): THREE.DataTexture {
-  const t = new THREE.DataTexture(px.data, px.width, px.height, THREE.RGBAFormat, THREE.UnsignedByteType);
-  t.wrapS = t.wrapT = THREE.RepeatWrapping;
-  t.minFilter = THREE.LinearMipmapLinearFilter;
-  t.magFilter = THREE.LinearFilter;
-  t.generateMipmaps = true;
-  t.colorSpace = srgb ? THREE.SRGBColorSpace : THREE.NoColorSpace;
-  t.needsUpdate = true;
-  return t;
-}
+/** Library presets each level builds with (texture sets to have ready before its scenery is built). */
+export const LEVEL_SURFACES: Readonly<Partial<Record<LevelId, readonly PresetName[]>>> = {
+  'night-loft': ['slab', 'brick', 'paintedBrick', 'wood', 'plaster', 'concrete'],
+  training: ['grass', 'gravel', 'asphalt', 'bark', 'foliage', 'needles'],
+  city: ['brick', 'concrete', 'gravel', 'bark', 'foliage', 'needles'],
+  alpine: ['grass', 'rock', 'gravel', 'bark', 'foliage', 'needles'],
+  infinite: ['grass', 'rock', 'gravel', 'bark', 'foliage', 'needles'],
+};
 
-const isGenerated = (k: SurfaceKind): k is GeneratedKind => k in GENERATED;
+
 
 /** The library API a level sees: the same calls, with everything it asks for released by `dispose()`. */
 export interface MaterialSource {
@@ -305,15 +313,17 @@ export class MaterialLibrary implements MaterialSource {
   private readonly handedOut = new Set<SurfaceKind>();
   private readonly patchIds = new WeakMap<EnvPatch, number>();
   private readonly watchers: SetWatcher[] = [];
+  private readonly textureWorker: TextureWorkerClient;
   private nextPatchId = 1;
   private grungeTex: THREE.DataTexture | null = null;
   private scopeSeq = 0;
   private disposed = false;
 
-  constructor(profile: QualityProfile, opts: { anisotropy?: number; fetcher?: TextureFetcher } = {}) {
+  constructor(profile: QualityProfile, opts: { anisotropy?: number; fetcher?: TextureFetcher; textureWorker?: TextureWorkerClient } = {}) {
     this._profile = profile;
     this.anisotropy = Math.min(opts.anisotropy ?? 4, 8);
     this.fetcher = opts.fetcher ?? defaultFetcher;
+    this.textureWorker = opts.textureWorker ?? new TextureWorkerClient();
   }
 
   get profile(): QualityProfile {
@@ -380,6 +390,48 @@ export class MaterialLibrary implements MaterialSource {
     if (!this._profile.pbrTextures) return Promise.resolve();
     const ids = LEVEL_TEXTURE_SETS[level] ?? [];
     return Promise.all(ids.map((id) => this.loadScanned(id))).then(() => undefined);
+  }
+
+  /**
+   * Everything a level's materials need, ready before its scenery is built: the CC0 scans it uses (tiers that load
+   * them, decoded off the main thread) and the procedural sets that no loaded scan replaces, generated in the texture
+   * worker. Building the level then finds every set cached instead of generating it on the main thread.
+   * `onProgress` gets 0..1.
+   */
+  async prepareLevel(level: LevelId, onProgress?: (f: number) => void): Promise<void> {
+    const scans = this._profile.pbrTextures ? (LEVEL_TEXTURE_SETS[level] ?? []) : [];
+    const kinds = (): SurfaceKind[] => {
+      const out = new Set<SurfaceKind>();
+      for (const name of LEVEL_SURFACES[level] ?? []) {
+        const def = PRESETS[name];
+        if (!def.kind || (def.cc0 && this.scanned.has(def.cc0))) continue;
+        if (!this.procedural.has(def.kind)) out.add(def.kind);
+      }
+      return [...out];
+    };
+    const total = scans.length + kinds().length || 1;
+    let done = 0;
+    const tick = (): void => onProgress?.(Math.min(1, ++done / total));
+    await Promise.all(scans.map((id) => this.loadScanned(id).then(tick)));
+    // a scan that failed (offline) leaves its kind to the procedural set
+    const todo = kinds();
+    const all = done + todo.length || 1;
+    const step = (): void => onProgress?.(Math.min(1, ++done / all));
+    const ts = this._profile.textureSize;
+    await Promise.all(
+      todo.map(async (kind) => {
+        const px = await this.textureWorker.build(kind, ts);
+        if (this.disposed) return;
+        if (!this.procedural.has(kind) && this._profile.textureSize === ts) this.procedural.set(kind, setTextures(px, this.anisotropy));
+        step();
+      }),
+    );
+    onProgress?.(1);
+  }
+
+  /** Starts the texture worker (its script loads during idle menu time). */
+  warmWorker(): void {
+    this.textureWorker.warm();
   }
 
   /** New tier: glass switches technique; newly enabled scanned sets start loading for existing materials. */
@@ -581,24 +633,12 @@ export class MaterialLibrary implements MaterialSource {
   private proceduralSet(kind: SurfaceKind): TextureSet {
     let set = this.procedural.get(kind);
     if (!set) {
-      const ts = this._profile.textureSize;
-      if (isGenerated(kind)) {
-        const g = GENERATED[kind];
-        // brick courses and slab joints need texels: never below minSize on a real tier (tests ask for tiny sets)
-        const s = g.make(texSize(1024, ts < 64 ? ts : Math.max(g.minSize, ts)), this.anisotropy);
-        set = { albedo: s.map, normal: s.normalMap, arm: s.orm };
-      } else {
-        const card = kind === 'foliage' || kind === 'needles';
-        const size = card ? Math.min(512, Math.max(ts < 64 ? ts : 256, ts)) : ts;
-        const px = generatePbr(kind, size);
-        set = { albedo: dataTexture(px.albedo, true), normal: dataTexture(px.normal, false), arm: dataTexture(px.arm, false) };
-        if (card) for (const t of Object.values(set)) t.wrapS = t.wrapT = THREE.ClampToEdgeWrapping;
-      }
-      for (const t of Object.values(set)) t.anisotropy = this.anisotropy;
+      set = setTextures(setPixels(kind, this._profile.textureSize), this.anisotropy);
       this.procedural.set(kind, set);
     }
     return set;
   }
+
 
   private loadScanned(id: Cc0SetId): Promise<TextureSet | null> {
     let p = this.pending.get(id);

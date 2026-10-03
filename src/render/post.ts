@@ -91,7 +91,13 @@ export class PostFX {
   }
 
   /** (Re)build the effect passes for a tier and a level look. */
-  configure(p: QualityProfile, look: Readonly<LevelLook>): void {
+  configure(p: QualityProfile, look: Readonly<LevelLook>, warm = true): void {
+    // N8AO compiles a dozen programs: the pass outlives a level switch when the tier keeps the same AO mode
+    const keptAo = this.aoPass && this.profile?.ao === p.ao && p.ao !== 'off' ? this.aoPass : null;
+    if (keptAo) {
+      this.composer.removePass(keptAo);
+      this.aoPass = null;
+    }
     this.clearPasses();
     this.generation++;
     this.profile = p;
@@ -155,8 +161,14 @@ export class PostFX {
     }
     this.caOn = false;
     this.applyScreenTarget();
-    this.warmUp();
-    if (p.ao !== 'off') void this.loadAo(this.generation);
+    if (keptAo) {
+      this.applyAoLook(keptAo, look);
+      this.aoPass = keptAo;
+      this.composer.addPass(keptAo, 1);
+      keptAo.setSize(this.width, this.height);
+    }
+    if (warm) this.warmUp();
+    if (p.ao !== 'off' && !keptAo) void this.loadAo(this.generation);
   }
 
   /**
@@ -164,6 +176,51 @@ export class PostFX {
    * on the frame they first switch on — a 0.3–1.5 s freeze on ANGLE/Metal in the middle of a flight. Renders
    * once with everything on, then once as configured so a still menu frame shows the right image.
    */
+  /**
+   * Compiles the passes' fullscreen shaders without blocking (KHR_parallel_shader_compile through
+   * `compileAsync`), so the warm-up render that follows finds them ready.
+   */
+  async precompile(): Promise<void> {
+    const r = this.composer.getRenderer();
+    // every fullscreen material the passes and their effects hold (SMAA edges / weights, bloom up / down
+    // sampling, DoF, …), each on a quad of one throwaway scene
+    const mats = new Set<THREE.Material>();
+    const seen = new Set<unknown>();
+    const scan = (o: unknown, depth: number): void => {
+      if (!o || typeof o !== 'object' || seen.has(o) || depth > 3) return;
+      seen.add(o);
+      if ((o as THREE.Material).isMaterial) {
+        if ((o as THREE.ShaderMaterial).isShaderMaterial) mats.add(o as THREE.Material);
+        return;
+      }
+      if ((o as THREE.Texture).isTexture || (o as THREE.WebGLRenderTarget).isRenderTarget || (o as THREE.Object3D).isObject3D) {
+        const m = (o as THREE.Mesh).material;
+        if (m) scan(m, depth + 1);
+        return;
+      }
+      for (const v of Object.values(o as Record<string, unknown>)) scan(v, depth + 1);
+    };
+    for (const pass of this.composer.passes) scan(pass, 0);
+    for (const e of this.effects) scan(e, 0);
+    const scene = new THREE.Scene();
+    const quad = new THREE.PlaneGeometry(2, 2);
+    for (const m of mats) {
+      const mesh = new THREE.Mesh(quad, m);
+      mesh.frustumCulled = false;
+      scene.add(mesh);
+    }
+    try {
+      await r.compileAsync(scene, new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1));
+    } finally {
+      quad.dispose();
+    }
+  }
+
+  /** Renders every pass once (see warmUp): after a deferred configure, behind a loading screen. */
+  warm(): void {
+    this.warmUp();
+  }
+
   private warmUp(): void {
     const optional = [this.dofPass, this.blurPass, this.caPass].filter((x): x is EffectPass => x !== null);
     if (optional.length === 0 && !this.aoPass) return;
