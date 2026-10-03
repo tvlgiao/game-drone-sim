@@ -448,6 +448,9 @@ test.describe('touch devices', () => {
     await touch(page, 'pointerup', 1, thr.x, thr.y - thr.R * 0.7); // let go
     await page.waitForTimeout(100);
     expect(await hook(page, (d) => d.control!.throttle)).toBeCloseTo(0.5, 1); // centre = hover
+    // the climb carries on briefly after the release (more of it on a loaded runner): sample the hold once
+    // the vertical speed has bled off, not while the quad is still coasting up
+    await page.waitForTimeout(600);
     const y0 = await hook(page, (d) => d.state.position.y);
     await page.waitForTimeout(1500);
     const y1 = await hook(page, (d) => d.state.position.y);
