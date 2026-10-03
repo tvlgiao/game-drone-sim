@@ -166,7 +166,7 @@ export class WorldLevelView implements LevelView {
     if (this.cityTrees && (d.x - this.cityTreesAt.x) ** 2 + (d.z - this.cityTreesAt.z) ** 2 > CITY_TREE_REBUILD * CITY_TREE_REBUILD) {
       this.cityTreesAt.set(d.x, 0, d.z);
       this.scatter.rebuild(new Map(), this.cityTrees, this.cityTreesAt, this.profile.furnitureRange);
-      this.city?.setFurniture(this.profile.furnitureRange, d.x, d.z);
+      this.city?.setFurniture(this.profile.furnitureRange, d.x, d.z, this.profile.kerbs);
     }
     if (this.followShadow) this.placeSun(this.shadowCentre(f.camera, d));
   }
@@ -236,11 +236,11 @@ export class WorldLevelView implements LevelView {
     }
     if (this.city) {
       this.city.setOutskirts(prof.outskirts);
-      this.city.setFurniture(prof.furnitureRange, this.cityTreesAt.x, this.cityTreesAt.z);
+      this.city.setFurniture(prof.furnitureRange, this.cityTreesAt.x, this.cityTreesAt.z, prof.kerbs);
       this.city.setFacadeDetail(prof.facadeDetail);
     }
     if (!q) return;
-    const shadows = q.shadows && (this.city ? true : prof.sunShadows);
+    const shadows = q.shadows && prof.sunShadows;
     this.sun.castShadow = shadows;
     this.followShadow = shadows;
     this.scatter.setShadows(shadows);

@@ -19,6 +19,8 @@ export const LIGHT_STRIDE = 3;
 /** x, z, length, yaw */
 export const KERB_STRIDE = 4;
 export const CAR_SIZE: readonly [number, number, number] = [1.9, 1.5, 4.4];
+/** parked cars keep at least this distance (m) from the edge of every intersection */
+export const CAR_INTERSECTION_GAP = 8;
 export const LIGHT_HEIGHT = 8;
 export const STREET_TREE_SCALE = 0.62;
 /** sidewalk offset of trees / lights from the street centre line, m */
@@ -95,7 +97,9 @@ export function cityFurniture(city: City): CityFurniture {
             }
           }
           // parked cars with gaps
-          for (let k = 0, s = s0 + 3; s + 2.5 <= s1; k++, s += 5.6) {
+          const c0 = blockMin(i) + CAR_INTERSECTION_GAP + CAR_SIZE[2] / 2;
+          const c1 = blockMin(i) + CITY_BLOCK - CAR_INTERSECTION_GAP - CAR_SIZE[2] / 2;
+          for (let k = 0, s = c0; s <= c1 + 1e-9; k++, s += 5.6) {
             const hc = rehash(h, 100 + k * 2 + (side > 0 ? 1 : 0));
             // downtown streets are no-parking; elsewhere about a third of the kerb is taken
             if (u01(hc) < (downtown ? 1 : 0.78)) continue;

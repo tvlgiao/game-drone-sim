@@ -120,6 +120,32 @@ test.describe('low tier (Quest XR budget)', () => {
   }
 });
 
+/** iPhone / tablet (medium) frame budget (07 §7). */
+const PHONE_DRAWS = 110;
+const PHONE_TRIS = 250_000;
+
+test.describe('phone (medium budget)', () => {
+  test.skip(({ isMobile }) => !isMobile, 'iPhone WebKit project');
+
+  test(`City over the street canyon fits ${PHONE_DRAWS} draws and ${PHONE_TRIS / 1000}k triangles`, async ({ page }) => {
+    await boot(page);
+    await fly(page, 'city', 'freefly');
+    expect(await hook(page, (d) => (d as unknown as { tier: string }).tier)).toBe('medium');
+    await page.evaluate(() => {
+      const d = (window as unknown as { __drone: Hook & { setCamera: (m: string) => void } }).__drone;
+      d.teleport(-560, 20, -200, -Math.PI / 2);
+      d.hold(true);
+      d.setCamera('chase');
+    });
+    await page.waitForTimeout(2_500);
+    const s = await hook(page, (d) => d.stats());
+    test.info().annotations.push({ type: 'budget', description: `${s.calls} draws, ${s.triangles} tris` });
+    expect(s.calls).toBeLessThanOrEqual(PHONE_DRAWS);
+    expect(s.triangles).toBeLessThanOrEqual(PHONE_TRIS);
+    expect(errors).toEqual([]);
+  });
+});
+
 test.describe('desktop', () => {
   test.skip(({ isMobile }) => isMobile, 'desktop only');
 

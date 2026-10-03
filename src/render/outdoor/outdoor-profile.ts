@@ -20,6 +20,8 @@ export interface OutdoorProfile {
   rocks: boolean;
   /** City: street trees, lights, parked cars and kerbs are drawn within this distance of the drone (inside the fog) */
   furnitureRange: number;
+  /** City: raised kerbs (no collider; the ground shader paints the kerb line anyway) */
+  kerbs: boolean;
   /** chunk meshes created / uploaded per frame (the 3 × 3 under the drone never waits) */
   uploads: number;
   sunShadows: boolean;
@@ -35,23 +37,23 @@ export const OUTDOOR_PROFILES: Readonly<Record<QualityTier, OutdoorProfile>> = {
   ultra: {
     stream: { radius: 5, lod0: 1.5, lod1: 2.5, maxInFlight: 6 },
     farRadius: 26,
-    fog: 4200, treesLod0: 1500, treesLod1: 14000, rocks: true, furnitureRange: Infinity, uploads: 2, sunShadows: true, facadeDetail: true, waterDetail: true, outskirts: 1,
+    fog: 4200, treesLod0: 1500, treesLod1: 14000, rocks: true, furnitureRange: Infinity, kerbs: true, uploads: 2, sunShadows: true, facadeDetail: true, waterDetail: true, outskirts: 1,
   },
   high: {
     stream: { radius: 4, lod0: 1.5, lod1: 2.5, maxInFlight: 5 },
     farRadius: 20,
-    fog: 3200, treesLod0: 1100, treesLod1: 10000, rocks: true, furnitureRange: Infinity, uploads: 2, sunShadows: true, facadeDetail: true, waterDetail: true, outskirts: 1,
+    fog: 3200, treesLod0: 1100, treesLod1: 10000, rocks: true, furnitureRange: Infinity, kerbs: true, uploads: 2, sunShadows: true, facadeDetail: true, waterDetail: true, outskirts: 1,
   },
   medium: {
     stream: { radius: 3, lod0: 0.75, lod1: 1.5, maxInFlight: 4 },
     farRadius: 10,
-    fog: 1400, treesLod0: 400, treesLod1: 5000, rocks: true, furnitureRange: 600, uploads: 1, sunShadows: false, facadeDetail: true, waterDetail: true, outskirts: 0.6,
+    fog: 1400, treesLod0: 400, treesLod1: 5000, rocks: true, furnitureRange: 320, kerbs: false, uploads: 1, sunShadows: false, facadeDetail: true, waterDetail: true, outskirts: 0.6,
   },
   low: {
     // only the chunk under the drone at LOD1 (landing matches the physics ground); the rest is one LOD2 batch
     stream: { radius: 2, lod0: 0, lod1: 0.5, maxInFlight: 3 },
     farRadius: 0,
-    fog: 350, treesLod0: 0, treesLod1: 1800, rocks: false, furnitureRange: 260, uploads: 1, sunShadows: false, facadeDetail: false, waterDetail: false, outskirts: 0.15,
+    fog: 350, treesLod0: 0, treesLod1: 1800, rocks: false, furnitureRange: 260, kerbs: false, uploads: 1, sunShadows: false, facadeDetail: false, waterDetail: false, outskirts: 0.15,
   },
 };
 

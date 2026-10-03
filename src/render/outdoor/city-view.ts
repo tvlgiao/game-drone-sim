@@ -363,7 +363,7 @@ export class CityView {
    * Street lights, parked cars and kerbs within `range` of (x, z). Everything the drone can reach is drawn: on the
    * Quest tier the range sits inside the fog, and the view refills as the drone moves.
    */
-  setFurniture(range: number, x: number, z: number): void {
+  setFurniture(range: number, x: number, z: number, kerbsOn = true): void {
     const [, , , lights, cars, kerbs] = this.props as [InstanceLayer, InstanceLayer, InstanceLayer, InstanceLayer, InstanceLayer, InstanceLayer];
     for (const l of [lights, cars, kerbs]) l.begin();
     const r2 = range * range;
@@ -371,7 +371,7 @@ export class CityView {
     const f = this.furniture;
     for (let k = 0; k < f.lights.length; k += LIGHT_STRIDE) if (near(f.lights[k]!, f.lights[k + 1]!)) lights.push(f.lights[k]!, 0, f.lights[k + 1]!, f.lights[k + 2]!, 1, 1, 1, 0);
     for (let k = 0; k < f.cars.length; k += CAR_STRIDE) if (near(f.cars[k]!, f.cars[k + 2]!)) cars.push(f.cars[k]!, f.cars[k + 1]!, f.cars[k + 2]!, f.cars[k + 3]!, 1, 1, 1, f.cars[k + 4]!);
-    for (let k = 0; k < f.kerbs.length; k += KERB_STRIDE) if (near(f.kerbs[k]!, f.kerbs[k + 1]!)) kerbs.push(f.kerbs[k]!, 0, f.kerbs[k + 1]!, f.kerbs[k + 3]!, 0.3, 0.15, f.kerbs[k + 2]!, 0);
+    if (kerbsOn) for (let k = 0; k < f.kerbs.length; k += KERB_STRIDE) if (near(f.kerbs[k]!, f.kerbs[k + 1]!)) kerbs.push(f.kerbs[k]!, 0, f.kerbs[k + 1]!, f.kerbs[k + 3]!, 0.3, 0.15, f.kerbs[k + 2]!, 0);
     for (const l of [lights, cars, kerbs]) l.end();
   }
 
