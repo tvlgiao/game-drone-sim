@@ -65,7 +65,10 @@ describe('settings', () => {
       viewDistance: 'auto',
       minimap: null,
       units: 'm',
-      windVolume: 0.6,
+      musicOn: true,
+      musicVolume: 0.7,
+      sfxVolume: 0.9,
+      ambienceVolume: 0.8,
     });
   });
 
@@ -122,7 +125,10 @@ describe('settings', () => {
       viewDistance: 'far',
       minimap: 'on',
       units: 'cubits',
-      windVolume: 4,
+      musicOn: 'loud',
+      musicVolume: 4,
+      sfxVolume: -1,
+      ambienceVolume: 'x',
     });
     expect(s).toEqual({
       stickMode: 2,
@@ -160,7 +166,10 @@ describe('settings', () => {
       viewDistance: 'auto',
       minimap: null,
       units: 'm',
-      windVolume: 1,
+      musicOn: true,
+      musicVolume: 1,
+      sfxVolume: 0,
+      ambienceVolume: 0.8,
     });
   });
 

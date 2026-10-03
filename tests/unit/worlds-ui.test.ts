@@ -256,13 +256,13 @@ describe('units', () => {
 
 describe('outdoor settings', () => {
   it('defaults: auto time and view distance, device-default minimap, metres', () => {
-    expect(DEFAULT_SETTINGS).toMatchObject({ timeOfDay: 'auto', viewDistance: 'auto', minimap: null, units: 'm', windVolume: 0.6 });
+    expect(DEFAULT_SETTINGS).toMatchObject({ timeOfDay: 'auto', viewDistance: 'auto', minimap: null, units: 'm', ambienceVolume: 0.8 });
     expect([minimapOn({ minimap: null }, false), minimapOn({ minimap: null }, true), minimapOn({ minimap: true }, true), minimapOn({ minimap: false }, false)]).toEqual([true, false, true, false]);
   });
 
   it('validates values and migrates unit spellings', () => {
-    expect(validateSettings({ timeOfDay: 'golden', viewDistance: 'long', minimap: false, units: 'ft', windVolume: 0.3 })).toMatchObject({ timeOfDay: 'golden', viewDistance: 'long', minimap: false, units: 'ft', windVolume: 0.3 });
-    expect(validateSettings({ timeOfDay: 7, viewDistance: null, minimap: 1, units: 'yards', windVolume: -2 })).toMatchObject({ timeOfDay: 'auto', viewDistance: 'auto', minimap: null, units: 'm', windVolume: 0 });
+    expect(validateSettings({ timeOfDay: 'golden', viewDistance: 'long', minimap: false, units: 'ft', ambienceVolume: 0.3 })).toMatchObject({ timeOfDay: 'golden', viewDistance: 'long', minimap: false, units: 'ft', ambienceVolume: 0.3 });
+    expect(validateSettings({ timeOfDay: 7, viewDistance: null, minimap: 1, units: 'yards', ambienceVolume: -2 })).toMatchObject({ timeOfDay: 'auto', viewDistance: 'auto', minimap: null, units: 'm', ambienceVolume: 0 });
     expect(validateSettings({ units: 'Imperial' }).units).toBe('ft');
     expect(validateSettings({ units: 'feet' }).units).toBe('ft');
     expect(validateSettings({ units: 'metric' }).units).toBe('m');
@@ -270,10 +270,10 @@ describe('outdoor settings', () => {
 
   it('persist across a reload; v3 saves without the new fields get the defaults', () => {
     const st = mem();
-    saveSettings({ ...validateSettings({}), timeOfDay: 'dusk', viewDistance: 'short', minimap: true, units: 'ft', windVolume: 0.2 }, st);
-    expect(loadSettings(st)).toMatchObject({ timeOfDay: 'dusk', viewDistance: 'short', minimap: true, units: 'ft', windVolume: 0.2 });
+    saveSettings({ ...validateSettings({}), timeOfDay: 'dusk', viewDistance: 'short', minimap: true, units: 'ft', ambienceVolume: 0.2 }, st);
+    expect(loadSettings(st)).toMatchObject({ timeOfDay: 'dusk', viewDistance: 'short', minimap: true, units: 'ft', ambienceVolume: 0.2 });
     const old = mem({ [SETTINGS_KEY]: JSON.stringify({ v: 3, fovDeg: 120 }) });
-    expect(loadSettings(old)).toMatchObject({ fovDeg: 120, timeOfDay: 'auto', viewDistance: 'auto', minimap: null, units: 'm', windVolume: 0.6 });
+    expect(loadSettings(old)).toMatchObject({ fovDeg: 120, timeOfDay: 'auto', viewDistance: 'auto', minimap: null, units: 'm', ambienceVolume: 0.8 });
   });
 });
 

@@ -89,8 +89,13 @@ export interface Settings {
   /** outdoor HUD minimap; null = the device default (off on Quest / in VR, on elsewhere) — see `minimapOn` */
   minimap: boolean | null;
   units: Units;
-  /** wind noise level relative to the master volume */
-  windVolume: number;
+  /** soundtrack on / off and its level (0..1, under the master volume) */
+  musicOn: boolean;
+  musicVolume: number;
+  /** motors, impacts, chimes, callouts and menu sounds */
+  sfxVolume: number;
+  /** level ambience: wind, room tone, traffic, rivers, birds (replaces the old wind-only slider) */
+  ambienceVolume: number;
 }
 
 export const SETTINGS_KEY = 'drone-sim.settings';
@@ -135,7 +140,10 @@ export const DEFAULT_SETTINGS: Readonly<Settings> = Object.freeze({
   viewDistance: 'auto',
   minimap: null,
   units: 'm',
-  windVolume: 0.6,
+  musicOn: true,
+  musicVolume: 0.7,
+  sfxVolume: 0.9,
+  ambienceVolume: 0.8,
 });
 
 /** Allowed values / numeric ranges, shared with the settings screens. */
@@ -166,8 +174,20 @@ export const SETTINGS_OPTIONS = {
   timeOfDay: ['auto', 'dawn', 'noon', 'golden', 'dusk'] as const,
   viewDistance: ['auto', 'short', 'medium', 'long'] as const,
   units: ['m', 'ft'] as const,
-  windVolume: { min: 0, max: 1, step: 0.1 },
+  musicVolume: { min: 0, max: 1, step: 0.1 },
+  sfxVolume: { min: 0, max: 1, step: 0.1 },
+  ambienceVolume: { min: 0, max: 1, step: 0.1 },
 };
+
+/** The X1 wind slider's default: a stored value that differs from it was the pilot's own choice. */
+const OLD_WIND_DEFAULT = 0.6;
+
+/** Ambience level for a save: the stored one, else a pilot-set wind level from before the ambience bus, else the default. */
+export function migrateAmbience(r: Record<string, unknown>): unknown {
+  if (r.ambienceVolume !== undefined) return r.ambienceVolume;
+  if (typeof r.windVolume === 'number' && Number.isFinite(r.windVolume) && Math.abs(r.windVolume - OLD_WIND_DEFAULT) > 1e-9) return r.windVolume;
+  return undefined;
+}
 
 /** Old stored values → current ones. */
 const THROTTLE_SOURCE_MIGRATION: Record<string, ThrottleSource> = { 'left-stick': 'stick', 'right-trigger': 'trigger' };
@@ -341,7 +361,10 @@ export function validateSettings(raw: unknown): Settings {
     viewDistance: pick(r.viewDistance, o.viewDistance, d.viewDistance),
     minimap: typeof r.minimap === 'boolean' ? r.minimap : null,
     units: pick(units, o.units, d.units),
-    windVolume: num(r.windVolume, o.windVolume, d.windVolume),
+    musicOn: bool(r.musicOn, d.musicOn),
+    musicVolume: num(r.musicVolume, o.musicVolume, d.musicVolume),
+    sfxVolume: num(r.sfxVolume, o.sfxVolume, d.sfxVolume),
+    ambienceVolume: num(migrateAmbience(r), o.ambienceVolume, d.ambienceVolume),
   };
 }
 

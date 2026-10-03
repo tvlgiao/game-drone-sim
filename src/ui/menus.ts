@@ -120,7 +120,7 @@ type Row =
   | (RowBase & { kind: 'range'; range: { min: number; max: number; step: number }; fmt: (v: number) => string; get: (s: Settings) => number; set: (s: Settings, v: number) => void })
   | (RowBase & { kind: 'bool'; on?: string; off?: string; get: (s: Settings) => boolean; set: (s: Settings, v: boolean) => void });
 
-type NumKey = 'cameraTiltDeg' | 'fovDeg' | 'analogStrength' | 'volume' | 'windVolume' | 'deadzone' | 'throttleExpo' | 'throttleLimit' | 'angleMaxTiltDeg' | 'mouseSensitivity' | 'mouseExpo' | 'mouseDeadzone';
+type NumKey = 'cameraTiltDeg' | 'fovDeg' | 'analogStrength' | 'volume' | 'musicVolume' | 'sfxVolume' | 'ambienceVolume' | 'deadzone' | 'throttleExpo' | 'throttleLimit' | 'angleMaxTiltDeg' | 'mouseSensitivity' | 'mouseExpo' | 'mouseDeadzone';
 const rangeRow = (id: NumKey, label: string, hint: string, fmt: (v: number) => string): Row => ({
   id,
   label,
@@ -299,7 +299,7 @@ const ROW_DEFS: Row[] = [
       s.quality = v as Settings['quality'];
     },
   },
-  rangeRow('volume', 'Volume', 'Master volume', (v) => `${Math.round(v * 100)}%`),
+  rangeRow('volume', 'Master volume', 'Everything the game plays', (v) => `${Math.round(v * 100)}%`),
   {
     id: 'showFps',
     label: 'Show FPS',
@@ -434,7 +434,19 @@ ROW_DEFS.push(
       s.units = v as Settings['units'];
     },
   },
-  rangeRow('windVolume', 'Wind volume', 'Wind noise outdoors', pct),
+  {
+    id: 'musicOn',
+    label: 'Music',
+    hint: 'Adaptive soundtrack, one theme per level',
+    kind: 'bool',
+    get: (s) => s.musicOn,
+    set: (s, v) => {
+      s.musicOn = v;
+    },
+  },
+  rangeRow('musicVolume', 'Music volume', 'Soundtrack level', pct),
+  rangeRow('sfxVolume', 'Effects volume', 'Motors, impacts, chimes and beeps', pct),
+  rangeRow('ambienceVolume', 'Ambience volume', 'Wind, room tone, traffic, rivers and birds', pct),
 );
 /** Rows only shown on touch devices. */
 const TOUCH_ROWS: ReadonlySet<string> = new Set(['touchThrottleCentre', 'touchSticksFixed']);
@@ -456,7 +468,10 @@ const SETTINGS_ROWS = [
   'viewDistance',
   'timeOfDay',
   'volume',
-  'windVolume',
+  'musicOn',
+  'musicVolume',
+  'sfxVolume',
+  'ambienceVolume',
   'units',
   'minimap',
   'showFps',
