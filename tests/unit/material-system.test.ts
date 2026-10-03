@@ -90,7 +90,7 @@ describe('patches on library presets', () => {
     const lib = new MaterialLibrary(noScans);
     const floor = lib.material('slab', { albedo: 0x67635e });
     expect(floor.color.getHex()).toBe(new THREE.Color(0x67635e).getHex());
-    expect(floor.defines?.ENV_DETAIL).toBe('');
+    expect(floor.defines?.ENV_DETAIL).toBe('1.000');
     expect(compiled(floor).fragment).toContain('sampledDiffuseColor.rgb / max( texture2D( map, vec2( 0.5 ), 16.0 ).rgb');
     lib.dispose();
   });
@@ -157,7 +157,7 @@ describe('loft palette', () => {
     expect(mats.plaster.name).toBe('lib:plaster');
     expect(mats.concrete.name).toBe('lib:concrete');
     expect(mats.wood.name).toBe('lib:wood');
-    expect(mats.floor.defines).toMatchObject({ ENV_BOX: '', ENV_MACRO: '', ENV_DETAIL: '' });
+    expect(mats.floor.defines).toMatchObject({ ENV_BOX: '', ENV_MACRO: '', ENV_DETAIL: '1.000' });
     expect(mats.brick.defines).toMatchObject({ ENV_GRIME: '' });
     expect(mats.glass.defines).toMatchObject({ ENV_BOX: '', ENV_GLASS: '' });
     const names = lib.materialNames();

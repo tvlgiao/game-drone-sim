@@ -14,6 +14,7 @@ import type { WindUniforms } from '../materials/patches';
 import { mountainBackdrop } from './backdrop';
 import { VegBuilder } from './foliage';
 import { Grass } from './grass';
+import { Forest } from './trees';
 import { GRASS_TILE, fieldGeometry, meadowGeometry, padTexture, terrainHeight } from './ground';
 import { buildOutdoorProps, lowPolyMaterial, type OutdoorProps } from './outdoor-props';
 import { buildScenery } from './scenery';
@@ -60,6 +61,7 @@ export class OutdoorLevelView implements LevelView {
   private readonly wind: WindUniforms;
   private readonly grass: Grass;
   private readonly cards: THREE.Mesh | null;
+  private readonly forest: Forest;
   private readonly scope: MaterialScope;
 
   constructor(level: OutdoorLevel, renderer: THREE.WebGLRenderer, library: MaterialLibrary) {
@@ -98,7 +100,7 @@ export class OutdoorLevelView implements LevelView {
 
     // meadow and mowed field: the palette rides on vertex colours, the grass set (procedural, CC0 where
     // loaded) only adds texture through the detail patch
-    const meadowMat = lib.material('grass', { uvMeters: GRASS_TILE, vertexColors: true, normalScale: 0.5, roughness: 1.4, envMapIntensity: 0.3, patch: { detail: true } });
+    const meadowMat = lib.material('grass', { uvMeters: GRASS_TILE, vertexColors: true, normalScale: 0.5, roughness: 1.4, envMapIntensity: 0.3, patch: { detail: 0.7 } });
     const groundGeo = meadowGeometry(MEADOW_RADIUS);
     if (this.props.hills) {
       const hills = this.props.hills;
@@ -118,7 +120,7 @@ export class OutdoorLevelView implements LevelView {
       roughness: 1.4,
       envMapIntensity: 0.3,
       polygonOffset: -1,
-      patch: { detail: true, stripes: { half, width: (half * 2) / FIELD_STRIPES, strength: 0.16 } },
+      patch: { detail: 0.7, stripes: { half, width: (half * 2) / FIELD_STRIPES, strength: 0.16 } },
     });
     const field = fieldGeometry(half, FIELD_STRIPES);
     this.addMesh(new THREE.Mesh(field, fieldMat), 'field', false, true);
@@ -160,7 +162,7 @@ export class OutdoorLevelView implements LevelView {
       this.owned.push(m.geometry);
     }
 
-    const barkMat = lib.material('bark', { uvMeters: 1, vertexColors: true, roughness: 0.95, envMapIntensity: 0.4, patch: { wind: { uniforms: this.wind, flutter: false } } });
+    const barkMat = lib.material('bark', { uvMeters: 1, vertexColors: true, albedo: 0x8a7a6a, roughness: 0.95, envMapIntensity: 0.8, patch: { wind: { uniforms: this.wind, flutter: false } } });
     const leavesMat = lib.custom('training:leaves', () =>
       applyEnvPatch(new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.82, metalness: 0, side: THREE.DoubleSide, envMapIntensity: 0.5 }), { wind: { uniforms: this.wind, flutter: true } }),
     );
@@ -172,6 +174,11 @@ export class OutdoorLevelView implements LevelView {
       m.receiveShadow = true;
       this.owned.push(m.geometry);
     }
+    const lodMat = lib.custom('training:tree-lod', () =>
+      applyEnvPatch(new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.85, metalness: 0, envMapIntensity: 0.5 }), { wind: { uniforms: this.wind, flutter: false } }),
+    );
+    const needleMat = lib.material('needles', { vertexColors: true, roughness: 0.85, envMapIntensity: 0.5, patch: { wind: { uniforms: this.wind, flutter: true } } });
+    this.forest = new Forest(veg.trees, { bark: barkMat, cards: cardMat, needles: needleMat, lod: lodMat }, this.group);
     this.cards = vegMeshes.cards;
     if (this.cards) {
       this.cards.castShadow = false;
@@ -241,7 +248,9 @@ export class OutdoorLevelView implements LevelView {
     const device = QUALITY_PROFILES[p.tier].particles > 0 ? p.particles / QUALITY_PROFILES[p.tier].particles : 1;
     const g = GRASS[p.tier];
     this.grass.setDensity(g.tufts * device, g.half);
-    if (this.cards) this.cards.visible = p.tier === 'ultra' || p.tier === 'high';
+    const detailed = p.tier === 'ultra' || p.tier === 'high';
+    if (this.cards) this.cards.visible = detailed;
+    this.forest.setDetailed(detailed);
   }
 
   /** grass tufts drawn this tier (tests / budget probes) */
@@ -265,6 +274,7 @@ export class OutdoorLevelView implements LevelView {
     this.hemi.dispose();
     this.ringLight.dispose();
     this.grass.dispose();
+    this.forest.dispose();
     for (const d of this.props.disposables) d.dispose();
     for (const d of this.owned) d.dispose();
     this.scope.dispose();

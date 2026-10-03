@@ -18,6 +18,9 @@ const FAN_BLADES = 4;
 const FAN_HUB_R = 0.12;
 const FAN_BLADE_W = 0.14;
 
+/** batch-key suffix of the small dressing the low tier drops */
+export const DETAIL_SUFFIX = '-detail';
+
 export interface LiveProps {
   fan: THREE.Group | null;
   tvScreen: THREE.Mesh<THREE.PlaneGeometry, THREE.ShaderMaterial> | null;
@@ -55,6 +58,11 @@ class PropFrame {
     this.local.compose(this.p, this.q, this.s);
     this.out.multiplyMatrices(this.base, this.local);
     this.batch.add(key, mat, g, this.out, opts);
+  }
+
+  /** Small dressing (rivets, bolts, seams, cages): merged into `<key>-detail`, which the low / VR tier hides. */
+  detail(key: string, mat: THREE.Material, g: THREE.BufferGeometry, x: number, y: number, z: number, rx = 0, ry = 0, rz = 0, opts: AddOptions = {}): void {
+    this.add(`${key}${DETAIL_SUFFIX}`, mat, g, x, y, z, rx, ry, rz, opts);
   }
 
   /** local → world point */
@@ -148,8 +156,8 @@ function beam(f: PropFrame, m: LoftMaterials, w: number, h: number, len: number)
   for (let z = -len / 2 + 0.08; z < len / 2; z += 0.16) {
     for (const s of [-1, 1]) {
       const x = s * w * 0.3;
-      f.add('props', m.props, rivet(), x, fl, z, 0, 0, 0, paint);
-      f.add('props', m.props, rivet(), x, h - fl, z, Math.PI, 0, 0, paint);
+      f.detail('props', m.props, rivet(), x, fl, z, 0, 0, 0, paint);
+      f.detail('props', m.props, rivet(), x, h - fl, z, Math.PI, 0, 0, paint);
     }
   }
   // splice plates with a 3 × 2 bolt group on both faces of the web
@@ -158,7 +166,7 @@ function beam(f: PropFrame, m: LoftMaterials, w: number, h: number, len: number)
     for (const s of [-1, 1]) {
       f.add('props', m.props, new THREE.BoxGeometry(0.012, h - fl * 2 - 0.04, 0.34), s * 0.017, h / 2, z, 0, 0, 0, paint);
       for (let i = -1; i <= 1; i++) for (let j = -1; j <= 1; j += 2) {
-        f.add('props', m.props, new THREE.CylinderGeometry(0.014, 0.014, 0.014, 6), s * 0.03, h / 2 + j * 0.09, z + i * 0.1, 0, 0, Math.PI / 2, steel);
+        f.detail('props', m.props, new THREE.CylinderGeometry(0.014, 0.014, 0.014, 6), s * 0.03, h / 2 + j * 0.09, z + i * 0.1, 0, 0, Math.PI / 2, steel);
       }
     }
   }
@@ -183,15 +191,15 @@ function duct(f: PropFrame, m: LoftMaterials, len: number, h: number, d: number,
     const a = t * turns * Math.PI * 2;
     pts.push(new THREE.Vector3(-len / 2 + 0.05 + t * (len - 0.1), h / 2 + Math.cos(a) * (r + 0.002), Math.sin(a) * (r + 0.002)));
   }
-  f.add('props', m.props, new THREE.TubeGeometry(new THREE.CatmullRomCurve3(pts), steps, 0.004, 3, false), 0, 0, 0, 0, 0, 0, galv);
+  f.detail('props', m.props, new THREE.TubeGeometry(new THREE.CatmullRomCurve3(pts), steps, 0.004, 3, false), 0, 0, 0, 0, 0, 0, galv);
   for (let x = -len / 2 + 0.6; x <= len / 2 - 0.5; x += 2.4) {
-    f.add('props', m.props, new THREE.CylinderGeometry(r + 0.008, r + 0.008, 0.05, 28, 1, true), x, h / 2, 0, 0, 0, Math.PI / 2, galv);
+    f.detail('props', m.props, new THREE.CylinderGeometry(r + 0.008, r + 0.008, 0.05, 28, 1, true), x, h / 2, 0, 0, 0, Math.PI / 2, galv);
   }
   for (const s of [-1, 1]) f.add('props', m.props, new THREE.CircleGeometry(r, 28), s * (len / 2 - 0.02), h / 2, 0, 0, s * Math.PI / 2, 0, galv);
   const steel = finish('steelBlack');
   const rodLen = 6 - (baseY + h);
   for (let x = -len / 2 + 1.5; x < len / 2; x += 3.5) {
-    f.add('props', m.props, new THREE.TorusGeometry(r + 0.006, 0.006, 4, 24, Math.PI), x, h / 2, 0, 0, Math.PI / 2, Math.PI, steel);
+    f.detail('props', m.props, new THREE.TorusGeometry(r + 0.006, 0.006, 4, 24, Math.PI), x, h / 2, 0, 0, Math.PI / 2, Math.PI, steel);
     for (const z of [-r - 0.006, r + 0.006]) {
       f.add('props', m.props, new THREE.CylinderGeometry(0.006, 0.006, rodLen + h / 2, 5), x, h / 2 + (rodLen + h / 2) / 2, z, 0, 0, 0, steel);
     }
@@ -476,9 +484,9 @@ function bulb(f: PropFrame, m: LoftMaterials, cordLen: number, index: number): v
     const wire = finish('steelBlack');
     for (let k = 0; k < 6; k++) {
       const a = (k / 6) * Math.PI * 2;
-      f.add('props', m.props, new THREE.CylinderGeometry(0.0015, 0.0015, 0.17, 3), Math.cos(a) * 0.064, 0.085, Math.sin(a) * 0.064, 0, 0, 0, wire);
+      f.detail('props', m.props, new THREE.CylinderGeometry(0.0015, 0.0015, 0.17, 3), Math.cos(a) * 0.064, 0.085, Math.sin(a) * 0.064, 0, 0, 0, wire);
     }
-    for (const y of [0.0, 0.08, 0.17]) f.add('props', m.props, new THREE.TorusGeometry(0.064, 0.0018, 3, 18), 0, y, 0, Math.PI / 2, 0, 0, wire);
+    for (const y of [0.0, 0.08, 0.17]) f.detail('props', m.props, new THREE.TorusGeometry(0.064, 0.0018, 3, 18), 0, y, 0, Math.PI / 2, 0, 0, wire);
   }
   f.add('props', m.props, new THREE.CylinderGeometry(0.0035, 0.0035, cordLen - 0.2, 5), 0, 0.2 + (cordLen - 0.2) / 2, 0, 0, 0, 0, finish('rubber'));
   f.add('props', m.props, new THREE.CylinderGeometry(0.05, 0.05, 0.025, 16), 0, cordLen - 0.0125, 0, 0, 0, 0, finish('steelBlack'));

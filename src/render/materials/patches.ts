@@ -86,7 +86,8 @@ export interface EnvPatch {
   macro?: MacroMap;
   grime?: WallGrime;
   paint?: PaintCoat;
-  detail?: boolean;
+  /** true, or the share of the map's luminance contrast kept (0..1; 1 = all of it) */
+  detail?: boolean | number;
   overlay?: MacroMap;
   stripes?: { half: number; width: number; strength: number };
   terrain?: TerrainPatch;
@@ -123,9 +124,17 @@ attribute float ENV_WET_ATTR;
 const VERT_WIND = /* glsl */ `
 #ifdef ENV_WIND
 {
+  // aSway is in world metres: instanced trees take the wind into their own (scaled, turned) frame and
+  // a phase from their position, so a treeline does not sway in lockstep
   float ph = dot( transformed.xz, vec2( 0.11, 0.07 ) );
+  #ifdef USE_INSTANCING
+  ph += dot( instanceMatrix[3].xz, vec2( 0.11, 0.07 ) );
+  vec3 windLocal = inverse( mat3( instanceMatrix ) ) * vec3( uWind.x, 0.0, uWind.y );
+  #else
+  vec3 windLocal = vec3( uWind.x, 0.0, uWind.y );
+  #endif
   float gust = sin( uTime * 1.25 + ph ) * 0.55 + sin( uTime * 2.3 + ph * 1.7 ) * 0.25 + 0.4;
-  transformed.xz += uWind * gust * aSway;
+  transformed += windLocal * gust * aSway;
   #ifdef ENV_FLUTTER
   transformed += vec3( sin( uTime * 8.0 + ph * 13.0 ), sin( uTime * 6.3 + ph * 11.0 ) * 0.6, cos( uTime * 7.1 + ph * 9.0 ) ) * 0.06 * aSway;
   #endif
@@ -240,7 +249,7 @@ const AFTER_MAP = /* glsl */ `
   // the smallest mip is the map's mean colour: what is left is texture, not tint. Mostly its luminance:
   // a scan's dry blades or fallen leaves must not repaint the level's palette
   vec3 dr = sampledDiffuseColor.rgb / max( texture2D( map, vec2( 0.5 ), 16.0 ).rgb, vec3( 0.03 ) );
-  diffuseColor.rgb = diffuse * mix( vec3( dot( dr, vec3( 0.2126, 0.7152, 0.0722 ) ) ), dr, 0.3 );
+  diffuseColor.rgb = diffuse * mix( vec3( 1.0 ), mix( vec3( dot( dr, vec3( 0.2126, 0.7152, 0.0722 ) ) ), dr, 0.3 ), ENV_DETAIL );
 }
 #endif
 #if defined( ENV_PAINT ) && defined( USE_MAP )
@@ -367,7 +376,7 @@ export function patchKey(p: EnvPatch): string {
     p.macro ? 'm' : '',
     p.grime ? 'g' : '',
     p.paint ? 'p' : '',
-    p.detail ? 'd' : '',
+    p.detail ? `d${p.detail === true ? 1 : p.detail}` : '',
     p.overlay ? 'o' : '',
     p.stripes ? 's' : '',
     t ? `t${t.rockAttribute ?? ''}:${t.wetAttribute ?? ''}` : '',
@@ -415,7 +424,7 @@ export function applyEnvPatch<M extends THREE.MeshStandardMaterial>(mat: M, p: E
     uniforms.uPaintCover = { value: p.paint.coverage };
     uniforms.uPaintRough = { value: p.paint.roughness };
   }
-  if (p.detail) defines.ENV_DETAIL = '';
+  if (p.detail) defines.ENV_DETAIL = (p.detail === true ? 1 : Math.min(1, Math.max(0, p.detail))).toFixed(3);
   if (p.overlay) {
     defines.ENV_OVERLAY = '';
     uniforms.uOverlay = { value: p.overlay.texture };

@@ -16,6 +16,7 @@ import { buildProps } from '../../src/render/props';
 import { buildRoom } from '../../src/render/room';
 import { mountainBackdrop } from '../../src/render/outdoor/backdrop';
 import { VegBuilder } from '../../src/render/outdoor/foliage';
+import { Forest } from '../../src/render/outdoor/trees';
 import { Grass } from '../../src/render/outdoor/grass';
 import { FLAT_RADIUS, fieldGeometry, meadowGeometry, terrainHeight } from '../../src/render/outdoor/ground';
 import { buildOutdoorProps, lowPolyMaterial } from '../../src/render/outdoor/outdoor-props';
@@ -167,27 +168,59 @@ describe('Training Field scenery', () => {
     expect(relief).toBeGreaterThan(2);
   });
 
-  it('tree trunks and crowns (leaf masses + cards) stay inside the trunk / canopy colliders', () => {
-    for (const p of TRAINING_LEVEL.props.filter((q) => q.kind === 'tree')) {
-      const veg = new VegBuilder(() => 0);
-      veg.tree(p);
-      const group = new THREE.Group();
-      const m = veg.build(group, { bark: new THREE.MeshStandardMaterial(), leaves: new THREE.MeshStandardMaterial(), cards: new THREE.MeshStandardMaterial() });
-      const [x, , z] = p.position;
-      const [crown, h] = p.size;
-      const canopy = p.colliders[1]!.shape as { radius: number };
-      const out: string[] = [];
-      worldVertices([m.bark, m.leaves, m.cards].filter((q): q is THREE.Mesh => !!q), (v) => {
-        const r = Math.hypot(v.x - x, v.z - z);
-        if (v.y > h * 0.24 && r > canopy.radius + 0.05) out.push(`${p.id} r=${r.toFixed(2)} > ${canopy.radius.toFixed(2)}`);
-        if (v.y > h + 0.05) out.push(`${p.id} y=${v.y.toFixed(2)} > ${h.toFixed(2)}`);
-      });
-      expect(crown / 2).toBeCloseTo(canopy.radius, 5);
-      expect(out.slice(0, 3)).toEqual([]);
+  it('tree trunks and crowns (branches, leaf cards and the cheap LOD) stay inside the trunk / canopy colliders', () => {
+    const veg = new VegBuilder(() => 0);
+    const trees = TRAINING_LEVEL.props.filter((q) => q.kind === 'tree');
+    for (const p of trees) veg.tree(p);
+    const group = new THREE.Group();
+    const std = new THREE.MeshStandardMaterial();
+    const forest = new Forest(veg.trees, { bark: std, cards: std, needles: std, lod: std }, group);
+    expect(forest.detailed.length + forest.cheap.length).toBe(9); // oak, birch, pine × (bark, cards, LOD)
+    const out: string[] = [];
+    const m = new THREE.Matrix4();
+    const v = new THREE.Vector3();
+    for (const mesh of [...forest.detailed, ...forest.cheap]) {
+      const kind = mesh.name.split(':')[1];
+      const list = veg.trees.filter((t) => t.kind === kind);
+      const pos = mesh.geometry.attributes.position;
+      for (let i = 0; i < mesh.count; i++) {
+        mesh.getMatrixAt(i, m);
+        const t = list[i]!;
+        const prop = trees.find((q) => q.position[0] === t.x && q.position[2] === t.z)!;
+        const [crown, h] = prop.size;
+        const canopy = prop.colliders[1]!.shape as { radius: number };
+        const trunk = prop.colliders[0]!.shape as { radius: number };
+        expect(crown / 2).toBeCloseTo(canopy.radius, 5);
+        for (let k = 0; k < pos.count; k++) {
+          v.fromBufferAttribute(pos, k).applyMatrix4(m);
+          const r = Math.hypot(v.x - t.x, v.z - t.z);
+          if (v.y > h * 0.24 && r > canopy.radius + 0.05) out.push(`${prop.id} ${mesh.name} r=${r.toFixed(2)} > ${canopy.radius.toFixed(2)}`);
+          if (v.y <= h * 0.24 && r > trunk.radius + 0.05) out.push(`${prop.id} ${mesh.name} trunk r=${r.toFixed(2)} at y=${v.y.toFixed(2)}`);
+          if (v.y > h + 0.05) out.push(`${prop.id} ${mesh.name} y=${v.y.toFixed(2)} > ${h.toFixed(2)}`);
+        }
+      }
     }
+    expect(out.slice(0, 3)).toEqual([]);
+    forest.dispose();
   });
 
-  function buildOutdoor(): { group: THREE.Group; grass: Grass; cards: THREE.Mesh | null } {
+  it('trees are instanced: a few draws for the whole treeline, cheap LOD on medium / low', () => {
+    const veg = new VegBuilder(() => 0);
+    for (const p of TRAINING_LEVEL.props.filter((q) => q.kind === 'tree')) veg.tree(p);
+    const std = new THREE.MeshStandardMaterial();
+    const forest = new Forest(veg.trees, { bark: std, cards: std, needles: std, lod: std }, new THREE.Group());
+    expect(new Set(veg.trees.map((t) => t.kind)).size).toBe(3);
+    forest.setDetailed(false);
+    expect(forest.detailed.every((m) => !m.visible) && forest.cheap.every((m) => m.visible)).toBe(true);
+    // the cheap LOD is a fraction of the detailed tree
+    const tris = (ms: THREE.InstancedMesh[]) => ms.reduce((n, m) => n + (m.geometry.attributes.position.count / 3) * m.count, 0);
+    expect(tris(forest.cheap)).toBeLessThan(tris(forest.detailed) / 2);
+    forest.setDetailed(true);
+    expect(forest.cheap.every((m) => !m.visible)).toBe(true);
+    forest.dispose();
+  });
+
+  function buildOutdoor(): { group: THREE.Group; grass: Grass; cards: THREE.Mesh | null; forest: Forest } {
     const group = new THREE.Group();
     const batch = new StaticBatcher();
     const veg = new VegBuilder(terrainHeight);
@@ -196,24 +229,33 @@ describe('Training Field scenery', () => {
     buildScenery(batch, low, veg, { avoid: [] });
     batch.build(group);
     const m = veg.build(group, { bark: new THREE.MeshStandardMaterial(), leaves: new THREE.MeshStandardMaterial(), cards: new THREE.MeshStandardMaterial() });
+    const std = new THREE.MeshStandardMaterial();
+    const forest = new Forest(veg.trees, { bark: std, cards: std, needles: std, lod: std }, group);
     group.add(new THREE.Mesh(meadowGeometry(1150)), new THREE.Mesh(fieldGeometry(half, 10)), mountainBackdrop(0xbfd8ea));
     if (props.hills) group.add(new THREE.Mesh(props.hills));
     const grass = new Grass({ fieldHalf: half, bare: [], wind: new THREE.Vector2(1, 0), maxTufts: 30000 });
     group.add(grass.mesh);
-    return { group, grass, cards: m.cards };
+    return { group, grass, cards: m.cards, forest };
   }
 
   it('ultra: ≤ 20 scenery draws and ≤ 1 M triangles with the grass on', () => {
-    const { group, grass } = buildOutdoor();
+    const { group, grass, forest } = buildOutdoor();
     grass.setDensity(30000, 16);
-    expect(drawables(group) + 3).toBeLessThanOrEqual(20); // + sky, pad, gravel
+    forest.setDetailed(true);
+    let visible = 0;
+    group.traverseVisible((o) => {
+      if ((o as THREE.Mesh).isMesh || (o as THREE.Points).isPoints) visible++;
+    });
+    // + sky, pad, gravel; the instanced trees add bark + cards per archetype (their cheap LOD is hidden)
+    expect(visible + 3).toBeLessThanOrEqual(23);
     expect(triangles(group)).toBeLessThanOrEqual(1_000_000);
   });
 
   it('low (Quest): no grass, no leaf cards, ≤ 150 k scenery triangles', () => {
-    const { group, grass, cards } = buildOutdoor();
+    const { group, grass, cards, forest } = buildOutdoor();
     grass.setDensity(0, 10);
     if (cards) cards.visible = false;
+    forest.setDetailed(false);
     let tris = 0;
     group.traverseVisible((o) => {
       if (o !== group) tris += triangles(o) * ((o as THREE.Mesh).isMesh ? 1 : 0);

@@ -28,6 +28,8 @@ export interface LevelLook {
    * carries the sky's ambient, a full hemisphere light on top would count it twice and flatten shadows.
    */
   hemiWithIbl: number;
+  /** race-gate LED channel gain: gates must stay the brightest thing in the frame (daylight needs more) */
+  ringGain: number;
 }
 
 /** Night Loft: warm practicals against cool moonlight, deep but not crushed blacks, teal-orange split. */
@@ -50,6 +52,7 @@ const NIGHT: LevelLook = {
   aerial: null,
   // the captured room already carries the moonlit-window ambient the cool hemisphere stands in for
   hemiWithIbl: 0.55,
+  ringGain: 1,
 };
 
 /** Training Field: clear late-morning sun, crisp shadows, haze into the treeline. */
@@ -72,6 +75,7 @@ const DAY: LevelLook = {
   grain: 0.035,
   aerial: { color: 0xb9cfe0, sunColor: 0x806a4c, density: 0.0022, falloff: 0.06, base: 0, maxOpacity: 0.6 },
   hemiWithIbl: 0.5,
+  ringGain: 2.2,
 };
 
 const LOOKS: Partial<Record<LevelId, LevelLook>> = {

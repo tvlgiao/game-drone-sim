@@ -51,6 +51,7 @@ export type PresetName =
   | 'bark'
   | 'rock'
   | 'foliage'
+  | 'needles'
   | 'glass';
 
 export interface MaterialOptions {
@@ -164,6 +165,7 @@ const PRESETS: Readonly<Record<PresetName, PresetDef>> = {
   bark: { kind: 'bark', cc0: 'bark', tileMeters: 1, physical: false, params: { metalness: 0, envMapIntensity: 0.4 } },
   rock: { kind: 'rock', cc0: null, tileMeters: 3, physical: false, params: { metalness: 0, envMapIntensity: 0.5 } },
   foliage: { kind: 'foliage', cc0: null, tileMeters: 0.5, physical: false, params: { metalness: 0, alphaTest: 0.5, side: THREE.DoubleSide } },
+  needles: { kind: 'needles', cc0: null, tileMeters: 0.5, physical: false, params: { metalness: 0, alphaTest: 0.45, side: THREE.DoubleSide } },
   glass: { kind: null, cc0: null, tileMeters: 1, physical: true, params: {} },
 };
 
@@ -501,10 +503,11 @@ export class MaterialLibrary implements MaterialSource {
         const s = g.make(texSize(1024, ts < 64 ? ts : Math.max(g.minSize, ts)), this.anisotropy);
         set = { albedo: s.map, normal: s.normalMap, arm: s.orm };
       } else {
-        const size = kind === 'foliage' ? Math.min(512, Math.max(256, ts)) : ts;
+        const card = kind === 'foliage' || kind === 'needles';
+        const size = card ? Math.min(512, Math.max(ts < 64 ? ts : 256, ts)) : ts;
         const px = generatePbr(kind, size);
         set = { albedo: dataTexture(px.albedo, true), normal: dataTexture(px.normal, false), arm: dataTexture(px.arm, false) };
-        if (kind === 'foliage') for (const t of Object.values(set)) t.wrapS = t.wrapT = THREE.ClampToEdgeWrapping;
+        if (card) for (const t of Object.values(set)) t.wrapS = t.wrapT = THREE.ClampToEdgeWrapping;
       }
       for (const t of Object.values(set)) t.anisotropy = this.anisotropy;
       this.procedural.set(kind, set);

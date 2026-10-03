@@ -12,7 +12,7 @@ import type { LevelView } from './level-view';
 import { Materials } from './materials';
 import { OutdoorLevelView } from './outdoor/outdoor-level-view';
 import { PostFX } from './post';
-import { RingsView } from './rings-view';
+import { NEXT_COLOR, RingsView } from './rings-view';
 import { ContactShadow } from './vfx/contact-shadow';
 import { VfxDirector, type WaterProbe } from './vfx/director';
 import { XrPanel } from './xr-panel';
@@ -98,6 +98,8 @@ export class GameView {
   private height = 1;
   private pendingRespawn = false;
   private bloomPulse = 0;
+  /** render-preview hook: a fixed camera pose instead of the rig's (null = the rig) */
+  posed: { position: THREE.Vector3; target: THREE.Vector3 } | null = null;
   /** player's analog FPV feed strength (0 = off); applied × the FPV camera weight on tiers with post */
   private analogStrength = 0;
   private ringFlash = 0;
@@ -247,6 +249,10 @@ export class GameView {
     this.rig.shake = !xr;
     this.rig.update({ dt, time: t, drone: f.drone, mode: f.cameraMode, cameraTiltDeg: f.cameraTiltDeg, fovDeg: f.fovDeg, speed: f.speed, instant: f.still });
     let cam: THREE.PerspectiveCamera = this.rig.camera;
+    if (this.posed) {
+      cam.position.copy(this.posed.position);
+      cam.lookAt(this.posed.target);
+    }
     if (xr) {
       this.placeDolly(f.cameraMode);
       cam = this.xrCam;
@@ -375,7 +381,7 @@ export class GameView {
     this.ringFlash = Math.max(0, this.ringFlash - dt * 2);
     if (next >= 0 && next < this.rings.count) {
       this.rings.ringPosition(next, L.position);
-      L.color.setRGB(0.15, 0.9, 1);
+      L.color.copy(NEXT_COLOR);
       L.intensity = 2.2 + Math.sin(t * 6) * 0.6 + this.ringFlash * 6;
       L.visible = true;
     } else {
@@ -457,6 +463,7 @@ export class GameView {
     this.library.setProfile(p);
     this.drone.setQuality(p.tier);
     this.vfx.setQuality(p.tier);
+    this.rings.setQuality(p.tier, look.ringGain);
     this.levelView.setQuality(p);
     this.cascades.apply(this.levelView.group, p);
     this.levelView.refreshShadows();

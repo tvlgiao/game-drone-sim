@@ -17,7 +17,7 @@ import { Halos } from './loft/halos';
 import { LoftMaterials } from './loft/materials';
 import { MoonPools } from './loft/moon-pools';
 import type { MaterialLibrary, MaterialScope } from './materials/library';
-import { buildProps, type LiveProps } from './props';
+import { DETAIL_SUFFIX, buildProps, type LiveProps } from './props';
 import { buildRoom } from './room';
 import { Atmosphere } from './vfx/atmosphere';
 
@@ -48,6 +48,8 @@ export class IndoorLevelView implements LevelView {
   private readonly lights: Lights;
   private readonly live: LiveProps;
   private readonly staticMeshes: THREE.Mesh[];
+  /** small-dressing batches the low tier hides */
+  private readonly detail: THREE.Mesh[];
   private readonly city: CityBackdrop;
   private readonly halos: Halos;
   private readonly pools: MoonPools;
@@ -75,6 +77,7 @@ export class IndoorLevelView implements LevelView {
       if (NO_RECEIVE.has(key)) m.receiveShadow = false;
       m.renderOrder = RENDER_ORDER[key] ?? 0;
     }
+    this.detail = this.staticMeshes.filter((m) => m.name.split('|')[0]!.endsWith(DETAIL_SUFFIX));
     this.lights = new Lights(this.group, level);
     // light cookies: reflector rings break up the spot pools
     for (const s of this.lights.spots) s.map = this.mats.cookie;
@@ -123,6 +126,8 @@ export class IndoorLevelView implements LevelView {
     // moonlight on the floor and the SH probe (ibl.ts) carries the room's ambient, warm like the high tiers.
     this.pools.mesh.visible = !p.shadows;
     this.lights.moon.visible = p.shadows;
+    // Quest budget: rivets, bolts, duct seams and bulb cages read at a metre, not through a headset at 72 Hz
+    for (const m of this.detail) m.visible = p.tier !== 'low';
     this.lights.moon.intensity = MOON_INTENSITY;
   }
 

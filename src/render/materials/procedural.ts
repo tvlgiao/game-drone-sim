@@ -44,7 +44,8 @@ export type ProceduralKind =
   | 'foliage'
   | 'plaster'
   | 'bark'
-  | 'rock';
+  | 'rock'
+  | 'needles';
 
 const to8 = (x: number): number => Math.round(clamp01(x) * 255);
 
@@ -264,13 +265,59 @@ function foliageSampler(): Sampler {
       best = l.tone;
       const vein = Math.abs(across) < 0.08 ? 0.1 : 0;
       const lum = (0.78 + l.tone * 0.32) * (0.8 + 0.2 * (1 - Math.abs(across))) - vein;
-      t.r = 0.2 * lum;
-      t.g = 0.33 * lum;
-      t.b = 0.11 * lum;
+      t.r = 0.3 * lum;
+      t.g = 0.46 * lum;
+      t.b = 0.15 * lum;
       t.a = 1;
       t.h = (1 - d) * 0.6 + l.tone * 0.3 - vein;
       t.ao = 0.65 + 0.35 * l.tone;
       t.rough = 0.55;
+    }
+  };
+}
+
+/** Conifer spray card: a twig up the middle with paired needles angled forward, alpha-cut, nothing at the edges. */
+function needleSampler(): Sampler {
+  const needles: { x0: number; y0: number; dx: number; dy: number; len: number; tone: number }[] = [];
+  for (let i = 0; i < 120; i++) {
+    const s = 0.06 + (i / 120) * 0.84;
+    const side = i % 2 === 0 ? 1 : -1;
+    const a = (55 + hash2(i, 1, 909) * 20) * (Math.PI / 180);
+    const len = (0.26 + hash2(i, 2, 909) * 0.1) * (1 - s * 0.4);
+    needles.push({ x0: 0.5, y0: s, dx: Math.sin(a) * side, dy: Math.cos(a), len, tone: hash2(i, 3, 909) });
+  }
+  return (u, v, t) => {
+    t.a = 0;
+    t.r = 0.12;
+    t.g = 0.22;
+    t.b = 0.14;
+    t.rough = 0.7;
+    const twig = Math.abs(u - 0.5) < 0.008 && v > 0.04 && v < 0.94;
+    if (twig) {
+      t.r = 0.22;
+      t.g = 0.16;
+      t.b = 0.1;
+      t.a = 1;
+      t.h = 0.5;
+      return;
+    }
+    for (const n of needles) {
+      const px = u - n.x0;
+      const py = v - n.y0;
+      const along = px * n.dx + py * n.dy;
+      if (along < 0 || along > n.len) continue;
+      const across = Math.abs(-px * n.dy + py * n.dx);
+      const w = 0.011 * (1 - (along / n.len) * 0.6);
+      if (across > w) continue;
+      const lum = 0.75 + n.tone * 0.35 + (along / n.len) * 0.15;
+      t.r = 0.17 * lum;
+      t.g = 0.34 * lum;
+      t.b = 0.2 * lum;
+      t.a = 1;
+      t.h = 0.6 - across * 20;
+      t.ao = 0.7 + 0.3 * (along / n.len);
+      t.rough = 0.6;
+      return;
     }
   };
 }
@@ -286,6 +333,7 @@ const SAMPLERS: Record<ProceduralKind, () => { sample: Sampler; bump: number }> 
   plaster: () => ({ sample: plaster, bump: 0.3 }),
   bark: () => ({ sample: bark, bump: 1.4 }),
   rock: () => ({ sample: rock, bump: 1.0 }),
+  needles: () => ({ sample: needleSampler(), bump: 0.4 }),
 };
 
 export const PROCEDURAL_KINDS = Object.keys(SAMPLERS) as ProceduralKind[];
