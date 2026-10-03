@@ -266,6 +266,23 @@ describe('engine: buses and routing', () => {
     expect([l.upX.value, l.upY.value, l.upZ.value]).toEqual([0, 1, 0]);
   });
 
+  it('listener and panner positions are plain writes, never ramps (a ramp keeps Chrome panning per sample)', async () => {
+    const { a, ctx } = await engine('night-loft');
+    for (let i = 0; i < 20; i++) {
+      ctx.currentTime += 0.02;
+      a.frame(drone([0.5, 0.5, 0.5, 0.5], true, new Vector3(5, 0, 0), new Vector3(i, 2, 0)), race('freefly'), 'chase', EYE);
+    }
+    a.handleEvent({ type: 'crash', position: new Vector3(1, 1, 1), speed: 6 });
+    const l = ctx.listener;
+    const params = [l.positionX, l.positionY, l.positionZ, l.forwardX, l.upY];
+    for (const n of ctx.nodes.filter((n) => n.kind === 'panner')) {
+      const p = n as unknown as { positionX: { calls: { kind: string }[] }; positionZ: { calls: { kind: string }[] } };
+      params.push(p.positionX as never, p.positionZ as never);
+    }
+    expect(params.length).toBeGreaterThan(10);
+    for (const p of params) expect(p.calls.filter((c) => c.kind !== 'set')).toEqual([]);
+  });
+
   it('countdown(n) beeps once per number; GO for 0; race events use the same path', async () => {
     const { a, ctx } = await engine();
     const before = a.debug().created;

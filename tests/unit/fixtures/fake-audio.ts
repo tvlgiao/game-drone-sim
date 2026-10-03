@@ -5,11 +5,20 @@
  */
 
 export class FakeParam {
-  value: number;
+  private v: number;
+  /** a plain `.value` write is recorded as a 'set' (what browsers do) */
+  get value(): number {
+    return this.v;
+  }
+  set value(x: number) {
+    this.v = x;
+    this.calls.push({ kind: 'set', value: x, time: -1 });
+    if (this.calls.length > 64) this.calls.shift();
+  }
   /** every automation call, newest last */
   readonly calls: { kind: string; value: number; time: number }[] = [];
   constructor(v = 0) {
-    this.value = v;
+    this.v = v;
   }
   private rec(kind: string, value: number, time: number): this {
     this.calls.push({ kind, value, time });
@@ -17,28 +26,28 @@ export class FakeParam {
     return this;
   }
   setValueAtTime(v: number, t: number): this {
-    this.value = v;
+    this.v = v;
     return this.rec('set', v, t);
   }
   linearRampToValueAtTime(v: number, t: number): this {
-    this.value = v;
+    this.v = v;
     return this.rec('linear', v, t);
   }
   exponentialRampToValueAtTime(v: number, t: number): this {
-    this.value = v;
+    this.v = v;
     return this.rec('exp', v, t);
   }
   setTargetAtTime(v: number, t: number, _tc: number): this {
     if (!Number.isFinite(v)) throw new TypeError('non-finite target');
-    this.value = v;
+    this.v = v;
     return this.rec('target', v, t);
   }
   cancelScheduledValues(t: number): this {
     return this.rec('cancel', 0, t);
   }
   setValueCurveAtTime(c: ArrayLike<number>, t: number): this {
-    this.value = c[c.length - 1] ?? this.value;
-    return this.rec('curve', this.value, t);
+    this.v = c[c.length - 1] ?? this.v;
+    return this.rec('curve', this.v, t);
   }
 }
 
