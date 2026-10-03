@@ -1,11 +1,52 @@
-/* Level picker: one card per level (thumbnail, name, blurb, best lap, Race / Free Fly). */
+/* Level picker: one card per level (thumbnail, name, blurb, best lap, Race / Free Fly or Free Fly / Worlds…). */
+.ds-dialog--xwide.ds-levels {
+  width: min(calc(1560 * var(--ds-u)), 100%);
+  /* a grid item would otherwise grow to the rail's full width instead of scrolling it */
+  min-width: 0;
+}
+
+/* Wide screens: every card in one row. Narrower or short ones: a snapping rail that scrolls sideways, so the
+   five cards never stack into a page taller than the screen (← → and the focus scroll it). */
 .ds-levels__grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(min(100%, calc(300 * var(--ds-u))), 1fr));
-  gap: calc(16 * var(--ds-u));
+  grid-auto-flow: column;
+  grid-auto-columns: minmax(0, 1fr);
+  min-width: 0;
+  gap: calc(14 * var(--ds-u));
+  overflow-x: auto;
+  overscroll-behavior-x: contain;
+  scroll-snap-type: x mandatory;
+  scroll-padding-inline: calc(2 * var(--ds-u));
+  scrollbar-width: thin;
+  scrollbar-color: rgba(120, 220, 255, 0.3) transparent;
+  padding-bottom: calc(6 * var(--ds-u));
+}
+
+.ds-levels__grid > .ds-lvl {
+  scroll-snap-align: start;
+}
+
+@media (max-width: 999px), (max-height: 500px) {
+  .ds-levels__grid {
+    grid-auto-columns: min(calc(270 * var(--ds-u)), 40%);
+  }
+}
+
+@media (max-height: 500px) {
+  .ds-levels__grid {
+    grid-auto-columns: min(260px, 42%);
+  }
+}
+
+/* portrait phones (behind the rotate prompt, but still laid out) */
+@media (max-width: 640px) and (min-height: 501px) {
+  .ds-levels__grid {
+    grid-auto-columns: 72%;
+  }
 }
 
 .ds-lvl {
+  container-type: inline-size;
   display: grid;
   grid-template-rows: auto 1fr auto;
   overflow: hidden;
@@ -72,6 +113,13 @@
   color: var(--ds-cyan);
 }
 
+.ds-lvl__note {
+  font-family: var(--ds-mono);
+  font-size: 0.9em;
+  letter-spacing: 0.04em;
+  color: var(--ds-cyan);
+}
+
 .ds-lvl__none {
   font-size: 0.9em;
   color: var(--ds-muted);
@@ -90,6 +138,32 @@
   padding: 0 calc(10 * var(--ds-u));
   font-size: 0.86em;
   letter-spacing: 0.16em;
+}
+
+/* narrow cards: the two buttons stack instead of squeezing their labels (not on short screens: no room) */
+@container (max-width: 230px) {
+  .ds-lvl__acts {
+    grid-template-columns: 1fr;
+    gap: calc(8 * var(--ds-u));
+  }
+}
+
+@media (max-height: 500px) {
+  .ds-lvl__acts {
+    grid-template-columns: 1fr 1fr !important;
+    gap: 6px !important;
+    padding: 10px 10px 12px;
+  }
+
+  .ds-lvl__acts .ds-btn {
+    padding: 0 4px;
+    letter-spacing: 0.08em;
+    font-size: 0.78em;
+  }
+
+  .ds-lvl__body {
+    padding: 10px 12px 2px;
+  }
 }
 
 .ds-levels__foot {
@@ -112,6 +186,18 @@
 
   .ds-lvl__thumb[data-thumb='night-loft'] {
     object-position: 50% 62%;
+  }
+
+  .ds-lvl__thumb[data-thumb='city'] {
+    object-position: 50% 52%;
+  }
+
+  .ds-lvl__thumb[data-thumb='alpine'] {
+    object-position: 50% 50%;
+  }
+
+  .ds-lvl__thumb[data-thumb='infinite'] {
+    object-position: 50% 45%;
   }
 
   .ds-lvl__blurb {

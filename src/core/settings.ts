@@ -16,6 +16,12 @@ export type MouseXAxis = 'roll' | 'yaw';
 export type MouseStickMode = 'auto' | 'hold' | 'spring';
 export type RatePreset = 'beginner' | 'freestyle' | 'race' | 'custom';
 export type RateAxis = keyof AxisRates;
+/** Outdoor sun position; 'auto' = the level's own (Infinite: picked from the seed). */
+export type TimeOfDay = 'auto' | 'dawn' | 'noon' | 'golden' | 'dusk';
+/** Outdoor terrain / fog distance; 'auto' = the quality tier's. */
+export type ViewDistance = 'auto' | 'short' | 'medium' | 'long';
+/** Lengths in metres (speed km/h) or feet (speed mph). */
+export type Units = 'm' | 'ft';
 export type RateField = keyof RateProfile;
 
 export interface ChannelFlags {
@@ -78,6 +84,13 @@ export interface Settings {
   mouseExpo: number;
   /** radius around centre that reads as centred */
   mouseDeadzone: number;
+  timeOfDay: TimeOfDay;
+  viewDistance: ViewDistance;
+  /** outdoor HUD minimap; null = the device default (off on Quest / in VR, on elsewhere) — see `minimapOn` */
+  minimap: boolean | null;
+  units: Units;
+  /** wind noise level relative to the master volume */
+  windVolume: number;
 }
 
 export const SETTINGS_KEY = 'drone-sim.settings';
@@ -118,6 +131,11 @@ export const DEFAULT_SETTINGS: Readonly<Settings> = Object.freeze({
   mouseStick: 'auto',
   mouseExpo: 0.2,
   mouseDeadzone: 0.03,
+  timeOfDay: 'auto',
+  viewDistance: 'auto',
+  minimap: null,
+  units: 'm',
+  windVolume: 0.6,
 });
 
 /** Allowed values / numeric ranges, shared with the settings screens. */
@@ -145,10 +163,21 @@ export const SETTINGS_OPTIONS = {
   mouseStick: ['auto', 'hold', 'spring'] as const,
   mouseExpo: { min: 0, max: 1, step: 0.05 },
   mouseDeadzone: { min: 0, max: 0.2, step: 0.01 },
+  timeOfDay: ['auto', 'dawn', 'noon', 'golden', 'dusk'] as const,
+  viewDistance: ['auto', 'short', 'medium', 'long'] as const,
+  units: ['m', 'ft'] as const,
+  windVolume: { min: 0, max: 1, step: 0.1 },
 };
 
 /** Old stored values → current ones. */
 const THROTTLE_SOURCE_MIGRATION: Record<string, ThrottleSource> = { 'left-stick': 'stick', 'right-trigger': 'trigger' };
+/** Unit spellings other builds / hand edits may have stored. */
+const UNITS_MIGRATION: Record<string, Units> = { metric: 'm', metre: 'm', meter: 'm', meters: 'm', metres: 'm', imperial: 'ft', feet: 'ft', foot: 'ft' };
+
+/** Whether the outdoor minimap shows: an explicit choice wins, otherwise off in a headset (Quest / VR), on elsewhere. */
+export function minimapOn(s: Pick<Settings, 'minimap'>, xr: boolean): boolean {
+  return s.minimap ?? !xr;
+}
 
 function pick<T extends string>(v: unknown, allowed: readonly T[], fallback: T): T {
   return typeof v === 'string' && (allowed as readonly string[]).includes(v) ? (v as T) : fallback;
@@ -259,6 +288,7 @@ export function validateSettings(raw: unknown): Settings {
   const base = axisRatesFrom(RATE_PRESETS[preset === 'custom' ? 'freestyle' : preset]);
   const rr = obj(r.rates);
   const rates: AxisRates = { roll: clampRate(rr.roll, base.roll), pitch: clampRate(rr.pitch, base.pitch), yaw: clampRate(rr.yaw, base.yaw) };
+  const units = typeof r.units === 'string' ? (UNITS_MIGRATION[r.units.toLowerCase()] ?? r.units) : undefined;
   const cr = r.customRates !== null && typeof r.customRates === 'object' && !Array.isArray(r.customRates) ? obj(r.customRates) : null;
   return {
     stickMode: mode === 1 || mode === 2 || mode === 3 || mode === 4 ? mode : d.stickMode,
@@ -307,6 +337,11 @@ export function validateSettings(raw: unknown): Settings {
     mouseStick: pick(r.mouseStick, o.mouseStick, d.mouseStick),
     mouseExpo: num(r.mouseExpo, o.mouseExpo, d.mouseExpo),
     mouseDeadzone: num(r.mouseDeadzone, o.mouseDeadzone, d.mouseDeadzone),
+    timeOfDay: pick(r.timeOfDay, o.timeOfDay, d.timeOfDay),
+    viewDistance: pick(r.viewDistance, o.viewDistance, d.viewDistance),
+    minimap: typeof r.minimap === 'boolean' ? r.minimap : null,
+    units: pick(units, o.units, d.units),
+    windVolume: num(r.windVolume, o.windVolume, d.windVolume),
   };
 }
 

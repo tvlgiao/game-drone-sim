@@ -1,0 +1,258 @@
+/* Outdoor HUD: compass tape (heading, ring / pilot bearings, distances, AGL) and the north-up minimap. */
+.ds-compass {
+  --ds-tape-w: clamp(calc(220 * var(--ds-u)), 22vw, calc(340 * var(--ds-u)));
+  display: grid;
+  justify-items: center;
+  gap: calc(4 * var(--ds-u));
+  padding: calc(14 * var(--ds-u)) calc(12 * var(--ds-u)) calc(7 * var(--ds-u));
+}
+
+.ds-compass__tape {
+  position: relative;
+  width: var(--ds-tape-w);
+  height: calc(36 * var(--ds-u));
+  overflow: hidden;
+  container-type: inline-size;
+  /* the scale fades out toward the ends */
+  -webkit-mask-image: linear-gradient(90deg, transparent, #000 14%, #000 86%, transparent);
+  mask-image: linear-gradient(90deg, transparent, #000 14%, #000 86%, transparent);
+}
+
+.ds-compass__strip {
+  position: absolute;
+  inset: 0;
+  will-change: transform;
+}
+
+.ds-compass__tick {
+  position: absolute;
+  bottom: 0;
+  width: 1px;
+  height: calc(6 * var(--ds-u));
+  background: rgba(234, 246, 255, 0.45);
+}
+
+.ds-compass__tick.is-major {
+  height: calc(10 * var(--ds-u));
+  background: rgba(234, 246, 255, 0.85);
+}
+
+.ds-compass__tick b {
+  position: absolute;
+  bottom: calc(11 * var(--ds-u));
+  left: 50%;
+  transform: translateX(-50%);
+  font-family: var(--ds-mono);
+  font-size: calc(10 * var(--ds-u));
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  color: var(--ds-muted);
+  white-space: nowrap;
+}
+
+.ds-compass__tick.is-major b {
+  font-family: var(--ds-font);
+  font-size: calc(12 * var(--ds-u));
+  font-weight: 800;
+  color: var(--ds-text);
+}
+
+/* lubber line: where the nose points */
+.ds-compass__tape::after {
+  content: '';
+  position: absolute;
+  left: 50%;
+  bottom: 0;
+  width: 2px;
+  height: calc(16 * var(--ds-u));
+  transform: translateX(-50%);
+  background: var(--ds-cyan);
+  box-shadow: 0 0 calc(6 * var(--ds-u)) var(--ds-cyan);
+}
+
+.ds-compass__mk {
+  position: absolute;
+  top: calc(2 * var(--ds-u));
+  left: 0;
+  width: calc(10 * var(--ds-u));
+  height: calc(10 * var(--ds-u));
+}
+
+.ds-compass__mk.is-ring {
+  background: var(--ds-magenta);
+  clip-path: polygon(50% 0, 100% 50%, 50% 100%, 0 50%);
+  filter: drop-shadow(0 0 calc(4 * var(--ds-u)) var(--ds-magenta));
+}
+
+.ds-compass__mk.is-pilot {
+  border: 2px solid var(--ds-text);
+  border-radius: 50%;
+  background: rgba(6, 10, 20, 0.85);
+}
+
+/* off the scale: pinned at the edge and pulsing, "turn this way" */
+.ds-compass__mk.is-pinned {
+  animation: ds-pulse 1s ease-in-out infinite;
+}
+
+.ds-compass__hdg {
+  position: absolute;
+  top: 0;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  padding: calc(1 * var(--ds-u)) calc(7 * var(--ds-u));
+  font-size: calc(12 * var(--ds-u));
+  font-weight: 700;
+  line-height: 1.3;
+  color: var(--ds-cyan);
+  background: var(--ds-panel-solid);
+  border: 1px solid rgba(40, 231, 255, 0.55);
+  border-radius: calc(6 * var(--ds-u));
+}
+
+.ds-compass__row {
+  display: flex;
+  gap: calc(14 * var(--ds-u));
+  font-size: 0.86em;
+  white-space: nowrap;
+}
+
+.ds-compass__item {
+  display: inline-flex;
+  align-items: baseline;
+  gap: calc(5 * var(--ds-u));
+}
+
+.ds-compass__item b {
+  font-weight: 700;
+}
+
+.ds-compass__item.is-pilot .ds-label::before,
+.ds-compass__item.is-ring .ds-label::before {
+  content: '';
+  display: inline-block;
+  width: 0.75em;
+  height: 0.75em;
+  margin-right: 0.45em;
+  vertical-align: -0.08em;
+  box-sizing: border-box;
+}
+
+.ds-compass__item.is-pilot .ds-label::before {
+  border: 1.5px solid var(--ds-text);
+  border-radius: 50%;
+}
+
+.ds-compass__item.is-ring .ds-label::before {
+  background: var(--ds-magenta);
+  clip-path: polygon(50% 0, 100% 50%, 50% 100%, 0 50%);
+}
+
+.ds-compass__item.is-ring b {
+  color: #ff9cf0;
+}
+
+/* hangs under the top-right chips and bind strip, whatever their height */
+.ds-minimap {
+  --ds-map: clamp(112px, calc(128 * var(--ds-u)), 180px);
+  position: absolute;
+  top: calc(100% + calc(10 * var(--ds-u)));
+  right: 0;
+  width: var(--ds-map);
+  height: var(--ds-map);
+  border-radius: 50%;
+  overflow: hidden;
+  background: rgba(6, 10, 20, 0.7);
+  border: 1px solid var(--ds-edge);
+  box-shadow:
+    inset 0 0 calc(18 * var(--ds-u)) rgba(0, 0, 0, 0.55),
+    0 calc(6 * var(--ds-u)) calc(22 * var(--ds-u)) rgba(0, 0, 0, 0.35);
+}
+
+.ds-minimap canvas {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+}
+
+/* muted cells so the markers read on top */
+.ds-minimap canvas:first-child {
+  opacity: 0.9;
+  filter: saturate(0.85);
+}
+
+.ds-minimap__n {
+  position: absolute;
+  top: calc(3 * var(--ds-u));
+  left: 50%;
+  transform: translateX(-50%);
+  font-size: calc(10 * var(--ds-u));
+  font-weight: 800;
+  line-height: 1;
+  color: var(--ds-text);
+  text-shadow: 0 0 calc(4 * var(--ds-u)) #000;
+}
+
+/* Touch HUD: the top row is PAUSE · CAM · timer · gates on the left and ARM / RESET / MODE on the right. The
+   compass takes a second row in the middle, the minimap the free corner under PAUSE / CAM (fixed = relative to
+   the .ds-ui root, which contains layout). */
+.ds-ui.ds-touch-on .ds-compass {
+  --ds-tape-w: 176px;
+  position: fixed;
+  top: calc(var(--ds-safe-t) + var(--ds-tbtn) + 14px);
+  left: 50%;
+  transform: translateX(-50%);
+  padding: 10px 8px 4px;
+}
+
+.ds-ui.ds-touch-on .ds-compass__tape {
+  height: 30px;
+}
+
+.ds-ui.ds-touch-on .ds-compass__row {
+  gap: 8px;
+  font-size: 10px;
+}
+
+.ds-ui.ds-touch-on .ds-minimap {
+  --ds-map: 112px;
+  position: fixed;
+  top: calc(var(--ds-safe-t) + var(--ds-tbtn) + 10px);
+  right: auto;
+  left: var(--ds-safe-l);
+}
+
+@media (max-height: 460px) {
+  .ds-ui.ds-touch-on .ds-minimap {
+    --ds-map: 92px;
+  }
+
+  /* the marker shapes already say which is which */
+  .ds-ui.ds-touch-on .ds-compass__item.is-pilot .ds-label,
+  .ds-ui.ds-touch-on .ds-compass__item.is-ring .ds-label {
+    font-size: 0;
+    letter-spacing: 0;
+  }
+
+  .ds-ui.ds-touch-on .ds-compass__item.is-pilot .ds-label::before,
+  .ds-ui.ds-touch-on .ds-compass__item.is-ring .ds-label::before {
+    width: 8px;
+    height: 8px;
+    margin-right: 0;
+  }
+}
+
+/* narrow phones: RESET / MODE reach the middle of the top band, so the compass drops below them */
+@media (max-width: 620px) {
+  .ds-ui.ds-touch-on .ds-compass {
+    --ds-tape-w: 150px;
+    top: calc(var(--ds-safe-t) + 2 * var(--ds-tbtn) + 4px);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ds-compass__mk.is-pinned {
+    animation: none;
+  }
+}

@@ -61,6 +61,11 @@ describe('settings', () => {
       mouseStick: 'auto',
       mouseExpo: 0.2,
       mouseDeadzone: 0.03,
+      timeOfDay: 'auto',
+      viewDistance: 'auto',
+      minimap: null,
+      units: 'm',
+      windVolume: 0.6,
     });
   });
 
@@ -113,6 +118,11 @@ describe('settings', () => {
       mouseStick: 'springy',
       mouseExpo: -1,
       mouseDeadzone: '0.1',
+      timeOfDay: 'midnight',
+      viewDistance: 'far',
+      minimap: 'on',
+      units: 'cubits',
+      windVolume: 4,
     });
     expect(s).toEqual({
       stickMode: 2,
@@ -146,6 +156,11 @@ describe('settings', () => {
       mouseStick: 'auto',
       mouseExpo: 0,
       mouseDeadzone: 0.03,
+      timeOfDay: 'auto',
+      viewDistance: 'auto',
+      minimap: null,
+      units: 'm',
+      windVolume: 1,
     });
   });
 
