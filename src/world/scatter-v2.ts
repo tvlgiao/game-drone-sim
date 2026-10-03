@@ -6,7 +6,8 @@
  *   shrubs, and lone trees stand in the meadows. Forests climb slopes up to 1.2 (thinning out, conifers only
  *   past 0.9).
  * - Rocks: v1 rocks plus boulders and outcrops on slopes over 0.9.
- * - Villages: hedges along 18 m garden parcels and small clusters of garden trees, clear of houses and roads.
+ * - Fields (fields.ts) keep trees only along their edges; villages get hedges along garden-parcel edges and small
+ *   clusters of garden trees, clear of houses and roads.
  * - Houses and bridges as in v1 (the v2 house layout already faces the roads).
  */
 import { dcos, dsin, smoothstep, TAU } from './math';
@@ -15,13 +16,12 @@ import { hash2, rehash, SALT, subSeed, u01 } from './rng';
 import { ROAD_HALF_WIDTH } from './roads';
 import type { ChunkObjects } from './scatter';
 import { CHUNK_SIZE, OBJECT_KIND, ROCK_CELL, ROCK_HALF, TREE_CELL, pushBox, pushTreeColliders, slopeAt } from './scatter';
-import { forestDensity, terrainSample, type TerrainSample } from './terrain-field';
+import { forestDensity, terrainSample, VILLAGE_TREES_V2, type TerrainSample } from './terrain-field';
+import { FIELD_CELL, GARDEN_CELL, SALT_FIELDS, SALT_GARDENS, fieldWeight, onTrack, parcel, parcelAt } from './fields';
 import type { Climate } from './base-terrain';
 import type { House, Village } from './settlements';
 import type { World } from './world';
 
-/** garden parcels inside villages, m */
-export const PARCEL = 18;
 /** spacing of hedge shrubs along a parcel edge, m */
 const HEDGE_STEP = 3;
 /** lone trees per meadow tree cell */
@@ -34,6 +34,7 @@ const SALT_GARDEN = 72;
 export const SPECIES = { conifer: 0, broadleaf: 1, scrub: 2, birch: 3 } as const;
 
 const climate: Climate = { moisture: 0, temperature: 0 };
+const P = parcel();
 
 /** Free of water, road deck and river channel: where any object may stand. */
 function dryGround(w: World, s: TerrainSample, margin: number): boolean {
@@ -80,7 +81,7 @@ export function chunkObjectsV2(w: World, cx: number, cz: number): ChunkObjects {
       if (x * x + z * z < clear2) continue;
       const u = u01(h0);
       f.sample(x, z, s);
-      if (s.village > 0 || !dryGround(w, s, 4) || s.h > base.treeLine) continue;
+      if (s.village > VILLAGE_TREES_V2 || !dryGround(w, s, 4) || s.h > base.treeLine) continue;
       const c = f.climate(x, z, s, climate);
       const clump = smoothstep(-0.3, 0.35, noise(clumpSeed, x * (1 / 160), z * (1 / 160)));
       const flat = forestDensity(base, s, 0, c, 2);
@@ -92,6 +93,11 @@ export function chunkObjectsV2(w: World, cx: number, cz: number): ChunkObjects {
       const slope = slopeAt(w, x, z);
       if (!lone && !shrubby && u >= forestDensity(base, s, slope, c, 2) * clump) continue;
       if ((lone || shrubby) && slope > 0.6) continue;
+      // farmed fields keep trees only along their edges (hedgerows), never on a farm track
+      if (fieldWeight(f.farmAt(x, z), s.roadD, slope, s.h, false) > 0.5) {
+        parcelAt(seed, SALT_FIELDS, FIELD_CELL, x, z, P);
+        if (P.edge > 3 || onTrack(P)) continue;
+      }
       const us = u01(rehash(h0, 5));
       const cold = s.h > 120 || c.temperature < 0.45;
       let species: number;
@@ -173,8 +179,9 @@ export function chunkObjectsV2(w: World, cx: number, cz: number): ChunkObjects {
 }
 
 /**
- * Hedges along the 18 m garden parcels and small clusters of garden trees, inside the village plateau, only
- * for parcels whose anchor lies in this chunk (so nothing is duplicated across chunks).
+ * Hedges along some garden-parcel edges (the Voronoi gardens chunk-gen paints) and small clusters of garden trees
+ * around parcel centres, inside the village, clear of houses and roads. Every chunk walks the parcels that can
+ * reach it and keeps what falls inside it, so nothing is duplicated or lost across chunk borders.
  */
 function villageGreenery(
   w: World,
@@ -190,10 +197,6 @@ function villageGreenery(
   const ox = cx * CHUNK_SIZE;
   const oz = cz * CHUNK_SIZE;
   const R = v.radius * 0.95;
-  const p0 = Math.floor(Math.max(ox, v.x - R) / PARCEL);
-  const p1 = Math.floor(Math.min(ox + CHUNK_SIZE - 1e-6, v.x + R) / PARCEL);
-  const q0 = Math.floor(Math.max(oz, v.z - R) / PARCEL);
-  const q1 = Math.floor(Math.min(oz + CHUNK_SIZE - 1e-6, v.z + R) / PARCEL);
   const ok = (x: number, z: number, r: number): boolean => {
     if (x < ox || x >= ox + CHUNK_SIZE || z < oz || z >= oz + CHUNK_SIZE) return false;
     const dx = x - v.x;
@@ -202,33 +205,48 @@ function villageGreenery(
     f.sample(x, z, s);
     return s.village > 0.5 && dryGround(w, s, 2.5 + r) && clearOfHouses(vh, x, z, r + 1.5);
   };
-  for (let q = q0; q <= q1; q++) {
-    for (let p = p0; p <= p1; p++) {
-      const hp = hash2(seed, p, q, SALT_HEDGE);
-      // a hedge along the parcel's west or south edge
-      if (u01(hp) < 0.3) {
-        const alongX = u01(rehash(hp, 1)) < 0.5;
-        for (let k = 0; k * HEDGE_STEP < PARCEL; k++) {
-          const x = p * PARCEL + (alongX ? (k + 0.5) * HEDGE_STEP : 0.4);
-          const z = q * PARCEL + (alongX ? 0.4 : (k + 0.5) * HEDGE_STEP);
-          if (!ok(x, z, 1)) continue;
-          tree(x, s.h, z, 0.55 + 0.2 * u01(rehash(hp, 10 + k)), TAU * u01(rehash(hp, 30 + k)), SPECIES.scrub);
-        }
-      }
-      // garden trees: 2–4 around the parcel centre
-      const hg = hash2(seed, p, q, SALT_GARDEN);
-      if (u01(hg) < 0.14) {
-        const count = 2 + Math.floor(u01(rehash(hg, 1)) * 3);
-        for (let k = 0; k < count; k++) {
-          const a = TAU * u01(rehash(hg, 2 + k));
-          const r = 2 + 3 * u01(rehash(hg, 8 + k));
-          const x = (p + 0.5) * PARCEL + r * dcos(a);
-          const z = (q + 0.5) * PARCEL + r * dsin(a);
-          const sc = 0.6 + 0.35 * u01(rehash(hg, 14 + k));
-          if (!ok(x, z, 3 * sc)) continue;
-          tree(x, s.h, z, sc, TAU * u01(rehash(hg, 20 + k)), u01(rehash(hg, 26 + k)) < 0.3 ? SPECIES.birch : SPECIES.broadleaf);
-        }
+  const x0 = Math.max(ox, v.x - R);
+  const x1 = Math.min(ox + CHUNK_SIZE, v.x + R);
+  const z0 = Math.max(oz, v.z - R);
+  const z1 = Math.min(oz + CHUNK_SIZE, v.z + R);
+  if (x0 >= x1 || z0 >= z1) return;
+  // hedges: points on a HEDGE_STEP lattice that sit on a hedged parcel edge
+  for (let gz = Math.ceil(z0 / HEDGE_STEP); gz * HEDGE_STEP < z1; gz++) {
+    for (let gx = Math.ceil(x0 / HEDGE_STEP); gx * HEDGE_STEP < x1; gx++) {
+      const x = gx * HEDGE_STEP;
+      const z = gz * HEDGE_STEP;
+      parcelAt(seed, SALT_GARDENS, GARDEN_CELL, x, z, P);
+      if (P.edge > HEDGE_STEP * 0.5 || !hedged(P.id, P.neighbour)) continue;
+      if (!ok(x, z, 1)) continue;
+      const hh = hash2(seed, gx, gz, SALT_HEDGE);
+      tree(x, s.h, z, 0.55 + 0.2 * u01(hh), TAU * u01(rehash(hh, 1)), SPECIES.scrub);
+    }
+  }
+  // garden trees: 2–4 around some parcel centres
+  for (let j = Math.floor((z0 - 6) / GARDEN_CELL) - 1; j <= Math.floor((z1 + 6) / GARDEN_CELL) + 1; j++) {
+    for (let i = Math.floor((x0 - 6) / GARDEN_CELL) - 1; i <= Math.floor((x1 + 6) / GARDEN_CELL) + 1; i++) {
+      const hc = hash2(seed, i, j, SALT_GARDENS);
+      const px = (i + 0.15 + 0.7 * u01(rehash(hc, 1))) * GARDEN_CELL;
+      const pz = (j + 0.15 + 0.7 * u01(rehash(hc, 2))) * GARDEN_CELL;
+      const hg = hash2(seed, i, j, SALT_GARDEN);
+      if (u01(hg) >= 0.18) continue;
+      const count = 2 + Math.floor(u01(rehash(hg, 1)) * 3);
+      for (let k = 0; k < count; k++) {
+        const a = TAU * u01(rehash(hg, 2 + k));
+        const r = 2 + 3 * u01(rehash(hg, 8 + k));
+        const x = px + r * dcos(a);
+        const z = pz + r * dsin(a);
+        const sc = 0.6 + 0.35 * u01(rehash(hg, 14 + k));
+        if (!ok(x, z, 3 * sc)) continue;
+        tree(x, s.h, z, sc, TAU * u01(rehash(hg, 20 + k)), u01(rehash(hg, 26 + k)) < 0.3 ? SPECIES.birch : SPECIES.broadleaf);
       }
     }
   }
+}
+
+/** True for the parcel edges that carry a hedge (symmetric in the pair). */
+function hedged(a: number, b: number): boolean {
+  const lo = a < b ? a : b;
+  const hi = a < b ? b : a;
+  return u01(rehash((lo ^ Math.imul(hi, 0x85ebca77)) >>> 0, 5)) < 0.35;
 }

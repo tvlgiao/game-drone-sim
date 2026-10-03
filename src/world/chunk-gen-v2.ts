@@ -1,14 +1,15 @@
 /**
- * Generator v2 additions to chunk meshes (v1 meshes are untouched): village ground as garden parcels that fade
- * into the surrounding grass (no dry halo), sand and gravel on river banks, per-vertex surface weights
- * (rock, bank) for the renderer, and a continuous water surface that extends one quad under the banks so the
- * shoreline is where the terrain meets the water, not a quad staircase.
+ * Generator v2 additions to chunk meshes (v1 meshes are untouched): macro colour variation of the ground (dry,
+ * lush and dark patches at two scales, so distant land is never one tint), farmed land as irregular Voronoi fields
+ * with crops, furrows and farm tracks, village gardens of the same kind (no plateau colour, no rim), sand and
+ * gravel on river banks, per-vertex surface weights (rock, bank) for the renderer, and a continuous water surface
+ * that extends one quad under the banks so the shoreline is where the terrain meets the water.
  */
-import { clamp, mix, smoothstep } from './math';
+import { CROP_COLOURS, FIELD_CELL, GARDEN_CELL, GARDEN_COLOURS, SALT_FIELDS, SALT_GARDENS, TRACK_COLOUR, cropOf, fieldWeight, onTrack, parcel, parcelAt } from './fields';
+import { clamp, dcos, dsin, mix, PI, smoothstep } from './math';
 import { noise } from './noise';
-import { hash2, subSeed, u01 } from './rng';
+import { hash2, rehash, subSeed, u01 } from './rng';
 import { BIOME, type BiomeSample } from './terrain-field';
-import { PARCEL } from './scatter-v2';
 
 /** channels of `ChunkData.surface` per vertex */
 export const SURFACE_STRIDE = 2;
@@ -18,48 +19,72 @@ export const SURFACE_BANK = 1;
 export const BANK_HEIGHT = 2.2;
 const SALT_ROCK_NOISE = 73;
 const SALT_PARCEL = 74;
+const SALT_MACRO = 77;
+const SALT_MACRO_FINE = 78;
 
-const LUSH = [0x4f, 0x8a, 0x3c];
 const SAND = [0xb9, 0xab, 0x86];
 const GRAVEL = [0x8e, 0x88, 0x7a];
-/** lawn, vegetable soil, long grass, orchard, gravel yard */
-const PARCELS: readonly (readonly [number, number, number])[] = [
-  [0x5f, 0x8a, 0x3a],
-  [0x76, 0x60, 0x46],
-  [0x6f, 0x96, 0x45],
-  [0x55, 0x7c, 0x38],
-  [0x97, 0x8e, 0x76],
-];
+const DRY = [0xa6, 0x9e, 0x5c];
+const DARK = [0x3f, 0x66, 0x30];
+
+const P = parcel();
+
+/** Biomes whose ground colour varies in patches and can be farmed or gardened. */
+function vegetated(biome: number): boolean {
+  return biome === BIOME.meadow || biome === BIOME.farmland || biome === BIOME.forest || biome === BIOME.conifer || biome === BIOME.scrub || biome === BIOME.village;
+}
+
+function blend(out: number[], c: readonly number[], t: number): void {
+  out[0] = mix(out[0]!, c[0]!, t);
+  out[1] = mix(out[1]!, c[1]!, t);
+  out[2] = mix(out[2]!, c[2]!, t);
+}
+
+const RGB = [0, 0, 0];
 
 /**
- * Recolours one vertex (3 bytes at `o`) for v2 and returns its surface weights: village plateaus become garden
- * parcels blended into lush grass by the village weight; meadows near villages lose the dry tint; banks get
- * sand / gravel.
+ * Recolours one vertex (3 bytes at `o`) for v2 and writes its surface weights. `roadD` / `farm` are the sample's
+ * road distance and farmland noise.
  */
-export function shadeV2(b: BiomeSample, seed: number, wx: number, wz: number, waterSurface: number, out: Uint8Array, o: number, surface: Uint8Array, so: number): void {
-  let r = out[o]!;
-  let g = out[o + 1]!;
-  let bl = out[o + 2]!;
-  const vw = b.village;
-  if (vw > 0 && b.biome !== BIOME.road && b.biome !== BIOME.water) {
-    // dry meadow in the blend ring turns lush: no pale halo around the village
-    if (b.biome === BIOME.meadow) {
-      const lush = smoothstep(0, 0.6, vw) * 0.6;
-      r = mix(r, LUSH[0]!, lush);
-      g = mix(g, LUSH[1]!, lush);
-      bl = mix(bl, LUSH[2]!, lush);
+export function shadeV2(b: BiomeSample, seed: number, wx: number, wz: number, waterSurface: number, roadD: number, farm: number, out: Uint8Array, o: number, surface: Uint8Array, so: number): void {
+  const c = RGB;
+  c[0] = out[o]!;
+  c[1] = out[o + 1]!;
+  c[2] = out[o + 2]!;
+  const wet = b.biome === BIOME.water || b.biome === BIOME.beach;
+  if (vegetated(b.biome) && b.snow < 0.5) {
+    // macro patches: a 350 m dry / lush field and a 90 m brightness field
+    const m = noise(subSeed(seed, SALT_MACRO), wx * (1 / 350), wz * (1 / 350));
+    const f = noise(subSeed(seed, SALT_MACRO_FINE), wx * (1 / 90), wz * (1 / 90));
+    if (m > 0) blend(c, DRY, smoothstep(0.1, 0.7, m) * 0.45);
+    else blend(c, DARK, smoothstep(0.1, 0.7, -m) * 0.4);
+    const k = 0.9 + 0.2 * (f * 0.5 + 0.5);
+    c[0] = c[0]! * k;
+    c[1] = c[1]! * k;
+    c[2] = c[2]! * k;
+    // farmed land: irregular fields with crops, furrows and farm tracks
+    // fields run up to the gardens: no bare ring around a village
+    const fw = fieldWeight(farm, roadD, b.slope, b.height, wet) * (1 - b.road) * (1 - smoothstep(0.25, 0.55, b.village));
+    if (fw > 0) {
+      parcelAt(seed, SALT_FIELDS, FIELD_CELL, wx, wz, P);
+      let crop = CROP_COLOURS[cropOf(P.id)]!;
+      const ang = PI * u01(rehash(P.id, 9));
+      const furrow = Math.floor((wx * dcos(ang) + wz * dsin(ang)) / 5) % 2 === 0 ? 0.92 : 1.06;
+      const t = smoothstep(0.45, 0.6, fw) * smoothstep(0.5, 2.5, P.edge);
+      blend(c, [crop[0]! * furrow, crop[1]! * furrow, crop[2]! * furrow], t);
+      if (onTrack(P) && fw > 0.5) {
+        crop = TRACK_COLOUR;
+        blend(c, crop, 0.9);
+      }
     }
-    const p = Math.floor(wx / PARCEL);
-    const q = Math.floor(wz / PARCEL);
-    const hp = hash2(seed, p, q, SALT_PARCEL);
-    const kind = Math.floor(u01(hp) * PARCELS.length);
-    let c = PARCELS[kind]!;
-    // vegetable gardens: soil rows 1.5 m apart
-    if (kind === 1 && Math.floor((u01(hp) > 0.1 ? wx : wz) / 1.5) % 2 === 0) c = [0x5e, 0x7a, 0x3e];
-    const t = smoothstep(0.35, 0.85, vw);
-    r = mix(r, c[0]!, t);
-    g = mix(g, c[1]!, t);
-    bl = mix(bl, c[2]!, t);
+    // village gardens: the same kind of cells, smaller, faded in by the village weight (no ring colour)
+    if (b.village > 0) {
+      parcelAt(seed, SALT_GARDENS, GARDEN_CELL, wx, wz, P);
+      const kind = Math.floor(u01(rehash(P.id, 4)) * GARDEN_COLOURS.length);
+      let g = GARDEN_COLOURS[kind]!;
+      if (kind === 1 && Math.floor((wx + wz) / 1.5) % 2 === 0) g = [0x5e, 0x7a, 0x3e];
+      blend(c, g, smoothstep(0.3, 0.8, b.village) * smoothstep(0.3, 1.5, P.edge) * 0.85);
+    }
   }
   let bank = 0;
   if (waterSurface > -Infinity) {
@@ -67,15 +92,12 @@ export function shadeV2(b: BiomeSample, seed: number, wx: number, wz: number, wa
     bank = above <= 0 ? 1 : 1 - smoothstep(0, BANK_HEIGHT, above);
     if (b.biome !== BIOME.road && above > -0.4) {
       const gravel = u01(hash2(seed, Math.floor(wx / 3), Math.floor(wz / 3), SALT_PARCEL + 1)) < 0.4 ? GRAVEL : SAND;
-      const k = bank * 0.85;
-      r = mix(r, gravel[0]!, k);
-      g = mix(g, gravel[1]!, k);
-      bl = mix(bl, gravel[2]!, k);
+      blend(c, gravel, bank * 0.85);
     }
   }
-  out[o] = clamp(Math.floor(r), 0, 255);
-  out[o + 1] = clamp(Math.floor(g), 0, 255);
-  out[o + 2] = clamp(Math.floor(bl), 0, 255);
+  out[o] = clamp(Math.floor(c[0]!), 0, 255);
+  out[o + 1] = clamp(Math.floor(c[1]!), 0, 255);
+  out[o + 2] = clamp(Math.floor(c[2]!), 0, 255);
   const rn = noise(subSeed(seed, SALT_ROCK_NOISE), wx * (1 / 23), wz * (1 / 23));
   const rock = clamp(smoothstep(0.7, 1.15, b.slope) + 0.25 * rn, 0, 1) * (1 - b.snow);
   surface[so + SURFACE_ROCK] = Math.round(rock * 255);

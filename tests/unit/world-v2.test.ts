@@ -5,10 +5,11 @@
  * weights, determinism. Also the City furniture keeps the 18-ring route clear.
  */
 import { describe, expect, it } from 'vitest';
-import { cityFurniture } from '../../src/levels/city-furniture';
+import { CAR_SIZE, CAR_STRIDE, cityFurniture } from '../../src/levels/city-furniture';
+import { FIELD_CELL, SALT_FIELDS, fieldWeight, onTrack, parcel, parcelAt } from '../../src/world/fields';
 import { buildChunk, chunkDigest, CHUNK_SIZE, LOD_QUADS } from '../../src/world/chunk-gen';
 import { SURFACE_BANK, SURFACE_ROCK, SURFACE_STRIDE } from '../../src/world/chunk-gen-v2';
-import { CITY_RING_CLEARANCE, generateCity } from '../../src/world/city-gen';
+import { CITY_HALF, CITY_PITCH, CITY_RING_CLEARANCE, CITY_STREET, generateCity, streetLine } from '../../src/world/city-gen';
 import { ROAD_HALF_WIDTH } from '../../src/world/roads';
 import { distanceToShape } from '../../src/world/routes';
 import { chunkObjects, HOUSE_STRIDE, ROCK_STRIDE, TREE_STRIDE, slopeAt } from '../../src/world/scatter';
@@ -182,6 +183,49 @@ describe('v2 scatter near water and in the open', () => {
   });
 });
 
+describe('v2 village ground (no mesa)', () => {
+  it('across the village edge the ground is never steeper than the land around it (+0.05), and never above 0.3', () => {
+    let edge = 0;
+    let natural = 0;
+    const s = terrainSample();
+    for (const seed of [1, 3, 9, 21, 42, 77]) {
+      const w = v2(seed);
+      const v = someVillage(w);
+      for (let k = 0; k < 36; k++) {
+        const a = (k / 36) * Math.PI * 2;
+        let prev = NaN;
+        let prevBase = NaN;
+        for (let r = v.radius - 30; r <= v.radius + VILLAGE_BLEND + 5; r += 0.25) {
+          w.field.sample(v.x + Math.cos(a) * r, v.z + Math.sin(a) * r, s);
+          // road beds have their own cut / fill: measure the village ground only
+          if (!Number.isNaN(prev) && s.roadD > 12) {
+            edge = Math.max(edge, Math.abs(s.h - prev) / 0.25);
+            natural = Math.max(natural, Math.abs(s.base - prevBase) / 0.25);
+          }
+          prev = s.h;
+          prevBase = s.base;
+        }
+      }
+    }
+    expect(edge).toBeLessThanOrEqual(natural + 0.05);
+    expect(edge).toBeLessThanOrEqual(0.3);
+  });
+
+  it('the village sits on the smoothed land, not on a plateau above it', () => {
+    const s = terrainSample();
+    for (const seed of [3, 21, 77]) {
+      const w = v2(seed);
+      const v = someVillage(w);
+      for (let k = 0; k < 16; k++) {
+        const a = (k / 16) * Math.PI * 2;
+        w.field.sample(v.x + Math.cos(a) * v.radius * 0.5, v.z + Math.sin(a) * v.radius * 0.5, s);
+        if (s.roadD < 12) continue;
+        expect(Math.abs(s.h - s.lp)).toBeLessThan(0.05);
+      }
+    }
+  });
+});
+
 describe('v2 village blend', () => {
   it('the plateau edge is continuous (no step over a 0.25 m move) and warped: its radius varies around the village', () => {
     let warpSpread = 0;
@@ -264,7 +308,49 @@ describe('v2 chunk surfaces', () => {
   });
 });
 
+describe('fields and farm tracks', () => {
+  it('fields are irregular Voronoi parcels (varied sizes), farmed along roads; tracks are symmetric between parcels', () => {
+    const p = parcel();
+    const sizes = new Map<number, number>();
+    for (let z = 0; z < 700; z += 5) {
+      for (let x = 0; x < 700; x += 5) {
+        parcelAt(7, SALT_FIELDS, FIELD_CELL, x, z, p);
+        sizes.set(p.id, (sizes.get(p.id) ?? 0) + 1);
+        expect(p.edge).toBeGreaterThanOrEqual(0);
+      }
+    }
+    const areas = [...sizes.values()].filter((n) => n > 20);
+    // a checkerboard would give equal parcels
+    expect(Math.max(...areas) / Math.min(...areas)).toBeGreaterThan(1.8);
+    expect(fieldWeight(0, 40, 0.02, 30, false)).toBe(1);
+    expect(fieldWeight(-0.5, 400, 0.02, 30, false)).toBe(0);
+    expect(fieldWeight(0, 40, 0.3, 30, false)).toBe(0);
+    expect(fieldWeight(0, 40, 0.02, 30, true)).toBe(0);
+    const a = { ...p, id: 123, neighbour: 456, edge: 0.5 };
+    const b = { ...p, id: 456, neighbour: 123, edge: 0.5 };
+    expect(onTrack(a)).toBe(onTrack(b));
+  });
+});
+
 describe('City furniture', () => {
+  it('parked cars keep 8 m from every intersection (5 seeds)', () => {
+    for (const seed of [1, 5, 42, 0x0c172026, 777]) {
+      const f = cityFurniture(generateCity(seed));
+      for (let k = 0; k < f.cars.length; k += CAR_STRIDE) {
+        const x = f.cars[k]!;
+        const z = f.cars[k + 2]!;
+        // intersections are the 16 × 16 m squares around every street-line crossing
+        const near = (v: number): number => {
+          const l = streetLine(Math.round((v + CITY_HALF) / CITY_PITCH));
+          return Math.abs(v - l);
+        };
+        const along = Math.abs(f.cars[k + 3]! % Math.PI) > 0.1 ? x : z;
+        const dist = near(along) - CITY_STREET / 2 - CAR_SIZE[2] / 2;
+        expect(dist).toBeGreaterThanOrEqual(8 - 1e-3);
+      }
+    }
+  });
+
   it('street trees, lights and parked cars stay ring radius + 3 m clear of the 18 race rings (5 seeds)', () => {
     for (const seed of [1, 5, 42, 0x0c172026, 777]) {
       const city = generateCity(seed);

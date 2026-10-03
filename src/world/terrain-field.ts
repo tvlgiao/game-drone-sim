@@ -99,7 +99,11 @@ export interface FeatureCell {
 }
 
 export const FEATURE_CELL = 128;
-/** v2: the village blend ring is warped by noise up to this many metres, so plateaus are not discs */
+/** v2: the village ground blends out over at least this many metres (outer − inner, the warp included) */
+export const VILLAGE_FALLOFF_V2 = 40;
+/** v2: trees grow where the village weight is below this (the outer part of the falloff) */
+export const VILLAGE_TREES_V2 = 0.3;
+/** v2: the village blend ring is warped by noise up to this many metres, so villages are not discs */
 export const VILLAGE_WARP = 22;
 const VILLAGE_WARP_SCALE = 1 / 46;
 /** salt of the v2 village-edge noise (outside SALT: v1 streams stay untouched) */
@@ -162,10 +166,17 @@ export class ComposedTerrainField implements TerrainField {
       const d2 = dx * dx + dz * dz;
       const outer = v.radius + VILLAGE_BLEND;
       if (d2 >= outer * outer) continue;
-      // the warp only moves the inner edge: the outer edge (feature-cell bound) stays a circle
       const d = Math.sqrt(d2);
-      const inner = v.radius - Math.abs(warp);
-      const t = warp === 0 ? smoothstep(v.radius, outer, d) : smoothstep(inner + warp, outer, d);
+      if (this.genVersion >= 2) {
+        // v2: no plateau. The village smooths the ground towards the local low-pass height over a wide,
+        // noise-warped falloff (≥ VILLAGE_FALLOFF_V2 m), so it follows the land and never ends in a step.
+        const inner = v.radius - VILLAGE_FALLOFF_V2 * 0.25 + warp * 0.4;
+        const t = smoothstep(inner, outer, d);
+        h = o.lp + (h - o.lp) * t;
+        if (1 - t > vm) vm = 1 - t;
+        continue;
+      }
+      const t = smoothstep(v.radius, outer, d);
       h = v.plateau + (h - v.plateau) * t;
       bed = v.plateau + (bed - v.plateau) * t;
       if (1 - t > vm) vm = 1 - t;
@@ -229,7 +240,8 @@ const FOREST_THIN_SLOPE_V2 = 0.55;
  * slope 0.9 (bare cliffs); v2 thins the forest out up to slope 1.2.
  */
 export function forestDensity(base: BaseTerrain, s: TerrainSample, slope: number, c: Climate, genVersion = 1): number {
-  if (s.water > s.h - 0.5 || s.village > 0 || s.roadD < ROAD_HALF_WIDTH + 4 || s.riverD < base.riverHalfWidth + 8) return 0;
+  // v2: woods reach into the outer half of a village's falloff (no treeless ring around it)
+  if (s.water > s.h - 0.5 || s.village > (genVersion >= 2 ? VILLAGE_TREES_V2 : 0) || s.roadD < ROAD_HALF_WIDTH + 4 || s.riverD < base.riverHalfWidth + 8) return 0;
   const v2 = genVersion >= 2;
   if (slope > (v2 ? FOREST_MAX_SLOPE_V2 : 0.9) || s.h > base.treeLine) return 0;
   const wet = smoothstep(0.3, 0.75, c.moisture);
@@ -261,7 +273,8 @@ export function classify(base: BaseTerrain, s: TerrainSample, slope: number, c: 
   let b: BiomeId;
   if (wet) b = BIOME.water;
   else if (out.road > 0.5) b = BIOME.road;
-  else if (s.village > 0.5) b = BIOME.village;
+  // v2 villages keep their land's biome (gardens are painted over it, no plateau colour)
+  else if (s.village > 0.5 && genVersion < 2) b = BIOME.village;
   else if (out.snow > 0.5) b = BIOME.snow;
   else if (slope > 0.8 || h > base.treeLine + 80) b = BIOME.rock;
   else if (s.water > h - 1.5) b = BIOME.beach;

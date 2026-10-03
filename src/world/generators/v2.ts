@@ -6,7 +6,7 @@
  * edges and lone trees, continuous water meshes and per-vertex rock / bank weights.
  */
 import { createBaseTerrain } from '../base-terrain';
-import { LruCache, segDist2 } from '../math';
+import { dcos, dsin, LruCache, segDist2 } from '../math';
 import type { RoadSource } from '../roads';
 import { FixedRoads, GridRoads, NoRoads, ROAD_HALF_WIDTH } from '../roads';
 import type { House, RoadNear, Settlements, Village } from '../settlements';
@@ -74,7 +74,18 @@ export function createWorldV2(spec: WorldSpec): World {
         }
         return out;
       };
-      return villageLayoutV2(v, blocked, nearest);
+      // v2 villages follow the land (no plateau): each house stands on the lowest corner of its footprint
+      return villageLayoutV2(v, blocked, nearest).map((h) => {
+        const c = dcos(h.yaw);
+        const s = dsin(h.yaw);
+        let y = field.heightAt(h.x, h.z);
+        for (const [ax, az] of [[-1, -1], [1, -1], [-1, 1], [1, 1]] as const) {
+          const lx = (ax * h.w) / 2;
+          const lz = (az * h.d) / 2;
+          y = Math.min(y, field.heightAt(h.x + c * lx + s * lz, h.z - s * lx + c * lz));
+        }
+        return { ...h, y: y - 0.05 };
+      });
     });
 
   return { spec: Object.freeze({ ...spec }), field, base, settlements, roads, houses };
