@@ -106,6 +106,7 @@ function boot(caps: EditionCaps): void {
   const race = new RaceController(level, storage);
   const input = new InputManager(window, settings, device.touch);
   const audio = new GameAudio();
+  audio.setAmbience(level.def.env.ambience.kind, level.def.env.ambience.gain);
   const loop = new FixedLoop(PHYSICS_DT, 250);
   const fpsMeter = new FpsMeter();
   const dynRes = new DynamicResolution(targetFps(device.form));
@@ -369,6 +370,7 @@ function boot(caps: EditionCaps): void {
     sim.world.setLevel(next);
     race.setLevel(next);
     old.dispose?.();
+    audio.setAmbience(next.def.env.ambience.kind, next.def.env.ambience.gain);
     saveLastLevel(storage, id);
     rememberWorld(next);
     toSpawn();

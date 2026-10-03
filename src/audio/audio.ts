@@ -6,6 +6,8 @@ const MOTOR_F_MAX = 900;
 /** Parameter smoothing time constant (s) for setTargetAtTime. */
 const SMOOTH = 0.04;
 const UPDATE_INTERVAL = 1 / 60;
+/** wind bed gain at ambience 1 (the speed rush peaks at 0.35) */
+const AMBIENT_WIND = 0.06;
 /** Slight per-motor detune so four motors beat against each other like a real quad. */
 const DETUNE = [1, 1.013, 0.991, 1.021];
 
@@ -37,6 +39,7 @@ export class GameAudio {
   private noise: AudioBuffer | null = null;
   private volume = 0.7;
   private lastUpdate = 0;
+  private ambience = 0;
   private failed = false;
   private wantRunning = false;
 
@@ -79,6 +82,11 @@ export class GameAudio {
     return this.ctx !== null && this.ctx.state === 'running';
   }
 
+  /** Outdoor levels: a light wind bed (EnvDef.ambience, 0..1) under the speed-driven rush; rooms are still. */
+  setAmbience(kind: 'room' | 'wind', gain: number): void {
+    this.ambience = kind === 'wind' ? Math.min(1, Math.max(0, gain)) : 0;
+  }
+
   setVolume(v: number): void {
     this.volume = Math.min(1, Math.max(0, v));
     if (this.ctx && this.master) this.master.gain.setTargetAtTime(this.volume, this.ctx.currentTime, 0.05);
@@ -113,8 +121,11 @@ export class GameAudio {
     }
     if (this.windGain && this.windFilter) {
       const s = Math.min(1, Math.max(0, speed / 25));
-      this.windGain.gain.setTargetAtTime(0.35 * s * s, now, 0.15);
-      this.windFilter.frequency.setTargetAtTime(300 + 1800 * s, now, 0.15);
+      // slow gusts on the ambient bed
+      const gust = 0.75 + 0.25 * Math.sin(now * 0.37) * Math.sin(now * 0.11 + 1.3);
+      const bed = AMBIENT_WIND * this.ambience * gust;
+      this.windGain.gain.setTargetAtTime(Math.max(0.35 * s * s, bed), now, 0.15);
+      this.windFilter.frequency.setTargetAtTime(300 + 1800 * Math.max(s, this.ambience * 0.15 * gust), now, 0.15);
     }
   }
 
