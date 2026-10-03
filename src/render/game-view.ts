@@ -88,6 +88,7 @@ export class GameView {
   private pendingRespawn = false;
   private washAcc = 0;
   private bloomPulse = 0;
+  private shownFade = 0;
   private ringFlash = 0;
   private readonly ledColor = new THREE.Color();
 
@@ -194,7 +195,7 @@ export class GameView {
     this.scene.fog = v.fog;
     this.scene.environmentIntensity = v.environmentIntensity;
     this.contact.surfaces = level.surfaces;
-    this.rig.setLevel(level.def);
+    this.rig.setLevel(level);
     this.xrCam.far = this.rig.camera.far;
     this.xrCam.updateProjectionMatrix();
     this.ringFlash = 0;
@@ -227,7 +228,14 @@ export class GameView {
     // outdoor LOS: the pilot watches the next ring, the course overview between laps
     this.rig.setFocus(f.nextRing >= 0 && f.nextRing < this.rings.count ? this.rings.ringPosition(f.nextRing, _focus) : null);
     this.rig.shake = !xr;
+    this.rig.allowRelocate = !xr;
     this.rig.update({ dt, time: t, drone: f.drone, mode: f.cameraMode, cameraTiltDeg: f.cameraTiltDeg, fovDeg: f.fovDeg, speed: f.speed, instant: f.still });
+    // pilot relocation fades the view out and back in (CSS filter: no extra pass, idle when 0)
+    const fade = this.rig.fade;
+    if (fade !== this.shownFade) {
+      this.shownFade = fade;
+      r.domElement.style.filter = fade > 0 ? `brightness(${(1 - fade).toFixed(3)})` : '';
+    }
     let cam: THREE.PerspectiveCamera = this.rig.camera;
     if (xr) {
       this.placeDolly(f.cameraMode);
