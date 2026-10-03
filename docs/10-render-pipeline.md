@@ -307,8 +307,9 @@ terrain shader, water shader and drone-following shadow box are gone or demoted.
 | sun / shadows | the level's `sun` → `SunCascades` on ultra / high (`shadowFar` 260 m, City 420 m); trees, buildings and furniture cast, chunks receive |
 | IBL | one capture from 6 m over the take-off (§3); trees take a full share of it (`envMapIntensity` 1), the ground 0.8 |
 | haze | `FogExp2` to the sky's haze colour at the profile's view distance + the post aerial haze in the same colour |
-| City | facades: one instanced draw (X1's facade shader) with the library's brick / concrete (`watchSet`) as wall texture within ~180 m, lit rooms dimmer and warmer at dusk, panes reflecting a share of the capture |
-| trees | X1's species + impostors; crown lumps / conifer tiers shade with their rounded shape (bent facet normals) |
+| City | facades: one instanced draw (X1's facade shader) with the library's brick / concrete (`watchSet`) as wall texture within ~180 m, lit rooms dimmer and warmer at dusk, panes reflecting a share of the capture. Roofs (ultra / high): parapets, vents and skylights on low / mid-rise roofs within 150 m of the drone or the camera (two instanced draws), ballast from the library's gravel with 6 m membrane seams on near roofs |
+| world edge | below the horizon the sky dome shows the fog colour itself (`SkyDome.fogGround`), so where the ground or the far backdrop ends there is no band and no box edge, from any altitude |
+| trees | near: the Training archetypes (`outdoor/world-trees.ts`; broadleaf → oak, birch → birch, conifer → pine, scrub → small oak): bark + leaf cards / needles on ultra / high (2 draws per species), the opaque masses on medium, none on low / VR. They cast through their opaque masses drawn only inside shadow passes (`onBeforeShadow` lifts the instance count from 0), not through every card. Far: X1's impostors with an atlas baked from the same archetypes (`bakeImpostorAtlas`), so a tree keeps colour and outline across the swap. Nearest 180 / 70 / 90 trees (ultra / high / medium), City within 80 m |
 | rings | the shared `RingsView` with the look's `ringGain` (day 2.2–2.3, golden 1.9, dawn 1.8, dusk 1.5) |
 | view distance | Settings → View distance × the adaptive step: `scaledProfile(profile, k)` — short 0.5, medium 0.75, long 1.3 (fog and the batched backdrop only; the streamed radius keeps the tier's budget) |
 
@@ -320,14 +321,17 @@ an immersive session at the low tier, **per frame, both eyes**. Includes the dro
 
 | level | ultra | high (≤ 150 / 0.6 M) | iPhone medium (≤ 110 / 250 k) | Quest IWER (≤ 80 / 120 k) |
 | --- | --- | --- | --- | --- |
-| City | 84 / 645 k | 84 / 516 k | 54 / 171 k | **30 / 105 k** |
-| Alpine Valley | 98 / 572 k | 98 / 537 k | 62 / 236 k | **34 / 91 k** |
-| Infinite | 94 / 512 k | 93 / 445 k | 53 / 201 k | **32 / 92 k** |
+| City | 92 / 685 k | 92 / 556 k | 54 / 169 k | **30 / 105 k** |
+| Alpine Valley | 98 / 805 k | 98 / 547 k | 61 / 241 k | **34 / 91 k** |
+| Infinite | 93 / 792 k | 92 / 502 k | 52 / 195 k | **32 / 92 k** |
 | Night Loft (Quest target: unchanged) | — | — | — | 68 / 109 k (feat/visual 72 / 110 k) |
 | Training (Quest target: unchanged) | — | — | — | 38 / 143 k (feat/visual 40 / 143 k) |
 
-Triangles on ultra / high are mostly the two shadow cascades drawing the casters again (trees, buildings,
-cars, lights): the City's main view is ≈ 190 k. What it took to fit: City street furniture within 450 m on
-high (was the whole city: 645 k → 516 k), roof units and tanks off on the Quest tier (133 k → 105 k). X1's
+Triangles on ultra / high are the near Training-model trees (≈ 1.4–2.3 k each, so their counts are set per
+tier: ultra 180, high 70, medium 90, City within 80 m) and the two shadow cascades drawing the casters again
+(buildings, cars, lights, the trees' opaque shadow masses). What it took to fit: City street furniture within
+450 m on high, roof units and tanks off on the Quest tier (133 k → 105 k), trees casting through their masses
+only inside the shadow passes (the cards in the cascades took Alpine ultra to 2.5 M), the per-tier tree counts
+(City high 682 k → 556 k, iPhone Alpine 264 k → 241 k). Ultra has no target. X1's
 earlier Quest numbers (old drone, old rings) no longer apply. Measured with the scratchpad `shots.mjs`
 (teleport + `__drone.stats()` after the streamer settles); the Quest card is up in every frame.
