@@ -50,3 +50,36 @@ test('the Quest app launches offline after one successful store check (cached ow
   expect(errors).toEqual([]);
   await context.setOffline(false);
 });
+
+test('texture maps are cached when a level first uses them: a visited level and an unvisited one both fly offline', async ({ page, context }) => {
+  test.setTimeout(120_000);
+  type H = { level: string; levelReady: boolean; loading: { visible: boolean }; startLevel: (id: string) => Promise<boolean> };
+  const errors: string[] = [];
+  page.on('pageerror', (e) => errors.push(e.message));
+  await page.goto('/play/');
+  await page.waitForFunction(() => !!(window as unknown as { __drone?: H }).__drone, null, { timeout: 30_000 });
+  await page.evaluate(() => navigator.serviceWorker.ready);
+  await page.waitForFunction(async () => (await caches.keys()).some((k) => k.startsWith('dronesim-')) && !!navigator.serviceWorker.controller, null, { timeout: 20_000 });
+  const maps = (): Promise<number> =>
+    page.evaluate(async () => {
+      let n = 0;
+      for (const k of await caches.keys()) for (const r of await (await caches.open(k)).keys()) if (/\/assets\/(albedo|normal|arm)-[^/]+\.webp$/.test(r.url)) n++;
+      return n;
+    });
+  // nothing of the ~6 MB of maps on install
+  expect(await maps()).toBe(0);
+  // the loft, visited online through the worker: its maps land in the cache
+  expect(await page.evaluate(() => (window as unknown as { __drone: H }).__drone.startLevel('night-loft'))).toBe(true);
+  await expect.poll(maps, { timeout: 20_000 }).toBeGreaterThan(0);
+
+  await context.setOffline(true);
+  await page.reload();
+  await page.waitForFunction(() => !!(window as unknown as { __drone?: H }).__drone, null, { timeout: 30_000 });
+  // visited: from the cache; unvisited (City): its procedural sets
+  for (const id of ['night-loft', 'city']) {
+    expect(await page.evaluate((id) => (window as unknown as { __drone: H }).__drone.startLevel(id), id)).toBe(true);
+    expect(await page.evaluate(() => { const d = (window as unknown as { __drone: H }).__drone; return [d.level, d.levelReady, d.loading.visible]; })).toEqual([id, true, false]);
+  }
+  expect(errors).toEqual([]);
+  await context.setOffline(false);
+});

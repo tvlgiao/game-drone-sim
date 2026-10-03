@@ -1,6 +1,6 @@
 import { existsSync, readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
-import { WORLD_WORKER_RE, assertWorkerPrecached, precacheFiles, precacheUrls, swSource } from '../../build/offline-sw';
+import { RUNTIME_ASSET_RE, WORLD_WORKER_RE, assertWorkerPrecached, precacheFiles, precacheUrls, swSource } from '../../build/offline-sw';
 import { legacyGameUrl } from '../../src/landing/legacy';
 import { storeBadgeHtml, storeBadgesHtml } from '../../src/site/badge';
 import { STORE_LINKS } from '../../src/site/stores';
@@ -52,6 +52,18 @@ describe('offline service worker', () => {
     const urls = precacheUrls(files);
     for (const u of ['./', './play/', './app/', './privacy/', './play/index.html', './assets/main.js']) expect(urls).toContain(u);
     expect(new Set(urls).size).toBe(urls.length);
+  });
+
+  it('the CC0 texture maps are not precached (runtime cache on first use); code chunks and workers are', () => {
+    const built = ['play/index.html', 'assets/main-A1.js', 'assets/world-level-view-B2.js', 'assets/world-worker-C3.js', 'assets/texture-worker-D4.js', 'assets/albedo-x1Y2.webp', 'assets/normal-Ab_c.webp', 'assets/arm-Q9.webp', 'icons/icon-192.png'];
+    const pre = precacheFiles(built);
+    expect(pre).toEqual(['assets/main-A1.js', 'assets/texture-worker-D4.js', 'assets/world-level-view-B2.js', 'assets/world-worker-C3.js', 'icons/icon-192.png', 'play/index.html']);
+    expect(RUNTIME_ASSET_RE.test('/drone-sim/assets/albedo-x1Y2.webp')).toBe(true);
+    expect(RUNTIME_ASSET_RE.test('/assets/main-A1.js')).toBe(false);
+    // the worker caches them on first fetch, into the same versioned cache
+    const src = swSource(pre, 'abc');
+    expect(src).toContain('RUNTIME');
+    expect(src).toMatch(/c\.put\(req/);
   });
 
   it('the generated worker lists them', () => {
