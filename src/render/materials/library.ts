@@ -126,6 +126,8 @@ export interface TerrainOptions {
   normalScale?: number;
   /** multiplies the base roughness map (1 = as authored) */
   roughness?: number;
+  /** travelling wind gusts brighten meadow and crops (docs/12); default off */
+  gust?: boolean;
 }
 
 export interface TextureSet {
@@ -561,6 +563,7 @@ export class MaterialLibrary implements MaterialSource {
         srgbColors: o.srgbColors,
         snow: o.snow,
         worldUv: o.worldUv,
+        gust: o.gust,
       },
     };
     const opts: MaterialOptions = { uvMeters: o.uvMeters ?? 1, vertexColors: o.vertexColors ?? true, envMapIntensity: o.envMapIntensity ?? 0.4, normalScale: o.normalScale, roughness: o.roughness, patch };

@@ -48,8 +48,10 @@ export function rippleTexture(size = 256): THREE.DataTexture {
 
 const PARS_VERTEX = /* glsl */ `
 attribute float aShore;
+attribute vec2 aFlow;
 varying vec3 vWaterPos;
-varying float vShore;`;
+varying float vShore;
+varying vec2 vFlow;`;
 
 const PARS_FRAGMENT = /* glsl */ `
 uniform sampler2D uRipple;
@@ -60,19 +62,38 @@ uniform vec3 uSkyHorizon;
 uniform vec3 uFoam;
 varying vec3 vWaterPos;
 varying float vShore;
-float waterFoam = 0.0;`;
+varying vec2 vFlow;
+float waterFoam = 0.0;
+// flow-map advection (docs/12): two copies of a sample, each dragged downstream for one period and blended
+// in a triangle wave, so the pattern runs along the river without ever stretching
+const float FLOW_RATE = 0.11;
+vec2 flowOffset( float phase ) { return vFlow * ( phase / FLOW_RATE ); }`;
 
 const RIPPLE_NORMAL = /* glsl */ `
 {
   vec2 p = vWaterPos.xz;
   float dist = length( vViewPosition );
   vec2 n2;
-  if ( uDetailOn > 0.5 ) {
+  float flowing = step( 0.01, dot( vFlow, vFlow ) );
+  if ( uDetailOn > 0.5 && flowing > 0.5 ) {
+    // a river: the ripple pattern runs downstream (two phases, blended), a little rougher where it runs fast
+    float ph0 = fract( uTime * FLOW_RATE );
+    float ph1 = fract( uTime * FLOW_RATE + 0.5 );
+    float w0 = 1.0 - abs( 2.0 * ph0 - 1.0 );
+    vec2 q0 = p - flowOffset( ph0 );
+    vec2 q1 = p - flowOffset( ph1 ) + vec2( 7.3, 3.1 );
+    vec2 a = mix( texture2D( uRipple, q1 * ${(1 / RIPPLE_TILE).toFixed(5)} ).rg, texture2D( uRipple, q0 * ${(1 / RIPPLE_TILE).toFixed(5)} ).rg, w0 ) * 2.0 - 1.0;
+    vec2 b = mix( texture2D( uRipple, q1 * ${(1 / (RIPPLE_TILE * 0.41)).toFixed(5)} ).rg, texture2D( uRipple, q0 * ${(1 / (RIPPLE_TILE * 0.41)).toFixed(5)} ).rg, w0 ) * 2.0 - 1.0;
+    n2 = ( a + b ) * ( 0.32 + 0.12 * clamp( length( vFlow ), 0.0, 1.5 ) );
+  } else if ( uDetailOn > 0.5 ) {
+    // a lake: gentle ripples drifting with the breeze
     vec2 a = texture2D( uRipple, p * ${(1 / RIPPLE_TILE).toFixed(5)} + vec2( uTime * 0.011, uTime * 0.006 ) ).rg * 2.0 - 1.0;
     vec2 b = texture2D( uRipple, p * ${(1 / (RIPPLE_TILE * 0.41)).toFixed(5)} - vec2( uTime * 0.008, -uTime * 0.014 ) ).rg * 2.0 - 1.0;
     n2 = ( a + b ) * 0.32;
   } else {
-    n2 = 0.05 * vec2( sin( p.x * 0.35 + uTime * 1.3 ) + sin( p.y * 0.21 - uTime * 0.7 ), cos( p.y * 0.29 - uTime * 1.1 ) );
+    // one analytic ripple (Quest), carried downstream on a river
+    vec2 pf = p - vFlow * uTime;
+    n2 = 0.05 * vec2( sin( pf.x * 0.35 + uTime * 1.3 ) + sin( pf.y * 0.21 - uTime * 0.7 ), cos( pf.y * 0.29 - uTime * 1.1 ) );
   }
   // gentle near the camera, flat into the distance (ripples finer than a pixel only alias)
   n2 *= 1.0 - smoothstep( 40.0, 320.0, dist );
@@ -84,8 +105,14 @@ const FOAM_COLOR = /* glsl */ `
 {
   float shore = clamp( vShore, 0.0, 1.0 );
   if ( shore > 0.002 && uDetailOn > 0.5 ) {
-    float n = texture2D( uRipple, vWaterPos.xz * 0.11 + vec2( uTime * 0.02, -uTime * 0.013 ) ).b;
-    float n2 = texture2D( uRipple, vWaterPos.xz * 0.37 - vec2( uTime * 0.03, uTime * 0.021 ) ).b;
+    // foam drifts with the current (rivers) or the breeze (lakes)
+    float ph0 = fract( uTime * FLOW_RATE );
+    float ph1 = fract( uTime * FLOW_RATE + 0.5 );
+    float w0 = 1.0 - abs( 2.0 * ph0 - 1.0 );
+    vec2 q0 = vWaterPos.xz - flowOffset( ph0 );
+    vec2 q1 = vWaterPos.xz - flowOffset( ph1 ) + vec2( 5.1, 2.7 );
+    float n = mix( texture2D( uRipple, q1 * 0.11 + vec2( uTime * 0.02, -uTime * 0.013 ) ).b, texture2D( uRipple, q0 * 0.11 + vec2( uTime * 0.02, -uTime * 0.013 ) ).b, w0 );
+    float n2 = mix( texture2D( uRipple, q1 * 0.37 - vec2( uTime * 0.03, uTime * 0.021 ) ).b, texture2D( uRipple, q0 * 0.37 - vec2( uTime * 0.03, uTime * 0.021 ) ).b, w0 );
     // a lacy band: dense at the bank, breaking into streaks further out
     waterFoam = smoothstep( 0.62, 0.9, shore * 0.85 + n * 0.45 + n2 * 0.25 - 0.18 ) * shore;
   } else if ( shore > 0.002 ) {
@@ -140,7 +167,7 @@ export function waterMaterial(sky: SkyDef, ripple: THREE.Texture, detail: boolea
     Object.assign(s.uniforms, uniforms);
     s.vertexShader = s.vertexShader
       .replace('#include <common>', `#include <common>\n${PARS_VERTEX}`)
-      .replace('#include <project_vertex>', '#include <project_vertex>\n  vWaterPos = ( modelMatrix * vec4( transformed, 1.0 ) ).xyz;\n  vShore = aShore;');
+      .replace('#include <project_vertex>', '#include <project_vertex>\n  vWaterPos = ( modelMatrix * vec4( transformed, 1.0 ) ).xyz;\n  vShore = aShore;\n  vFlow = aFlow;');
     s.fragmentShader = s.fragmentShader
       .replace('#include <common>', `#include <common>\n${PARS_FRAGMENT}`)
       .replace('#include <color_fragment>', `#include <color_fragment>\n${FOAM_COLOR}`)
@@ -148,7 +175,7 @@ export function waterMaterial(sky: SkyDef, ripple: THREE.Texture, detail: boolea
       .replace('#include <normal_fragment_maps>', `#include <normal_fragment_maps>\n${RIPPLE_NORMAL}`)
       .replace('#include <lights_fragment_maps>', `#include <lights_fragment_maps>\n${SKY_REFLECTION}`);
   };
-  m.customProgramCacheKey = () => 'water-v2';
+  m.customProgramCacheKey = () => 'water-v3';
   return m;
 }
 

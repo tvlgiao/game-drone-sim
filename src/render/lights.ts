@@ -183,6 +183,20 @@ export class Lights {
     for (const s of this.spots) s.shadow.needsUpdate = true;
   }
 
+  /** The practical (bulb / lamp / neon) light nearest to `p` (living-world flicker hooks). */
+  practicalNear(p: THREE.Vector3): THREE.PointLight | null {
+    let best: THREE.PointLight | null = null;
+    let bd = Infinity;
+    for (const pr of this.practicals) {
+      const d = pr.light.position.distanceToSquared(p);
+      if (d < bd) {
+        bd = d;
+        best = pr.light;
+      }
+    }
+    return best;
+  }
+
   update(time: number): void {
     const boost = this.profile && this.profile.pointLights < 6 ? 1.2 : 1;
     for (const p of this.practicals) {

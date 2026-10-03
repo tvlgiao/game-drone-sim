@@ -29,6 +29,7 @@ physics (WP-B), levels (WP-I) and UI (WP-J) consume. Nothing in `src/render`, `s
 | `routes.ts` | `routeFromWaypoints`, `ALPINE_ROUTE`, `worldObstacles`, `distanceToShape`, `clearanceAt`. |
 | `city-gen.ts` | `generateCity(seed)` (buildings, roof props, skybridges, slab, park, river, 18-ring route), `cityTerrainField`, `cityObstacles`, `clearPoint`. |
 | `src/game/worlds.ts` | Saved Infinite worlds (`drone-sim.worlds.v1`). |
+| `traffic/**`, `life/**` | The living world: City traffic, rural cars, birds, river flow, countryside placement, the level's `LifeHub` (docs/12). Same arithmetic-only rules. |
 
 ## 2. Rules that keep worlds reproducible
 

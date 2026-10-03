@@ -20,6 +20,9 @@ import { buildOutdoorProps, lowPolyMaterial, type OutdoorProps } from './outdoor
 import { buildScenery } from './scenery';
 import { SkyDome, skyEnvironment } from './sky';
 import { applyEnvPatch } from '../materials/patches';
+import type { LevelRuntime } from '../../levels/runtime';
+import { TrainingLife } from '../life/training-life';
+import { TERRAIN_GUST } from '../life/gust';
 
 const MEADOW_RADIUS = 1150;
 const GROUND_HAZE = 0x9db58a;
@@ -40,6 +43,8 @@ const GRASS: Record<QualityProfile['tier'], { tufts: number; half: number }> = {
 const GRASS_MAX = GRASS.ultra.tufts;
 
 const _v = new THREE.Vector3();
+/** meadow: grass detail under the vertex colours, travelling gusts over it (one object: the library caches by identity) */
+const MEADOW_PATCH = { detail: 0.7, gust: true };
 
 export class OutdoorLevelView implements LevelView {
   readonly group = new THREE.Group();
@@ -63,8 +68,11 @@ export class OutdoorLevelView implements LevelView {
   private readonly cards: THREE.Mesh | null;
   private readonly forest: Forest;
   private readonly scope: MaterialScope;
+  /** birds, turbines, cows, the tractor, chimney smoke, farm-road cars (docs/12) */
+  private readonly life: TrainingLife;
+  private readonly lifeClock = { uTime: { value: 0 } };
 
-  constructor(level: OutdoorLevel, renderer: THREE.WebGLRenderer, library: MaterialLibrary) {
+  constructor(level: OutdoorLevel, renderer: THREE.WebGLRenderer, library: MaterialLibrary, rt: LevelRuntime | null = null) {
     this.group.name = 'world';
     this.scope = library.scope(level.id);
     const lib = this.scope;
@@ -100,7 +108,7 @@ export class OutdoorLevelView implements LevelView {
 
     // meadow and mowed field: the palette rides on vertex colours, the grass set (procedural, CC0 where
     // loaded) only adds texture through the detail patch
-    const meadowMat = lib.material('grass', { uvMeters: GRASS_TILE, vertexColors: true, normalScale: 0.5, roughness: 1.4, envMapIntensity: 0.3, patch: { detail: 0.7 } });
+    const meadowMat = lib.material('grass', { uvMeters: GRASS_TILE, vertexColors: true, normalScale: 0.5, roughness: 1.4, envMapIntensity: 0.3, patch: MEADOW_PATCH });
     const groundGeo = meadowGeometry(MEADOW_RADIUS);
     if (this.props.hills) {
       const hills = this.props.hills;
@@ -120,7 +128,7 @@ export class OutdoorLevelView implements LevelView {
       roughness: 1.4,
       envMapIntensity: 0.3,
       polygonOffset: -1,
-      patch: { detail: 0.7, stripes: { half, width: (half * 2) / FIELD_STRIPES, strength: 0.16 } },
+      patch: { detail: 0.7, stripes: { half, width: (half * 2) / FIELD_STRIPES, strength: 0.16 }, gust: true },
     });
     const field = fieldGeometry(half, FIELD_STRIPES);
     this.addMesh(new THREE.Mesh(field, fieldMat), 'field', false, true);
@@ -192,6 +200,9 @@ export class OutdoorLevelView implements LevelView {
 
     this.grass = new Grass({ fieldHalf: half, bare: [[-3.8, 29.4, 3.8, 39.2], [-1.7, 43.3, 1.7, 46.7]], wind: windDir, maxTufts: GRASS_MAX });
     this.group.add(this.grass.mesh);
+
+    this.life = new TrainingLife(rt, this.lifeClock, windDir, this.fog, library.profile.tier);
+    this.group.add(this.life.group);
   }
 
   private addMesh(m: THREE.Mesh, name: string, cast: boolean, receive: boolean): void {
@@ -227,7 +238,13 @@ export class OutdoorLevelView implements LevelView {
 
   update(f: LevelFrame): void {
     this.sky.follow(f.camera);
+    this.sky.update(f.time);
     this.wind.uTime.value = f.time;
+    this.lifeClock.uTime.value = f.time;
+    TERRAIN_GUST.uGustTime.value = f.time;
+    TERRAIN_GUST.uGustWind.value.copy(this.wind.uWind.value);
+    TERRAIN_GUST.uGustOrigin.value.set(0, 0);
+    this.life.update(f.time, f.dt, f.drone);
     this.grass.update(f.time, f.camera);
     const sock = this.props.sock;
     if (sock) {
@@ -251,6 +268,11 @@ export class OutdoorLevelView implements LevelView {
     const detailed = p.tier === 'ultra' || p.tier === 'high';
     if (this.cards) this.cards.visible = detailed;
     this.forest.setDetailed(detailed);
+    this.life.setQuality(p.tier);
+  }
+
+  stats(): Record<string, unknown> {
+    return { life: this.life.stats() };
   }
 
   /** grass tufts drawn this tier (tests / budget probes) */
@@ -275,6 +297,7 @@ export class OutdoorLevelView implements LevelView {
     this.ringLight.dispose();
     this.grass.dispose();
     this.forest.dispose();
+    this.life.dispose();
     for (const d of this.props.disposables) d.dispose();
     for (const d of this.owned) d.dispose();
     this.scope.dispose();

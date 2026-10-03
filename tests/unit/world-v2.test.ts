@@ -419,6 +419,7 @@ describe('City furniture', () => {
     }
   });
 
+  // five cities and their furniture: ~1 s alone, several under a full parallel run (a correctness test, not a perf budget)
   it('street trees, lights and parked cars stay ring radius + 3 m clear of the 18 race rings (5 seeds)', () => {
     for (const seed of [1, 5, 42, 0x0c172026, 777]) {
       const city = generateCity(seed);
@@ -430,7 +431,7 @@ describe('City furniture', () => {
         for (const c of f.colliders) expect(distanceToShape(r.position[0], r.position[1], r.position[2], c.shape)).toBeGreaterThanOrEqual(r.radius + CITY_RING_CLEARANCE - 1e-9);
       }
     }
-  });
+  }, 30_000);
 
   it('a ring right over a street light removes that light (and anything else within its clearance)', () => {
     const city = generateCity(42);

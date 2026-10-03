@@ -6,6 +6,7 @@
  * melt into the ground; wind sway in the vertex shader. Tier-gated count; off on the lowest tier.
  */
 import * as THREE from 'three';
+import { GUST_GLSL } from '../life/gust';
 import { mulberry32 } from '../materials/texgen';
 
 export interface GrassOptions {
@@ -72,6 +73,8 @@ uniform int uBareCount;
 varying float vShade;
 varying float vWild;
 varying float vRnd;
+varying float vGust;
+${GUST_GLSL}
 `;
 
 const VERT_BODY = /* glsl */ `
@@ -95,7 +98,10 @@ p.xz *= 0.6 + height * 3.0;
 // wind: gusts travel downwind; the bend grows with the square of the height along the blade
 float gust = sin( dot( world, uWind ) * 0.35 - uTime * 1.9 + rnd * 1.3 ) * 0.5 + 0.5;
 float flutter = sin( uTime * 7.0 + rnd * 40.0 ) * 0.15;
-float bend = position.y * position.y * height * ( 0.25 + 0.55 * gust + flutter ) * mix( 0.5, 1.0, wild );
+// travelling gusts (docs/12): a band rolling downwind lays the blades over
+float big = lifeGust( world, uWind, uTime );
+float bend = position.y * position.y * height * ( 0.25 + 0.55 * gust + flutter + 1.1 * big ) * mix( 0.5, 1.0, wild );
+vGust = big;
 p.xz += uWind * bend;
 p.y -= bend * bend * 0.6;
 vec3 transformed = vec3( world.x + p.x, p.y, world.y + p.z );
@@ -105,6 +111,7 @@ vRnd = rnd;
 `;
 
 const FRAG_HEAD = /* glsl */ `
+varying float vGust;
 varying float vShade;
 varying float vWild;
 varying float vRnd;
@@ -121,6 +128,8 @@ const FRAG_COLOR = /* glsl */ `
   float flower = step( 0.955, vRnd ) * vWild * smoothstep( 0.82, 0.95, vShade );
   vec3 petal = vRnd > 0.985 ? vec3( 0.95, 0.85, 0.2 ) : vRnd > 0.97 ? vec3( 0.95, 0.95, 0.92 ) : vec3( 0.65, 0.45, 0.9 );
   diffuseColor.rgb *= mix( col, petal, flower );
+  // blades laid over by a gust show their paler side
+  diffuseColor.rgb *= 1.0 + 0.22 * vGust * vShade;
 }
 `;
 

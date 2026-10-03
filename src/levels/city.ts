@@ -11,6 +11,7 @@ import { cityFurniture, type CityFurniture } from './city-furniture';
 import { cityOutskirts, type Outskirts } from './city-outskirts';
 import { createRuntime, type LevelRuntime } from './runtime';
 import { outdoorEnv } from './skies';
+import { createCityTraffic } from '../world/traffic/city-traffic';
 
 export const CITY_SEED = 0x0c17_2026;
 export const CITY_CEILING = 250;
@@ -40,5 +41,9 @@ export function cityRuntime(seed = CITY_SEED): LevelRuntime {
   const outskirts = cityOutskirts(city.seed);
   const furniture = cityFurniture(city);
   const rt = createRuntime(cityLevel(city, outskirts, furniture), cityTerrainField(city, GEN_VERSION));
-  return { ...rt, content: { kind: 'city', city, outskirts, furniture, seed: city.seed } };
+  // living world (docs/12): cars on the street grid (kinematic colliders through the life hub) and traffic lights
+  const traffic = createCityTraffic(city);
+  rt.grid?.insertOwned('traffic-signals', traffic.roads.signalColliders);
+  rt.life?.addTraffic(traffic.sim);
+  return { ...rt, content: { kind: 'city', city, outskirts, furniture, seed: city.seed, traffic } };
 }

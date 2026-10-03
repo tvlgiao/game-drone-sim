@@ -294,7 +294,7 @@ export class GameView {
       if (!worldViews) throw new Error('World renderer not loaded');
       return new worldViews.WorldLevelView(level, this.renderer, this.library, this.form, { time: this.worldTime(def), viewDistance: this.viewDistance });
     }
-    return new OutdoorLevelView(def, this.renderer, this.library);
+    return new OutdoorLevelView(def, this.renderer, this.library, level);
   }
 
   /** Sky preset a generated level is drawn at under the pilot's Time of day (undefined: not a generated level). */

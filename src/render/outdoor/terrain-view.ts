@@ -7,6 +7,7 @@
  * Everything is stored relative to the floating origin (world-origin.ts).
  */
 import * as THREE from 'three';
+import { waterFlow } from '../../world/life/water-flow';
 import { cellKey, type ChunkStreamer, type StreamCell } from '../../levels/chunk-streamer';
 import { chunkIndices, CHUNK_SIZE, LOD_QUADS, type ChunkData, type Lod } from '../../world/chunk-gen';
 import { SURFACE_BANK, SURFACE_ROCK, SURFACE_STRIDE } from '../../world/chunk-gen-v2';
@@ -99,6 +100,7 @@ class RibbonBatch {
     const ia = idx.array as Uint32Array;
     const ra = this.road ? ((g.getAttribute('aRoad') as THREE.BufferAttribute).array as Float32Array) : null;
     const sa = this.road ? null : ((g.getAttribute('aShore') as THREE.BufferAttribute).array as Float32Array);
+    const fa = this.road ? null : ((g.getAttribute('aFlow') as THREE.BufferAttribute).array as Float32Array);
     let v = 0;
     let i = 0;
     for (const c of chunks.values()) {
@@ -124,6 +126,7 @@ class RibbonBatch {
         }
       }
       if (sa) for (let k = 0; k < n; k++) sa[v + k] = shoreFoam(c.data, p[k * 3]!, p[k * 3 + 1]!, p[k * 3 + 2]!);
+      if (fa) fa.set(chunkFlow(c.data), v * 2);
       const ix = r.indices;
       for (let k = 0; k < ix.length; k++) ia[i + k] = ix[k]! + v;
       v += n;
@@ -133,6 +136,7 @@ class RibbonBatch {
     idx.needsUpdate = true;
     if (ra) g.getAttribute('aRoad').needsUpdate = true;
     if (sa) g.getAttribute('aShore').needsUpdate = true;
+    if (fa) g.getAttribute('aFlow').needsUpdate = true;
     g.setDrawRange(0, i);
     this.mesh.visible = i > 0;
   }
@@ -147,6 +151,8 @@ class RibbonBatch {
       g.setAttribute('aRoad', new THREE.BufferAttribute(new Float32Array(nv * 2), 2).setUsage(THREE.DynamicDrawUsage));
     } else {
       g.setAttribute('aShore', new THREE.BufferAttribute(new Float32Array(nv), 1).setUsage(THREE.DynamicDrawUsage));
+      // river flow along the generator's water surface (docs/12), m/s
+      g.setAttribute('aFlow', new THREE.BufferAttribute(new Float32Array(nv * 2), 2).setUsage(THREE.DynamicDrawUsage));
     }
     g.setIndex(new THREE.BufferAttribute(new Uint32Array(ni), 1).setUsage(THREE.DynamicDrawUsage));
     this.mesh.geometry = g;
@@ -164,6 +170,30 @@ export function upNormals(nv: number): THREE.BufferAttribute {
   const n = new Float32Array(nv * 3);
   for (let k = 0; k < nv; k++) n[k * 3 + 1] = 1;
   return new THREE.BufferAttribute(n, 3);
+}
+
+const flowCache = new WeakMap<ChunkData, Float32Array>();
+
+/** Per-vertex river flow of a chunk's water mesh (computed once per chunk). */
+export function chunkFlow(d: ChunkData): Float32Array {
+  let f = flowCache.get(d);
+  if (f) return f;
+  const p = d.water.positions;
+  const n = p.length / 3;
+  const depth = new Float32Array(n);
+  for (let k = 0; k < n; k++) depth[k] = waterDepth(d, p[k * 3]!, p[k * 3 + 1]!, p[k * 3 + 2]!);
+  f = waterFlow(p, d.water.indices, depth);
+  flowCache.set(d, f);
+  return f;
+}
+
+/** Water depth (m) of a water vertex at chunk-local (x, z) over the chunk's own ground grid. */
+function waterDepth(d: ChunkData, x: number, y: number, z: number): number {
+  const side = d.gridSize;
+  const step = CHUNK_SIZE / (side - 1);
+  const i = Math.min(side - 1, Math.max(0, Math.round(x / step)));
+  const j = Math.min(side - 1, Math.max(0, Math.round(z / step)));
+  return y - d.positions[(j * side + i) * 3 + 1]!;
 }
 
 /** water this shallow (m) over the chunk grid's ground foams at full strength; deeper fades out by FOAM_DEPTH */

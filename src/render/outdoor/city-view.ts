@@ -14,6 +14,7 @@ import { instancedMaterials, type InstanceUniforms } from './terrain-materials';
 import { carModel, LAMP_HEX, streetLightModel, unitBox, unitCylinder } from './scatter-models';
 import { CAR_STRIDE, KERB_STRIDE, LIGHT_STRIDE, type CityFurniture } from '../../levels/city-furniture';
 import type { MaterialSource } from '../materials/library';
+import { CITY_RIVER_FLOW } from '../../world/life/water-flow';
 
 /** roof detail (parapets, vents, skylights): within this distance of the drone, on roofs up to this height, m */
 const ROOF_DETAIL_RANGE = 150;
@@ -26,6 +27,7 @@ const KIND_SHIFT = 1048576;
 export const BUILDING_KIND = { building: 0, slab: 1, skybridge: 2, outskirts: 3 } as const;
 
 const FACADE_PARS = /* glsl */ `
+uniform float uTime;
 uniform float uDusk;
 uniform float uLit;
 uniform sampler2D uDetail;
@@ -150,7 +152,10 @@ if ( n.y > 0.5 ) {
   // glass: dark interiors (some with lighter blinds) behind a reflective pane
   vec3 glass = style == 0.0 ? glassTint * ( 0.75 + 0.5 * rnd ) : mix( srgb( 0.05, 0.055, 0.065 ) * ( 0.6 + 0.9 * rnd ), srgb( 0.42, 0.39, 0.34 ), step( 0.86, rnd ) * ( 1.0 - isStore ) );
   float litP = isStore > 0.5 ? 0.12 + 0.75 * uDusk : uDusk * uDusk * 0.55 + 0.01;
-  float lit = step( fh3( vec3( floorI + 17.0 * isStore, colI + 3.7, seedK * 1.37 + faceI ) ), litP );
+  // living windows (docs/12): one room in five switches its light now and then (each on its own slow clock)
+  float tog = step( 0.8, fh3( vec3( colI * 1.31 + 5.0, floorI * 0.71 + 2.0, seedK + faceI * 1.7 ) ) );
+  float epoch = tog * floor( uTime / ( 25.0 + 70.0 * rnd ) + rnd * 11.0 );
+  float lit = step( fh3( vec3( floorI + 17.0 * isStore, colI + 3.7 + mod( epoch, 97.0 ) * 0.37, seedK * 1.37 + faceI ) ), litP );
   vec3 warm = mix( vec3( 1.0, 0.7, 0.4 ), vec3( 0.85, 0.9, 1.0 ), step( 0.75, rnd ) );
   // a lit room glows, it does not outshine the sky: dimmer than the sunlit wall, a spread of warm tones
   vec3 litCol = warm * ( 0.32 + 0.42 * rnd ) * ( isStore > 0.5 ? 1.1 : 0.75 );
@@ -588,5 +593,13 @@ export function cityRiverGeometry(reach = 2600): THREE.BufferGeometry {
   const g = new THREE.PlaneGeometry(r.halfWidth * 2, reach * 2, 1, 8);
   g.rotateX(-Math.PI / 2);
   g.translate(r.x, r.level, 0);
+  // the river runs south (docs/12): its level surface gives no slope to follow
+  const n = g.getAttribute('position').count;
+  const flow = new Float32Array(n * 2);
+  for (let k = 0; k < n; k++) {
+    flow[k * 2] = CITY_RIVER_FLOW[0];
+    flow[k * 2 + 1] = CITY_RIVER_FLOW[1];
+  }
+  g.setAttribute('aFlow', new THREE.BufferAttribute(flow, 2));
   return g;
 }
