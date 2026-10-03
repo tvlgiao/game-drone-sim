@@ -76,6 +76,8 @@ export interface GameViewOptions {
   xr?: boolean;
   /** MSAA on the default framebuffer; the XR layer inherits it (headsets need it, post FX does not) */
   antialias?: boolean;
+  /** the first level waits for `prepare()` (capture, post warm-up): the boot readies it in steps */
+  deferred?: boolean;
 }
 
 type WorldViews = typeof import('./outdoor/world-level-view');
@@ -235,7 +237,7 @@ export class GameView {
     this.rings = new RingsView(level.def.rings);
     this.attachLevel(level);
 
-    this.applyQuality();
+    this.applyQuality(opts.deferred === true);
     this.resize(canvas.clientWidth || window.innerWidth, canvas.clientHeight || window.innerHeight);
   }
 

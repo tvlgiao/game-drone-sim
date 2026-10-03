@@ -358,19 +358,27 @@ room, a progress ring and the level name 1.4 m in front of the head, drawn every
 
 The bar (`LoadProgress`) is the weighted sum of the stages' own fractions, never goes back, creeps inside a
 silent stage (never past 85 % of it) so it is never still, and ends at exactly 100 %. The hand-off: the bar
-fills, Free Fly says "Ready" (650 ms), the screen fades (400 ms; none with `prefers-reduced-motion`) over the
-already rendering scene; physics are held and arming is refused until it is gone, and a Race counts down
-3-2-1-GO with the drone disarmed. Dynamic resolution ignores the load and the 1.5 s after it.
+closes fast once the load is done, Free Fly says "Ready" (220 ms), then control goes back to the pilot and the
+screen fades (400 ms, pointer-transparent; none with `prefers-reduced-motion`) over the live scene: about 0.35 s
+from a loaded level to control in Free Fly (was 1.5 s), 0.12 s before a Race's countdown starts (was 0.9 s).
+Until then physics are held and arming is refused; a Race counts down 3-2-1-GO (with its beeps) with the drone
+disarmed. Dynamic resolution ignores the load and the 1.5 s after it.
 
-Boot: the splash bar follows the boot (bundle → "Building level" → "Opening menu", the last one painted before
-the first, compiling frame); the boot level's flight programs are compiled behind the menu (`warmPrograms`).
+Audio (docs/11): the music keeps playing through a load on the menu layers under a low-pass (`setLoading`), the
+new level's ambience comes with the swap and its theme at the hand-off (`setLevel(level, true)` + `levelMusic()`),
+so a level never starts from silence; the loading screen's buttons click on the ui bus.
+
+Boot: the splash bar follows the boot (bundle → textures → level → shaders → lighting → menu). The boot level's
+procedural texture sets come from the texture worker before the view is built (`prefetchLevelSurfaces`), the
+view is built deferred and readied by `prepare()` in steps (no frame draws it meanwhile), and its flight
+programs are compiled behind the menu (`warmPrograms`): the boot's longest task 1.4 s → ~0.25 s on desktop.
 
 ### 12.1 Measured (2026-10-03, Apple-silicon Mac under load; before = 4c7479b)
 
 Click on a level card → first visual change / first flyable frame (ms) and the longest main-thread task during
 the load (iPhone: WebKit has no Long Tasks API, the longest gap between animation frames instead). Cold = first
-load of the level in the page, warm = again after another level. The Free Fly hand-off ("Ready" + fade,
-~1.05 s) follows the flyable frame. Full table and scripts: scratchpad `wi/loading/`.
+load of the level in the page, warm = again after another level. The Free Fly hand-off (~0.35 s to control)
+follows the flyable frame. Full table and scripts: scratchpad `wi/loading/`.
 
 | level | device | visual | flyable | longest task |
 | --- | --- | --- | --- | --- |
@@ -384,5 +392,5 @@ load of the level in the page, warm = again after another level. The Free Fly ha
 | City cold | Quest UA | 1242 → 26 | 1500 → 608 | 1232 → 84 |
 
 Desktop: no task over 200 ms in any load (was up to 2.3 s); the main bundle is 1.46 MB → 1.17 MB + a
-three.js core chunk (251 kB, shared with the worker) and the 69 kB world renderer chunk. The boot itself
-still builds its level in one task (~1.4 s on desktop) behind the splash.
+three.js core chunk (251 kB, shared with the worker) and the 69 kB world renderer chunk. Re-picking the level already
+loaded: longest task 188 → 63 ms.

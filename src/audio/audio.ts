@@ -18,7 +18,7 @@ import { impulseResponse, noise, type NoiseColour } from './dsp';
 import { ceilingCurve, glide, liveNodes, placeListener, Scope, type NodeStats } from './graph';
 import { BUSES, busGains, crashDuckDb, duckGain, masterGain, motorDuckDb, type BusName, type MixSettings } from './mix';
 import { MotorSound, type MotorFrame } from './motor';
-import { MusicDirector, type MusicInputs, type MusicState } from './music/director';
+import { MusicDirector, musicMix, type MusicInputs, type MusicMix, type MusicState } from './music/director';
 import { MusicPlayer } from './music/player';
 import type { OfflineFactory } from './music/render';
 import { songFor } from './music/songs';
@@ -90,6 +90,9 @@ const CELL_CRIT = 3.3;
 const COMBO_WINDOW = 2.6;
 /** pentatonic climb of the ring chime with the combo */
 const COMBO_STEPS = [0, 2, 4, 7, 9, 12, 14, 16, 19, 21, 24];
+/** Music while a level loads: the menu's layers, muffled and a little down (setLoading). */
+const LOADING_MIX: MusicMix = { ...musicMix('menu'), cutoff: 1600, gainDb: -6, glide: 0.6 };
+
 /** matrixWorld entries the listener uses: up (4–6), back (8–10), position (12–14) */
 const EYE_INDICES = [4, 5, 6, 8, 9, 10, 12, 13, 14] as const;
 
@@ -114,6 +117,10 @@ export class GameAudio {
   private motor: MotorSound | null = null;
   private music: MusicPlayer | null = null;
   private readonly director = new MusicDirector();
+  /** a level load is on screen: the music holds a muffled calm mix (never silence, never the old level's beat) */
+  private loading = false;
+  /** the new level's song waits for the hand-off (`levelMusic`) */
+  private songPending = false;
   private levelScope: Scope | null = null;
   private ambience: Ambience | null = null;
   private retiring: { scope: Scope; at: number }[] = [];
@@ -331,11 +338,32 @@ export class GameAudio {
 
   // --- level ---------------------------------------------------------------------------------------------------
 
-  /** Switches ambience, reverb and music to `level` (old level fades out and is disposed). */
-  setLevel(level: AudioLevel): void {
+  /**
+   * Switches ambience, reverb and music to `level` (old level fades out and is disposed). `deferMusic`: the song
+   * stays until `levelMusic()` (a load swaps the level behind its loading screen; the theme starts at the hand-off).
+   */
+  setLevel(level: AudioLevel, deferMusic = false): void {
     this.level = level;
     this.levelToken++;
+    this.songPending = deferMusic;
     if (this.ctx) this.buildLevel();
+  }
+
+  /** The level's song from now (the loading screen's hand-off); no-op when it already plays. */
+  levelMusic(): void {
+    if (!this.songPending) return;
+    this.songPending = false;
+    if (this.level) this.music?.setSong(songFor(this.level.def.id));
+  }
+
+  /**
+   * A level load on screen: the music glides to the menu layers under a low-pass and a few dB down, and back to the
+   * game's own mix when it ends. It keeps playing through the swap, so the level never starts from silence.
+   */
+  setLoading(on: boolean): void {
+    if (on === this.loading) return;
+    this.loading = on;
+    this.music?.setMix(on ? LOADING_MIX : this.director.current());
   }
 
   private buildLevel(): void {
@@ -354,7 +382,7 @@ export class GameAudio {
     }
     this.profile = ambienceFor(level.def.id, this.tier.lite);
     this.probe = level.terrain ? levelProbe(level, this.tier.lite) : FLAT_PROBE;
-    this.music?.setSong(songFor(level.def.id));
+    if (!this.songPending) this.music?.setSong(songFor(level.def.id));
     const profile = this.profile;
     const needed = profileSounds(profile).filter((id) => !this.bank.has(id));
     const make = (): void => {
@@ -469,7 +497,7 @@ export class GameAudio {
     });
     this.music = new MusicPlayer(ctx, this.stats, root, this.musicDuck, this.offline, this.tier.lite);
     this.music.setEnabled(this.mixSettings.musicOn && this.mixSettings.music > 0);
-    this.music.setMix(this.director.current());
+    this.music.setMix(this.loading ? LOADING_MIX : this.director.current());
     if (this.offline) void renderBank(CORE_SFX, this.bankRate(), this.offline, this.bank);
     if (this.level) this.buildLevel();
   }
@@ -575,7 +603,7 @@ export class GameAudio {
     mi.time = race.time;
     mi.bestTime = race.bestTime;
     const mix = this.director.update(mi);
-    if (mix && this.music) this.music.setMix(mix);
+    if (mix && this.music && !this.loading) this.music.setMix(mix);
     this.music?.tick();
     let mean = 0;
     for (let i = 0; i < 4; i++) mean += drone.motors[i] ?? 0;
@@ -700,7 +728,7 @@ export class GameAudio {
 
   /** Listens to the menus under `root`: focus moves (pointer, keys, pad) tick, buttons click. */
   attachUi(root: HTMLElement): () => void {
-    const BACK = new Set(['back', 'menu', 'cancel', 'resume']);
+    const BACK = new Set(['back', 'menu', 'cancel', 'resume', 'load-back']);
     const onClick = (ev: Event): void => {
       const el = (ev.target as HTMLElement | null)?.closest?.<HTMLElement>('[data-act], [data-dir]');
       if (!el) return;

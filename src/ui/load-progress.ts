@@ -20,6 +20,8 @@ export const CREEP_SHARE = 0.85;
 export const CREEP_MS = 1400;
 /** easing time constant of the shown value towards the goal (ms) */
 export const EASE_MS = 120;
+/** once everything is done the bar closes the rest this fast (ms): the hand-off does not wait on a slow tail */
+export const EASE_DONE_MS = 40;
 
 export class LoadProgress {
   private readonly stages: readonly LoadStage[];
@@ -97,7 +99,7 @@ export class LoadProgress {
       const silent = Math.max(0, now - this.reportedAt);
       goal = target + (this.stageEnd - target) * CREEP_SHARE * (1 - Math.exp(-silent / CREEP_MS));
     }
-    const k = 1 - Math.exp(-dt / EASE_MS);
+    const k = 1 - Math.exp(-dt / (this.done ? EASE_DONE_MS : EASE_MS));
     let next = this.shown + (goal - this.shown) * k;
     // never stall on a sub-pixel tail: finish the last bit once very close
     if (this.done && 1 - next < 0.002) next = 1;

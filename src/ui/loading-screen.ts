@@ -34,7 +34,7 @@ export const PILOT_TIPS: readonly string[] = [
 
 const TIP_MS = 4500;
 const FADE_MS = 400;
-const READY_MS = 650;
+const READY_MS = 220;
 /** aria-valuenow updates at most this often (screen readers do not want 60 per second) */
 const ARIA_MS = 250;
 
@@ -66,6 +66,8 @@ export class LoadingScreen {
   /** Back / Esc / gamepad B while loading or after an error */
   onCancel: (() => void) | null = null;
   private state: 'hidden' | 'loading' | 'error' | 'finishing' = 'hidden';
+  /** the hand-off has released control (the fade is running) */
+  private releasing = false;
 
   constructor(parent: HTMLElement) {
     const root = document.createElement('div');
@@ -238,9 +240,10 @@ export class LoadingScreen {
    * Success: the bar runs to 100 %, "Ready" shows for Free Fly (`ready`), then the screen fades into the scene over
    * FADE_MS (instantly with reduced motion). Resolves once it is gone.
    */
-  async finish(ready: boolean): Promise<void> {
+  async finish(ready: boolean, onControl?: () => void): Promise<void> {
     if (this.state !== 'loading' || !this.progress) return;
     this.state = 'finishing';
+    this.releasing = false;
     this.progress.complete();
     this.back.hidden = true;
     const reduced = reducedMotion();
@@ -255,11 +258,20 @@ export class LoadingScreen {
       await new Promise((r) => setTimeout(r, reduced ? 250 : READY_MS));
     }
     if (this.gone) return;
+    // the pilot has the drone from here: the fade runs over a live, controllable scene
+    this.releasing = true;
+    onControl?.();
     if (!reduced) {
       this.root.classList.add('is-fading');
       await new Promise((r) => setTimeout(r, FADE_MS));
     }
+    if (this.gone) return;
     this.hide();
+  }
+
+  /** up and taking input (loading, failed, or the hand-off before control is released) */
+  get blocking(): boolean {
+    return this.state !== 'hidden' && !this.releasing;
   }
 
   /** hidden (a cancel or another load may hide it while finish() waits) */
@@ -269,6 +281,7 @@ export class LoadingScreen {
 
   hide(): void {
     this.state = 'hidden';
+    this.releasing = false;
     cancelAnimationFrame(this.raf);
     this.root.hidden = true;
     this.root.classList.remove('is-fading', 'is-error');

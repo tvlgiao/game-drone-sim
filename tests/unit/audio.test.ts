@@ -628,3 +628,42 @@ describe('settings: sound', () => {
     expect(validateSettings({ musicOn: 'no' }).musicOn).toBe(true);
   });
 });
+
+describe('level loads', () => {
+  it('music stays on, muffled, through a load; the new theme starts at the hand-off', async () => {
+    const { a, ctx } = await engine('training');
+    a.frame(drone([0, 0, 0, 0], false), race('freefly'), 'los', EYE);
+    const open = a.debug().music;
+    const song0 = open.song;
+    expect(song0).not.toBeNull();
+    a.setLoading(true);
+    const muffled = a.debug().music;
+    expect(muffled.cutoff).toBeLessThan(2000);
+    expect(muffled.level).toBeGreaterThan(0); // quieter, never silent
+    expect(muffled.level).toBeLessThan(open.level);
+    // the level swaps behind the loading screen: its ambience now, its song later
+    a.setLevel({ def: { id: 'night-loft' }, terrain: null }, true);
+    await flush();
+    expect(a.debug().music.song).toBe(song0);
+    // the game's state moves on (freefly → countdown) without lifting the loading mix
+    ctx.currentTime += 0.2;
+    a.frame(drone([0, 0, 0, 0], false), race('countdown'), 'los', EYE);
+    expect(a.debug().music.cutoff).toBeLessThan(2000);
+    // hand-off
+    a.levelMusic();
+    a.setLoading(false);
+    expect(a.debug().music.song).not.toBe(song0);
+    expect(a.debug().music.cutoff).toBeGreaterThan(5000); // the countdown mix
+    // a second call does not restart the song
+    const song1 = a.debug().music.song;
+    a.levelMusic();
+    expect(a.debug().music.song).toBe(song1);
+  });
+
+  it('a plain level switch (no load screen) changes the song at once', async () => {
+    const { a } = await engine('training');
+    const song0 = a.debug().music.song;
+    a.setLevel({ def: { id: 'night-loft' }, terrain: null });
+    expect(a.debug().music.song).not.toBe(song0);
+  });
+});

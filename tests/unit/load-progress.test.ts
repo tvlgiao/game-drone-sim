@@ -111,6 +111,18 @@ describe('LoadProgress shown value', () => {
     expect(v).toBeLessThanOrEqual(start + (end - start) * CREEP_SHARE + 1e-9);
   });
 
+  it('closes the rest fast once complete (the hand-off does not wait on a tail)', () => {
+    const p = new LoadProgress(STAGES, 0);
+    p.report('c', 0.2, 0);
+    let t = 0;
+    for (; t < 500; t += 16) p.tick(t);
+    expect(p.shownValue).toBeLessThan(0.95);
+    p.complete();
+    const start = t;
+    while (p.tick(t) < 1 && t - start < 2000) t += 16;
+    expect(t - start).toBeLessThanOrEqual(300);
+  });
+
   it('reaches exactly 1 after complete()', () => {
     const p = new LoadProgress(STAGES, 0);
     p.report('a', 1, 0);

@@ -15,7 +15,7 @@ interface Hook {
   armed: boolean;
   renders: number;
   race: { status: string };
-  loading: { visible: boolean; loading: boolean; value: number; handoff: boolean };
+  loading: { visible: boolean; blocking: boolean; loading: boolean; value: number; handoff: boolean };
   action: (a: Record<string, unknown>) => void;
   showScreen: (s: string) => void;
   press: (b: string) => void;
@@ -47,11 +47,11 @@ async function openLevels(page: Page): Promise<void> {
 /** Records, every animation frame, the loading screen's value and visibility (window.__samples). */
 async function sampleLoading(page: Page): Promise<void> {
   await page.evaluate(() => {
-    const w = window as unknown as { __samples: { t: number; v: number; vis: boolean; armed: boolean; status: string }[]; __drone: Hook };
+    const w = window as unknown as { __samples: { t: number; v: number; vis: boolean; blocking: boolean; armed: boolean; status: string }[]; __drone: Hook };
     w.__samples = [];
     const tick = (): void => {
       const d = w.__drone;
-      w.__samples.push({ t: performance.now(), v: d.loading.value, vis: d.loading.visible, armed: d.armed, status: d.race.status });
+      w.__samples.push({ t: performance.now(), v: d.loading.value, vis: d.loading.visible, blocking: d.loading.blocking, armed: d.armed, status: d.race.status });
       requestAnimationFrame(tick);
     };
     requestAnimationFrame(tick);
@@ -160,11 +160,11 @@ test('the drone cannot be armed during the hand-off, nor before a Race says GO',
   await expect.poll(() => hook(page, (d) => d.race.status), { timeout: 45_000 }).toBe('racing');
   await expect.poll(() => hook(page, (d) => d.armed), { timeout: 3000 }).toBe(true);
   await page.evaluate(() => clearInterval((window as unknown as { __arming: number }).__arming));
-  const samples = await page.evaluate(() => (window as unknown as { __samples: { vis: boolean; armed: boolean; status: string }[] }).__samples);
-  expect(samples.some((s) => s.vis)).toBe(true);
+  const samples = await page.evaluate(() => (window as unknown as { __samples: { blocking: boolean; armed: boolean; status: string }[] }).__samples);
+  expect(samples.some((s) => s.blocking)).toBe(true);
   expect(samples.some((s) => s.status === 'countdown')).toBe(true);
   // armed only once the race runs: never under the loading screen, never in the countdown
-  expect(samples.filter((s) => s.armed && (s.vis || s.status !== 'racing'))).toEqual([]);
+  expect(samples.filter((s) => s.armed && (s.blocking || s.status !== 'racing'))).toEqual([]);
 
   // Free Fly: the hand-off ("Ready" and the fade) refuses arming too
   await hook(page, (d) => d.press('arm')); // disarm
@@ -182,10 +182,22 @@ test('the drone cannot be armed during the hand-off, nor before a Race says GO',
   await expect.poll(() => hook(page, (d) => [d.level, d.loading.visible, d.race.status]), { timeout: 45_000 }).toEqual(['training', false, 'freefly']);
   await expect.poll(() => hook(page, (d) => d.armed), { timeout: 3000 }).toBe(true);
   await page.evaluate(() => clearInterval((window as unknown as { __arming: number }).__arming));
-  const ff = await page.evaluate(() => (window as unknown as { __samples: { vis: boolean; armed: boolean }[] }).__samples);
-  expect(ff.some((s) => s.vis)).toBe(true);
-  expect(ff.filter((s) => s.armed && s.vis)).toEqual([]);
+  const ff = await page.evaluate(() => (window as unknown as { __samples: { blocking: boolean; armed: boolean }[] }).__samples);
+  expect(ff.some((s) => s.blocking)).toBe(true);
+  expect(ff.filter((s) => s.armed && s.blocking)).toEqual([]);
   expect(errors).toEqual([]);
+});
+
+test('Free Fly hands control over within 0.5 s of the loaded level, then fades', async ({ page }) => {
+  await boot(page);
+  await hook(page, (d) => d.action({ type: 'level', id: 'night-loft', mode: 'freefly' }));
+  await page.waitForFunction(() => performance.getEntriesByName('handoff:control').length > 0, null, { timeout: 45_000 });
+  const ms = await page.evaluate(() => performance.getEntriesByName('handoff:control')[0]!.startTime - performance.getEntriesByName('handoff:start')[0]!.startTime);
+  test.info().annotations.push({ type: 'hand-off (ms)', description: ms.toFixed(0) });
+  expect(ms).toBeLessThanOrEqual(500);
+  // the fade is still running over the controllable scene
+  expect(await hook(page, (d) => [d.loading.visible, d.loading.blocking])).toEqual([true, false]);
+  await expect.poll(() => hook(page, (d) => d.loading.visible)).toBe(false);
 });
 
 test('no long frozen frame while a level loads (desktop long-task budget)', async ({ page, browserName }) => {

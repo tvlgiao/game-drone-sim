@@ -27,7 +27,7 @@ import type { LevelId } from '../../types';
 import { CC0_SETS, LEVEL_TEXTURE_SETS, cc0Url, type Cc0SetId, type PbrMapName } from './assets';
 import { grungeOrm } from './generators';
 import { applyEnvPatch, isEmptyPatch, type EnvPatch } from './patches';
-import { GENERATED, setPixels, setTextures, type SurfaceKind } from './set-pixels';
+import { GENERATED, setPixels, setTextures, type SetPixels, type SurfaceKind } from './set-pixels';
 import { TextureWorkerClient } from './texture-client';
 import { texSize } from './texgen';
 
@@ -225,6 +225,35 @@ const defaultFetcher: TextureFetcher = async (url) => {
 };
 
 /** Library presets each level builds with (texture sets to have ready before its scenery is built). */
+/** Procedural sets made before any library exists (the boot), by `kind|size`; the first library takes them. */
+const PREFETCHED = new Map<string, SetPixels>();
+/** the boot's texture worker, handed to the first library */
+let bootWorker: TextureWorkerClient | null = null;
+
+/**
+ * Generates the procedural sets `level` draws with, at `textureSize`, in the texture worker before the game view is
+ * built: the boot then binds ready pixels instead of generating them on the main thread (a long frozen splash).
+ */
+export async function prefetchLevelSurfaces(level: LevelId, textureSize: number): Promise<void> {
+  const kinds = new Set<SurfaceKind>();
+  for (const name of LEVEL_SURFACES[level] ?? []) {
+    const kind = PRESETS[name].kind;
+    if (kind) kinds.add(kind);
+  }
+  const worker = (bootWorker ??= new TextureWorkerClient());
+  await Promise.all(
+    [...kinds].map(async (kind) => {
+      const key = `${kind}|${textureSize}`;
+      if (PREFETCHED.has(key)) return;
+      try {
+        PREFETCHED.set(key, await worker.build(kind, textureSize));
+      } catch {
+        // generated on first use instead
+      }
+    }),
+  );
+}
+
 export const LEVEL_SURFACES: Readonly<Partial<Record<LevelId, readonly PresetName[]>>> = {
   'night-loft': ['slab', 'brick', 'paintedBrick', 'wood', 'plaster', 'concrete'],
   training: ['grass', 'gravel', 'asphalt', 'bark', 'foliage', 'needles'],
@@ -323,7 +352,8 @@ export class MaterialLibrary implements MaterialSource {
     this._profile = profile;
     this.anisotropy = Math.min(opts.anisotropy ?? 4, 8);
     this.fetcher = opts.fetcher ?? defaultFetcher;
-    this.textureWorker = opts.textureWorker ?? new TextureWorkerClient();
+    this.textureWorker = opts.textureWorker ?? bootWorker ?? new TextureWorkerClient();
+    bootWorker = null;
   }
 
   get profile(): QualityProfile {
@@ -633,7 +663,10 @@ export class MaterialLibrary implements MaterialSource {
   private proceduralSet(kind: SurfaceKind): TextureSet {
     let set = this.procedural.get(kind);
     if (!set) {
-      set = setTextures(setPixels(kind, this._profile.textureSize), this.anisotropy);
+      const key = `${kind}|${this._profile.textureSize}`;
+      const ready = PREFETCHED.get(key);
+      PREFETCHED.delete(key);
+      set = setTextures(ready ?? setPixels(kind, this._profile.textureSize), this.anisotropy);
       this.procedural.set(kind, set);
     }
     return set;
