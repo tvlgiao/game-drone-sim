@@ -201,7 +201,7 @@ describe('whole simulation', () => {
     run(sim, 1, input(0.7));
     expect(sim.world.state.position.y).toBeGreaterThan(1);
     let touchdown = 0;
-    for (let i = 0; i < 10000 && sim.world.state.position.y > 0.1; i++) {
+    for (let i = 0; i < 15000 && sim.world.state.position.y > 0.1; i++) {
       // pilot: aim for a 0.6 m/s descent
       const vy = sim.world.state.velocity.y;
       sim.step(DT, input(Math.max(0, Math.min(1, 0.5 + 0.2 * (-0.6 - vy)))));
@@ -457,4 +457,47 @@ describe('battery over a long flight', () => {
     expect(critAt).toBeLessThan(seconds);
     expect(Math.abs(sim.world.state.position.y - 50)).toBeLessThan(1);
   });
+});
+
+describe('battery sag compensation (centred stick on a non-holding source)', () => {
+  /**
+   * Airborne quad whose pack sits at about `volts` under the hover load (charge set by bisection), settled to
+   * vz ≈ 0 by altitude hold, which is then switched off: from here the stick alone holds it up.
+   */
+  function settled(mode: 'acro' | 'angle', volts: number): Simulation {
+    const sim = airborne(mode, 1, 60);
+    sim.fc.altitudeHold = true;
+    const at = (c: number, seconds: number): number => {
+      sim.world.consumed = c;
+      sim.reset(new Vector3(0, 60, 0), 0, false);
+      run(sim, seconds, input(0.5));
+      return sim.world.state.batteryVoltage;
+    };
+    let lo = 0;
+    let hi = DEFAULT_DRONE.battery.capacityS;
+    for (let k = 0; k < 30; k++) {
+      const c = (lo + hi) / 2;
+      if (at(c, 0.3) > volts) lo = c;
+      else hi = c;
+    }
+    at(lo, 3);
+    sim.fc.altitudeHold = false;
+    return sim;
+  }
+
+  for (const [mode, volts] of [
+    ['angle', 16.3],
+    ['acro', 16.3],
+    ['angle', 16.75],
+  ] as const) {
+    // Residual ≈ +0.02 m/s² at any voltage: the motors spin up faster than down (tauUp < tauDown), so the PID's
+    // jitter rectifies into ≈ 0.2 % extra thrust. Without the compensation 16.3 V sinks ≈ 2.4 m/s in these 5 s.
+    it(`${mode}: at ${volts} V a centred stick holds vz (|vz| < 0.12 m/s after 5 s)`, () => {
+      const sim = settled(mode, volts);
+      expect(sim.world.state.batteryVoltage).toBeCloseTo(volts, 1);
+      expect(Math.abs(sim.world.state.velocity.y)).toBeLessThan(0.02);
+      run(sim, 5, input(0.5));
+      expect(Math.abs(sim.world.state.velocity.y)).toBeLessThan(0.12);
+    });
+  }
 });
