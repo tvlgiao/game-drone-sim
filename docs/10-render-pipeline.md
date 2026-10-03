@@ -312,6 +312,7 @@ terrain shader, water shader and drone-following shadow box are gone or demoted.
 | trees | near: the Training archetypes (`outdoor/world-trees.ts`; broadleaf → oak, birch → birch, conifer → pine, scrub → small oak): bark + leaf cards / needles on ultra / high (2 draws per species), the opaque masses on medium, none on low / VR. They cast through their opaque masses drawn only inside shadow passes (`onBeforeShadow` lifts the instance count from 0), not through every card. Far: X1's impostors with an atlas baked from the same archetypes (`bakeImpostorAtlas`), so a tree keeps colour and outline across the swap. Nearest 180 / 70 / 90 trees (ultra / high / medium), City within 80 m |
 | rings | the shared `RingsView` with the look's `ringGain` (day 2.2–2.3, golden 1.9, dawn 1.8, dusk 1.5) |
 | view distance | Settings → View distance × the adaptive step: `scaledProfile(profile, k)` — short 0.5, medium 0.75, long 1.3 (fog and the batched backdrop only; the streamed radius keeps the tier's budget) |
+| life | traffic, birds, roof and countryside life, river flow, gusts, the loft's neon / bulb / router: `render/life/**`, per-tier budgets and measured cost in docs/12 |
 
 ### 11.1 renderer.info per frame (2026-10-03, Apple-silicon Mac, ANGLE/Metal)
 

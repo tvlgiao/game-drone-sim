@@ -17,6 +17,8 @@ export const TURBINE_CELL = 640;
 export const TURBINE_SPACING = 120;
 /** a turbine's tower collider */
 export const TURBINE_RADIUS = 1.7;
+/** alpine pastures: one herd candidate per cell of this size (m) */
+export const PASTURE_CELL = 400;
 
 export interface Herd {
   /** animal positions x, y, z, yaw (4 per animal) */
@@ -52,7 +54,7 @@ const open = (b: BiomeSample, maxSlope: number): boolean => (b.biome === BIOME.m
  * Life within `radius` of (x, z). `windYaw`: rotation about +Y that faces the wind (turbines turn their rotor into
  * it). `turbines`: rows of wind turbines (Infinite only; the Alpine valley has none).
  */
-export function countrysideAround(world: World, x: number, z: number, radius: number, windYaw: number, opts: { turbines: boolean; sheep: boolean } = { turbines: true, sheep: true }): CountrysideLife {
+export function countrysideAround(world: World, x: number, z: number, radius: number, windYaw: number, opts: { turbines: boolean; sheep: boolean; pastures?: boolean } = { turbines: true, sheep: true }): CountrysideLife {
   const seed = world.spec.seed >>> 0;
   const field = world.field;
   const b = biomeSample();
@@ -75,9 +77,10 @@ export function countrysideAround(world: World, x: number, z: number, radius: nu
     }
     // a herd on open grass beside the village
     if (u01(hv) < 0.75) {
-      for (let t = 0; t < 8; t++) {
+      // near the village first, further out (Alpine hamlets sit in the forest) on later tries
+      for (let t = 0; t < 16; t++) {
         const a = u01(rehash(hv, 10 + t)) * TAU;
-        const d = v.radius + 50 + 70 * u01(rehash(hv, 20 + t));
+        const d = v.radius + 50 + (70 + 25 * t) * u01(rehash(hv, 20 + t));
         const cx = v.x + dcos(a) * d;
         const cz = v.z + dsin(a) * d;
         field.biomeAt(cx, cz, b);
@@ -100,9 +103,9 @@ export function countrysideAround(world: World, x: number, z: number, radius: nu
     // the tractor works a field by the village nearest to the point
     const dv = (v.x - x) * (v.x - x) + (v.z - z) * (v.z - z);
     if (dv < nearest) {
-      for (let t = 0; t < 10; t++) {
+      for (let t = 0; t < 16; t++) {
         const a = u01(rehash(hv, 60 + t)) * TAU;
-        const d = v.radius + 70 + 90 * u01(rehash(hv, 70 + t));
+        const d = v.radius + 70 + (90 + 25 * t) * u01(rehash(hv, 70 + t));
         const cx = v.x + dcos(a) * d;
         const cz = v.z + dsin(a) * d;
         const yaw = u01(rehash(hv, 80 + t)) * TAU;
@@ -129,6 +132,34 @@ export function countrysideAround(world: World, x: number, z: number, radius: nu
         nearest = dv;
         out.tractor = { x: cx, z: cz, yaw, halfW: 22, halfL: 32 };
         break;
+      }
+    }
+  }
+  // alpine pastures: cows on the open meadows away from the villages, one candidate per PASTURE_CELL
+  if (opts.pastures) {
+    const p0 = Math.floor((x - radius) / PASTURE_CELL);
+    const p1 = Math.floor((x + radius) / PASTURE_CELL);
+    const q0 = Math.floor((z - radius) / PASTURE_CELL);
+    const q1 = Math.floor((z + radius) / PASTURE_CELL);
+    for (let i = p0; i <= p1; i++) {
+      for (let j = q0; j <= q1; j++) {
+        const h = hash2(seed, i, j, SALT_LIFE + 9);
+        if (u01(h) > 0.6) continue;
+        const cx = (i + 0.15 + 0.7 * u01(rehash(h, 1))) * PASTURE_CELL;
+        const cz = (j + 0.15 + 0.7 * u01(rehash(h, 2))) * PASTURE_CELL;
+        field.biomeAt(cx, cz, b);
+        if (!open(b, 0.25) || b.road > 0.2 || b.village > 0.1) continue;
+        const herd: Herd = { animals: [], kind: 0, x: cx, z: cz };
+        const n = 4 + Math.floor(u01(rehash(h, 3)) * 6);
+        for (let k = 0; k < n; k++) {
+          const ai = rehash(h, 40 + k);
+          const ax = cx + (u01(ai) - 0.5) * 30;
+          const az = cz + (u01(rehash(ai, 1)) - 0.5) * 30;
+          field.biomeAt(ax, az, b);
+          if (!open(b, 0.32)) continue;
+          herd.animals.push(ax, field.heightAt(ax, az), az, u01(rehash(ai, 2)) * TAU);
+        }
+        if (herd.animals.length > 0) out.herds.push(herd);
       }
     }
   }

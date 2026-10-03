@@ -111,7 +111,7 @@ export class WorldLife {
       this.placedAt.set(at[0]!, 0, at[1]!);
       // turbines face into the wind: front (+Z) = −wind
       const faceYaw = Math.atan2(-this.wind.x, -this.wind.y);
-      const life = countrysideAround(c.world, at[0]!, at[1]!, alpine ? 1700 : 900, faceYaw, { turbines: !alpine, sheep: !alpine });
+      const life = countrysideAround(c.world, at[0]!, at[1]!, alpine ? 1700 : 900, faceYaw, { turbines: !alpine, sheep: !alpine, pastures: alpine });
       this.countryside.setContent(life, this.origin.x, this.origin.z);
     }
     if ((d.x - this.roadsAt.x) ** 2 + (d.z - this.roadsAt.z) ** 2 > 420 * 420) {
