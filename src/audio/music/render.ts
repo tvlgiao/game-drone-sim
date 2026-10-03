@@ -5,7 +5,7 @@
  */
 import { foldTail, impulseResponse, noise, normalizeGain, rng } from '../dsp';
 import { arp, bass, drum, lead, pad, type Rig } from './instruments';
-import { BARS, loopSamples, STEPS_PER_BAR, type Song, type StemName } from './songs';
+import { BARS, loopSamples, STEMS, STEPS_PER_BAR, type Song, type StemName } from './songs';
 
 export type OfflineFactory = (channels: number, length: number, sampleRate: number) => OfflineAudioContext;
 
@@ -14,9 +14,25 @@ export interface StemFormat {
   channels: 1 | 2;
 }
 
-/** Stem formats per audio tier: full = stereo at the device rate; lite = mono at 24 kHz (≈¼ the memory). */
-export function stemFormat(lite: boolean, deviceRate: number): StemFormat {
-  return lite ? { sampleRate: 24000, channels: 1 } : { sampleRate: deviceRate, channels: 2 };
+/** Stems whose stereo image matters (wide pads, ping-pong arps, the hall); the rest are centred and mono. */
+const STEREO: ReadonlySet<StemName | 'space'> = new Set(['pad', 'arp', 'space']);
+
+/**
+ * Stem format per audio tier: full = 32 kHz (16 kHz of bandwidth), stereo only where the image matters;
+ * lite = mono 24 kHz. One rate per tier, so every stem's loop is the same number of samples.
+ */
+export function stemFormat(lite: boolean, stem: StemName | 'space'): StemFormat {
+  return lite ? { sampleRate: 24000, channels: 1 } : { sampleRate: 32000, channels: STEREO.has(stem) ? 2 : 1 };
+}
+
+/** Bytes a song's rendered layers take in memory (Float32 PCM), for the budget. */
+export function songBytes(song: Song, lite: boolean): number {
+  let n = 0;
+  for (const s of [...STEMS, 'space' as const]) {
+    const f = stemFormat(lite, s);
+    n += loopSamples(song, f.sampleRate) * f.channels * 4;
+  }
+  return n;
 }
 
 /** Reverb / echo tail rendered past the loop end and folded back (s). */
@@ -129,14 +145,3 @@ export async function renderSpace(song: Song, stems: Partial<Record<StemName, Au
   return toBuffer(ctx, chans, fmt.sampleRate);
 }
 
-/** Renders every stem of `song`, one after another (keeps the render thread's peak memory low). */
-export async function renderSong(song: Song, stems: readonly StemName[], fmt: StemFormat, offline: OfflineFactory): Promise<Partial<Record<StemName, AudioBuffer>>> {
-  const out: Partial<Record<StemName, AudioBuffer>> = {};
-  for (const s of stems) out[s] = await renderStem(song, s, fmt, offline);
-  return out;
-}
-
-/** Bytes a rendered stem set takes (Float32 PCM). */
-export function stemBytes(song: Song, stems: number, fmt: StemFormat): number {
-  return loopSamples(song, fmt.sampleRate) * fmt.channels * 4 * stems;
-}

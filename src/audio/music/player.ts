@@ -12,7 +12,8 @@ import { STEMS, type Song, type StemName } from './songs';
 export type Layer = StemName | 'space';
 /** Render order: what the menu needs first; the hall last (it is made from the others). */
 const RENDER_ORDER: readonly StemName[] = ['pad', 'arp', 'bass', 'beat', 'perc', 'lead'];
-const CACHE = 2;
+/** songs kept rendered: the current one and the last (lite: the current one only) */
+const CACHE = { full: 2, lite: 1 };
 const XFADE = 1.6;
 
 /** Hall level for a layer mix: the send-weighted average of the layers that feed it. */
@@ -165,7 +166,7 @@ export class MusicPlayer {
     if (!stems) {
       stems = {};
       this.cache.set(song.id, stems);
-      while (this.cache.size > CACHE) this.cache.delete(this.cache.keys().next().value!);
+      while (this.cache.size > (this.lite ? CACHE.lite : CACHE.full)) this.cache.delete(this.cache.keys().next().value!);
     }
     if (stems.space) {
       this.start(song, stems);
@@ -179,9 +180,9 @@ export class MusicPlayer {
   }
 
   private async renderAll(song: Song, stems: Partial<Record<Layer, AudioBuffer>>): Promise<void> {
-    const fmt = stemFormat(this.lite, this.ctx.sampleRate);
     for (const name of [...RENDER_ORDER, 'space' as const]) {
       if (!stems[name]) {
+        const fmt = stemFormat(this.lite, name);
         try {
           stems[name] = name === 'space' ? await renderSpace(song, stems, fmt, this.offline!) : await renderStem(song, name, fmt, this.offline!);
           this.rendered++;
