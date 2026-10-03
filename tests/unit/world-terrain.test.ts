@@ -172,11 +172,12 @@ describe('villages and roads', () => {
     }
   });
 
-  it('road decks follow the road bed within the max cut and roads connect villages', () => {
+  it('road decks sit on the road bed, cutting / filling at most 4 m into the natural ground', () => {
     const roads = w.roads.polylinesNear(-2500, -2500, 2500, 2500, 0);
     expect(roads.length).toBeGreaterThan(3);
     const s = terrainSample();
     let onDeck = 0;
+    let clamped = 0;
     for (const r of roads) {
       for (let i = 0; i + 1 < r.pts.length / 2; i++) {
         if (r.bridged[i]) continue;
@@ -184,12 +185,53 @@ describe('villages and roads', () => {
         const z = (r.pts[2 * i + 1]! + r.pts[2 * i + 3]!) / 2;
         w.field.sample(x, z, s);
         expect(s.roadD).toBeLessThan(ROAD_HALF_WIDTH);
-        expect(Math.abs(s.h - s.bed)).toBeLessThanOrEqual(Math.max(0, Math.abs(s.base - s.lp) - ROAD_MAX_CUT) + 1e-9);
+        if (s.village > 0) continue;
+        // outside villages the natural ground is the base height
+        expect(Math.abs(s.h - s.base)).toBeLessThanOrEqual(4 + 1e-9);
+        if (Math.abs(s.bed - s.base) <= 4) expect(s.h).toBe(s.bed);
+        else clamped++;
         onDeck++;
       }
     }
+    expect(ROAD_MAX_CUT).toBe(4);
     expect(onDeck).toBeGreaterThan(100);
+    // the cut limit is exercised: some road crosses ground more than 4 m off its bed
+    expect(clamped).toBeGreaterThan(0);
   });
+
+  it('water never hangs in the air: at every wet → dry step the dry ground is at or above the water', () => {
+    for (const [preset, seed, x0, z0, size] of [
+      ['alpine', 1, -700, -200, 1400],
+      ['alpine', 99, -700, 100, 500],
+      ['alpine', 2024, -700, 100, 500],
+      ['infinite', 1, -4000, -4000, 8000],
+    ] as const) {
+      const f = createWorld({ seed, preset, genVersion: 1 }).field;
+      const step = 0.5;
+      let transitions = 0;
+      // scan lines across the area; only the neighbourhood of water matters, so coarse-search then refine
+      for (let row = 0; row < 120; row++) {
+        const z = z0 + (row / 120) * size;
+        let prevWet = f.waterLevelAt(x0, z);
+        for (let x = x0 + 4; x <= x0 + size; x += 4) {
+          const wl = f.waterLevelAt(x, z);
+          if ((wl === -Infinity) !== (prevWet === -Infinity)) {
+            for (let fx = x - 4; fx < x; fx += step) {
+              const a = f.waterLevelAt(fx, z);
+              const b = f.waterLevelAt(fx + step, z);
+              if ((a === -Infinity) === (b === -Infinity)) continue;
+              const level = a === -Infinity ? b : a;
+              const dryX = a === -Infinity ? fx : fx + step;
+              expect(f.heightAt(dryX, z), `${preset} at ${dryX}, ${z}`).toBeGreaterThanOrEqual(level - SLOPE_CAP * step);
+              transitions++;
+            }
+          }
+          prevWet = wl;
+        }
+      }
+      expect(transitions, preset).toBeGreaterThan(10);
+    }
+  }, 30_000);
 });
 
 describe('chunk structure', () => {

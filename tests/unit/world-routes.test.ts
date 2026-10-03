@@ -2,12 +2,12 @@
  * City generator, ring routes (City 18 rings, Alpine 16 rings) and the seed spawn.
  */
 import { describe, expect, it } from 'vitest';
-import { BUILDING_STRIDE, CITY_BLOCK, CITY_BLOCKS, CITY_HALF, CITY_RING_CLEARANCE, cityObstacles, cityTerrainField, generateCity, blockMin } from '../../src/world/city-gen';
+import { BUILDING_STRIDE, CITY_BLOCK, CITY_BLOCKS, CITY_HALF, CITY_RING_CLEARANCE, CITY_RING_RADIUS, blockMin, clearPoint, cityObstacles, cityTerrainField, generateCity } from '../../src/world/city-gen';
 import { ALPINE_RING_COUNT, ALPINE_RING_RADIUS, ALPINE_ROUTE, clearanceAt, distanceToShape, routeFromWaypoints, worldObstacles } from '../../src/world/routes';
 import { spawnFromSeed } from '../../src/world/spawn';
 import { createWorld } from '../../src/world/world';
 
-const CITY_SEEDS = [1, 42, 7, 0xffffffff, 123456];
+const CITY_SEEDS = [1, 42, 7, 0xffffffff, 123456, ...Array.from({ length: 20 }, (_, i) => 1000 + i * 7919)];
 
 describe('distanceToShape', () => {
   it('is signed and respects box yaw', () => {
@@ -80,6 +80,19 @@ describe('city', () => {
     const [px, py, pz] = city.pilot;
     expect(py).toBeGreaterThan(1.7);
     expect(clearanceAt(px, py - 1.7 - 0.01, pz, city.colliders.map((c) => c.shape))).toBeLessThanOrEqual(0.01);
+  });
+
+  it('clearPoint lifts a point out of a building to roof + ring radius + clearance', () => {
+    const city = generateCity(42);
+    const b = city.buildings;
+    const o = 0;
+    const [x, , z, , h] = [b[o]!, b[o + 1]!, b[o + 2]!, b[o + 3]!, b[o + 4]!];
+    const [, y] = clearPoint(city, x, h / 2, z);
+    const need = CITY_RING_RADIUS + CITY_RING_CLEARANCE;
+    expect(clearanceAt(x, y, z, city.colliders.map((c) => c.shape))).toBeGreaterThanOrEqual(need);
+    expect(y).toBeGreaterThanOrEqual(h + need - 1e-9);
+    // capped by the ceiling when it cannot clear below it
+    expect(clearPoint(city, x, h / 2, z, h / 2 + 3)[1]).toBeLessThanOrEqual(h / 2 + 3);
   });
 
   it('is deterministic', () => {

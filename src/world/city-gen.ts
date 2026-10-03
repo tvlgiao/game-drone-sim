@@ -289,8 +289,8 @@ export function cityObstacles(city: City, x: number, z: number, range: number): 
   return out;
 }
 
-/** Lifts (x, y, z) until it clears every collider by r + clearance (or reaches `ceiling`). */
-function clearPoint(city: City, x: number, y: number, z: number, ceiling = 250): [number, number, number] {
+/** Lifts (x, y, z) in 1 m steps until it clears every collider by ring radius + clearance (or reaches `ceiling`). */
+export function clearPoint(city: City, x: number, y: number, z: number, ceiling = 250): [number, number, number] {
   const need = CITY_RING_RADIUS + CITY_RING_CLEARANCE;
   const near = cityObstacles(city, x, z, need + 2);
   let yy = Math.max(y, need);
