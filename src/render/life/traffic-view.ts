@@ -149,7 +149,7 @@ function signalModel(full: boolean): THREE.BufferGeometry {
   const py = full ? 3.0 : SIGNAL_SHORT_HEAD_Y;
   g.box(0, py, 0.22, 0.34, 1.0, 0.26, head);
   g.box(0, py, 0.08, 0.5, 1.15, 0.03, head);
-  for (const k of [-1, 0, 1]) g.box(0, py - k * 0.31, 0.36, 0.2, 0.2, 0.02, 0x0b0b0c);
+  for (const k of [-1, 0, 1]) g.panel(0, py - k * 0.31, 0.356, 0.2, 0.2, 1, 0x0b0b0c);
   if (full) {
     const reach = SIGNAL_POLE_ACROSS - SIGNAL_HEAD_ACROSS;
     g.box(-reach / 2 - 0.2, SIGNAL_ARM_Y + 0.5, 0, reach + 0.6, 0.14, 0.14, grey);
@@ -157,7 +157,7 @@ function signalModel(full: boolean): THREE.BufferGeometry {
     const hy = SIGNAL_ARM_Y - 0.15;
     g.box(-reach, hy, 0.05, 0.36, 1.05, 0.28, head);
     g.box(-reach, hy, -0.08, 0.56, 1.25, 0.03, head);
-    for (const k of [-1, 0, 1]) g.box(-reach, hy - k * 0.33, 0.2, 0.21, 0.21, 0.02, 0x0b0b0c);
+    for (const k of [-1, 0, 1]) g.panel(-reach, hy - k * 0.33, 0.196, 0.21, 0.21, 1, 0x0b0b0c);
   }
   return g.build();
 }
@@ -264,7 +264,7 @@ export class TrafficView {
     const shortModel = signalModel(false);
     this.housings = new InstanceLayer(fullModel, hm.material, hm.depth, 'signal-housings');
     this.housingsShort = new InstanceLayer(shortModel, hm.material, hm.depth, 'signal-housings-short');
-    const lampBox = new GeoBuilder().box(0, 0, 0, 0.19, 0.19, 0.03, 0xffffff).build();
+    const lampBox = new GeoBuilder().panel(0, 0, 0.016, 0.19, 0.19, 1, 0xffffff).build();
     const lm = instancedMaterials({ key: 'signal-lamp', roughness: 0.3, fragment: LAMP_FRAGMENT }, shared);
     this.lamps = new InstanceLayer(lampBox, lm.material, null, 'signal-lamps');
     this.lamps.mesh.castShadow = false;

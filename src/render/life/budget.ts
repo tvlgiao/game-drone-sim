@@ -13,7 +13,7 @@ export interface LifeBudget {
   genericCars: boolean;
   /** headlight pools / beams (one additive draw) */
   carGlow: boolean;
-  /** cars and signal housings cast into the sun cascades */
+  /** cars and signal housings cast into the sun cascades (ultra: high stays inside 0.6 M triangles) */
   carShadows: boolean;
   /** traffic lights drawn within this distance (m) */
   signalRange: number;
@@ -36,7 +36,7 @@ export interface LifeBudget {
 
 export const LIFE_BUDGETS: Readonly<Record<QualityTier, LifeBudget>> = {
   ultra: { cars: 220, carRadius: 420, genericCars: false, carGlow: true, carShadows: true, signalRange: 260, ruralCars: 10, flocks: 3, birds: 16, puffs: 160, animals: 90, tractor: true, roofLife: true, clouds: true },
-  high: { cars: 160, carRadius: 380, genericCars: false, carGlow: true, carShadows: true, signalRange: 220, ruralCars: 8, flocks: 3, birds: 12, puffs: 110, animals: 70, tractor: true, roofLife: true, clouds: true },
+  high: { cars: 160, carRadius: 380, genericCars: false, carGlow: true, carShadows: false, signalRange: 180, ruralCars: 8, flocks: 3, birds: 12, puffs: 110, animals: 70, tractor: true, roofLife: true, clouds: true },
   medium: { cars: 90, carRadius: 300, genericCars: false, carGlow: false, carShadows: false, signalRange: 170, ruralCars: 6, flocks: 2, birds: 10, puffs: 60, animals: 48, tractor: true, roofLife: true, clouds: true },
   low: { cars: 40, carRadius: 250, genericCars: true, carGlow: false, carShadows: false, signalRange: 110, ruralCars: 4, flocks: 1, birds: 8, puffs: 0, animals: 24, tractor: false, roofLife: false, clouds: true },
 };

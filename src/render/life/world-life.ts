@@ -117,7 +117,7 @@ export class WorldLife {
       this.rural.target = this.budget.ruralCars;
       this.rt.life?.addTraffic(this.rural);
       if (!this.ruralView) {
-        this.ruralView = new TrafficView(this.rural, null, null, this.shared, { generic: this.budget.genericCars, glow: false, shadows: this.budget.carShadows, signalRange: 0 });
+        this.ruralView = new TrafficView(this.rural, null, null, this.shared, { generic: this.budget.genericCars, glow: false, shadows: false, signalRange: 0 });
         this.group.add(this.ruralView.group);
       } else this.ruralView.setSim(this.rural);
     }
@@ -146,7 +146,7 @@ export class WorldLife {
     this.countryside?.setBudget(this.budget);
     this.cityLife?.setBudget(this.budget);
     if (this.rural) this.rural.target = this.budget.ruralCars;
-    this.ruralView?.setOptions({ generic: this.budget.genericCars, glow: false, shadows: this.budget.carShadows, signalRange: 0 });
+    this.ruralView?.setOptions({ generic: this.budget.genericCars, glow: false, shadows: false, signalRange: 0 });
   }
 
   /** 0 day … 1 night: car lamps, lit windows */

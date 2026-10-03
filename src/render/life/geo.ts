@@ -59,8 +59,11 @@ export class GeoBuilder {
     return this;
   }
 
-  /** Cylinder along X (wheels), centre (x, y, z), `sides` facets; caps in `capHex`. */
-  cylinderX(x: number, y: number, z: number, r: number, w: number, sides: number, hex: number, capHex: number, part = 0, extra = 0): this {
+  /**
+   * Cylinder along X (wheels), centre (x, y, z), `sides` facets; caps in `capHex`. `caps`: 0 both, +1 only the
+   * +X cap, −1 only the −X cap (a wheel only shows its outer face).
+   */
+  cylinderX(x: number, y: number, z: number, r: number, w: number, sides: number, hex: number, capHex: number, part = 0, extra = 0, caps = 0): this {
     const x0 = x - w / 2;
     const x1 = x + w / 2;
     for (let i = 0; i < sides; i++) {
@@ -69,10 +72,17 @@ export class GeoBuilder {
       const y0 = y + Math.cos(a0) * r, z0 = z + Math.sin(a0) * r;
       const y1 = y + Math.cos(a1) * r, z1 = z + Math.sin(a1) * r;
       this.quad([x0, y0, z0], [x0, y1, z1], [x1, y1, z1], [x1, y0, z0], hex, part, extra);
-      this.tri([x1, y, z], [x1, y0, z0], [x1, y1, z1], capHex, part, extra);
-      this.tri([x0, y, z], [x0, y1, z1], [x0, y0, z0], capHex, part, extra);
+      if (caps >= 0) this.tri([x1, y, z], [x1, y0, z0], [x1, y1, z1], capHex, part, extra);
+      if (caps <= 0) this.tri([x0, y, z], [x0, y1, z1], [x0, y0, z0], capHex, part, extra);
     }
     return this;
+  }
+
+  /** A flat quad on the plane z = `z` facing +Z (dir 1) or −Z (dir −1), centred at (x, y). */
+  panel(x: number, y: number, z: number, w: number, h: number, dir: 1 | -1, hex: number, part = 0, extra = 0): this {
+    const x0 = x - (w / 2) * dir;
+    const x1 = x + (w / 2) * dir;
+    return this.quad([x0, y - h / 2, z], [x1, y - h / 2, z], [x1, y + h / 2, z], [x0, y + h / 2, z], hex, part, extra);
   }
 
   /** Vertical cylinder (poles, tanks) from y0 to y1, open bottom. */

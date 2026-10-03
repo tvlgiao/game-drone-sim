@@ -111,22 +111,22 @@ export function tractorModel(): THREE.BufferGeometry {
 /** Rooftop AC unit's fan: a grey ring housing and four blades (LIFE_PART.rotor, spun about +Y). */
 export function acFanModel(): THREE.BufferGeometry {
   const g = new GeoBuilder();
-  const sides = 10;
+  // a dark grille disc, then four blades on a hub (34 triangles)
+  const sides = 6;
   for (let i = 0; i < sides; i++) {
     const a0 = (i / sides) * Math.PI * 2;
     const a1 = ((i + 1) / sides) * Math.PI * 2;
-    const r = 0.62;
-    g.quad([Math.cos(a0) * r, 0, Math.sin(a0) * r], [Math.cos(a0) * r, 0.18, Math.sin(a0) * r], [Math.cos(a1) * r, 0.18, Math.sin(a1) * r], [Math.cos(a1) * r, 0, Math.sin(a1) * r], 0x75787c);
+    const r = 0.66;
+    g.quad([Math.cos(a0) * r, 0, Math.sin(a0) * r], [Math.cos(a0) * r, 0.16, Math.sin(a0) * r], [Math.cos(a1) * r, 0.16, Math.sin(a1) * r], [Math.cos(a1) * r, 0, Math.sin(a1) * r], 0x75787c);
+    g.tri([0, 0.02, 0], [Math.cos(a1) * r, 0.02, Math.sin(a1) * r], [Math.cos(a0) * r, 0.02, Math.sin(a0) * r], 0x1c1d1f);
   }
-  g.box(0, 0.02, 0, 1.3, 0.03, 1.3, 0x1c1d1f);
   for (let b = 0; b < 4; b++) {
     const a = (b / 4) * Math.PI * 2;
     const c = Math.cos(a);
     const s = Math.sin(a);
     const p = (r: number, w: number, y: number): V3 => [c * r - s * w, y, s * r + c * w];
-    g.quad(p(0.08, -0.1, 0.1), p(0.58, -0.13, 0.12), p(0.58, 0.13, 0.08), p(0.08, 0.1, 0.1), 0xa9adb2, LIFE_PART.rotor);
+    g.quad(p(0.08, -0.1, 0.1), p(0.6, -0.13, 0.12), p(0.6, 0.13, 0.08), p(0.08, 0.1, 0.1), 0xa9adb2, LIFE_PART.rotor);
   }
-  g.cylinderY(0, 0, 0.09, 0.05, 0.16, 6, 0x55585c, LIFE_PART.rotor);
   return g.build();
 }
 

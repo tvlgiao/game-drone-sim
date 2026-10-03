@@ -37,13 +37,8 @@ interface Body {
 }
 
 function wheels(g: GeoBuilder, W: number, r: number, axles: readonly number[], track = 0.1): void {
-  for (const z of axles) {
-    for (const s of [-1, 1]) {
-      g.cylinderX(s * (W / 2 - track), r, z, r, 0.22, 8, TYRE, TYRE, VEHICLE_PART.tyre);
-      // the rim: a smaller disc just proud of the tyre's sidewall
-      g.cylinderX(s * (W / 2 - track + 0.1), r, z, r * 0.58, 0.04, 8, RIM, RIM, VEHICLE_PART.trim);
-    }
-  }
+  // six-sided tyres showing only their outer face, the rim painted on it
+  for (const z of axles) for (const s of [-1, 1]) g.cylinderX(s * (W / 2 - track), r, z, r, 0.22, 6, TYRE, RIM, VEHICLE_PART.tyre, 0, s as 1 | -1);
 }
 
 function car(type: number, b: Body): GeoBuilder {
@@ -69,11 +64,10 @@ function car(type: number, b: Body): GeoBuilder {
   const [fy, ry] = b.lightY;
   g.box(0, 0.36, L / 2 - 0.08, W + 0.02, 0.22, 0.2, BUMPER, VEHICLE_PART.trim);
   g.box(0, 0.36, -L / 2 + 0.08, W + 0.02, 0.22, 0.2, BUMPER, VEHICLE_PART.trim);
-  g.box(0, fy - 0.05, L / 2 + 0.005, W * 0.36, 0.13, 0.04, TRIM, VEHICLE_PART.trim);
+  g.panel(0, fy - 0.05, L / 2 + 0.01, W * 0.36, 0.13, 1, TRIM, VEHICLE_PART.trim);
   for (const s of [-1, 1]) {
-    g.box(s * (half - 0.26), fy, L / 2 - 0.005, 0.36, 0.13, 0.06, HEAD, VEHICLE_PART.head);
-    g.box(s * (half - 0.2), ry, -L / 2 + 0.005, 0.3, 0.14, 0.06, TAIL, VEHICLE_PART.tail);
-    g.box(s * (half + 0.07), b.belt + 0.05, b.cabin[b.cabin.length - 1]![0] - 0.15, 0.14, 0.1, 0.18, 0xffffff, VEHICLE_PART.paint);
+    g.panel(s * (half - 0.26), fy, L / 2 + 0.012, 0.36, 0.13, 1, HEAD, VEHICLE_PART.head);
+    g.panel(s * (half - 0.2), ry, -L / 2 - 0.012, 0.3, 0.14, -1, TAIL, VEHICLE_PART.tail);
   }
   wheels(g, W, b.wheelR, b.axles);
   return g;
@@ -248,12 +242,12 @@ function bus(): GeoBuilder {
   // pillars between the side windows
   for (let z = z0 + 1.6; z < z1 - 1.5; z += 1.55) g.box(0, 1.85, z, W + 0.005, 1.4, 0.16, 0xffffff, VEHICLE_PART.paint);
   // destination sign, bumpers, lights
-  g.box(0, 2.35, z1 + 0.01, W * 0.7, 0.26, 0.04, 0xffb347, VEHICLE_PART.sign);
+  g.panel(0, 2.35, z1 + 0.012, W * 0.7, 0.26, 1, 0xffb347, VEHICLE_PART.sign);
   g.box(0, 0.4, z1 - 0.05, W + 0.02, 0.3, 0.14, BUMPER, VEHICLE_PART.trim);
   g.box(0, 0.4, z0 + 0.05, W + 0.02, 0.3, 0.14, BUMPER, VEHICLE_PART.trim);
   for (const s of [-1, 1]) {
-    g.box(s * (W / 2 - 0.3), 0.75, z1 + 0.01, 0.34, 0.16, 0.04, HEAD, VEHICLE_PART.head);
-    g.box(s * (W / 2 - 0.2), 1.0, z0 - 0.01, 0.24, 0.32, 0.04, TAIL, VEHICLE_PART.tail);
+    g.panel(s * (W / 2 - 0.3), 0.75, z1 + 0.012, 0.34, 0.16, 1, HEAD, VEHICLE_PART.head);
+    g.panel(s * (W / 2 - 0.2), 1.0, z0 - 0.012, 0.24, 0.32, -1, TAIL, VEHICLE_PART.tail);
   }
   wheels(g, W, 0.5, [-L / 2 + 2.6, L / 2 - 2.3], 0.15);
   return g;

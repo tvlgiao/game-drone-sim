@@ -16,7 +16,7 @@ import { acFanModel, beaconModel, flagModel } from './life-models';
 import type { LifeBudget } from './budget';
 
 /** fans and steam within this distance of the drone, m (rebuilt every REBUILD m) */
-const FAN_RANGE = 320;
+const FAN_RANGE = 220;
 const REBUILD = 40;
 const OWNER_FLAGS = 'life:flags';
 
@@ -44,7 +44,7 @@ export class CityLifeView {
       flagModel(),
       { key: 'flags', pre: FLAG_PRE, vertexPars: LIFE_LOCAL_PARS_V, fragmentPars: LIFE_LOCAL_PARS_F, fragment: FLAG_COLOR, roughness: 0.8, side: THREE.DoubleSide },
       shared,
-      true,
+      false,
     );
     this.beacons = new AnimLayer(beaconModel(), { key: 'beacons', fragment: BEACON_COLOR, roughness: 0.4 }, shared, false);
     this.group.add(this.fans.mesh, this.flags.mesh, this.beacons.mesh, this.puffs.layer.mesh);
