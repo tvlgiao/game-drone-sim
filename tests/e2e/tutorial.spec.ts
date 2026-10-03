@@ -137,8 +137,15 @@ test('reset and crash repeat the step from the pad; the main menu Tutorial entry
   await page.keyboard.down('KeyW');
   await expect.poll(() => hook(page, (d) => d.state.position.y)).toBeGreaterThan(0.8);
   await page.keyboard.up('KeyW');
-  // R: back on the pad (z = 33), disarmed, same step from zero
-  const before = await step(page);
+  // R: back on the pad (z = 33), disarmed, same step from zero. The climb can complete the throttle step a
+  // moment after the key comes up: take the step once it has settled (two reads 400 ms apart agree)
+  let before = await step(page);
+  for (let i = 0; i < 10; i++) {
+    await page.waitForTimeout(400);
+    const now = await step(page);
+    if (now === before) break;
+    before = now;
+  }
   expect(['throttle', 'hover']).toContain(before);
   await page.keyboard.press('KeyR');
   await expect.poll(() => hook(page, (d) => d.state.position.y < 0.2)).toBe(true);
